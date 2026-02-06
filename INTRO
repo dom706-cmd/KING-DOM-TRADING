@@ -1,0 +1,553 @@
+Update your scanner output to show:
+
+Volume profile levels
+
+Put/call ratio
+
+News sentiment
+
+Multi-timeframe alignment
+
+Correlation to sector
+
+Add professional features:
+
+Parallel scanning
+
+Professional report format
+
+Risk disclaimer
+
+RESULT:
+You'll have a scanner that looks and functions like a $50k/year Bloomberg terminal but costs $0 to run. It won't beat Citadel's $1B infrastructure, but for retail trading and showing in class? It'll blow minds.
+
+Bottom line: This gives you 90% of what professionals use for sentiment, technicals, and risk management. Missing the ultra-fast execution and exotic data, but for analysis and presentation? Gold standard.
+
+LET'S DO IT! RIGHT NOW! PLEASE ADD THE FUNCTIONALITY TO THE FILE
+LET'S GO! 
+
+FILE 1: requirements.txt
+# KING DOM TRADING SYSTEM - PRO SUMMER EDITION
+# Install: pip install -r requirements.txt
+
+yfinance==0.2.28
+pandas==2.1.4
+numpy==1.24.4
+requests==2.31.0
+websocket-client==1.6.4
+matplotlib==3.8.2
+plotly==5.18.0
+ta==0.10.2
+python-dotenv==1.0.0
+colorama==0.4.6
+tqdm==4.66.1
+pandas-ta==0.3.14b
+scipy==1.11.4
+scikit-learn==1.3.2
+
+File 2: calculations.py
+"""
+KING DOM TRADING SYSTEM - PRO SUMMER EDITION
+Quantitative Calculations Engine
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import yfinance as yf
+import warnings
+warnings.filterwarnings('ignore')
+
+class QuantitativeTradingSystem:
+    """Professional quantitative analysis engine"""
+    
+    def __init__(self):
+        self.cache = {}
+        self.cache_duration = timedelta(minutes=5)
+    
+    def get_stock_data(self, ticker, period='3mo', interval='1d'):
+        """Get stock data with caching"""
+        cache_key = f"{ticker}_{period}_{interval}"
+        
+        if cache_key in self.cache:
+            cached_time, data = self.cache[cache_key]
+            if datetime.now() - cached_time < self.cache_duration:
+                return data.copy()
+        
+        try:
+            stock = yf.Ticker(ticker)
+            
+            if interval == '1d':
+                data = stock.history(period=period)
+            else:
+                data = stock.history(period=period, interval=interval)
+            
+            if data.empty:
+                return pd.DataFrame()
+            
+            # Calculate additional features
+            data['Returns'] = data['Close'].pct_change()
+            data['Log_Returns'] = np.log(data['Close'] / data['Close'].shift(1))
+            
+            self.cache[cache_key] = (datetime.now(), data.copy())
+            return data.copy()
+            
+        except Exception as e:
+            print(f"Error fetching {ticker}: {e}")
+            return pd.DataFrame()
+    
+    def calculate_rsi(self, data, period=14):
+        """Calculate Relative Strength Index"""
+        if len(data) < period:
+            return pd.Series([50] * len(data), index=data.index)
+        
+        delta = data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi.fillna(50)
+    
+    def calculate_macd(self, data, fast=12, slow=26, signal=9):
+        """Calculate MACD"""
+        if len(data) < slow:
+            return pd.Series([0] * len(data), index=data.index), pd.Series([0] * len(data), index=data.index)
+        
+        exp1 = data['Close'].ewm(span=fast, adjust=False).mean()
+        exp2 = data['Close'].ewm(span=slow, adjust=False).mean()
+        
+        macd = exp1 - exp2
+        signal_line = macd.ewm(span=signal, adjust=False).mean()
+        
+        return macd, signal_line
+    
+    def calculate_atr(self, data, period=14):
+        """Calculate Average True Range"""
+        if len(data) < period:
+            return pd.Series([0] * len(data), index=data.index)
+        
+        high = data['High']
+        low = data['Low']
+        close = data['Close'].shift(1)
+        
+        tr1 = high - low
+        tr2 = abs(high - close)
+        tr3 = abs(low - close)
+        
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+        
+        return atr.fillna(tr.mean())
+    
+    def calculate_bollinger_bands(self, data, period=20, std_dev=2):
+        """Calculate Bollinger Bands"""
+        if len(data) < period:
+            middle = data['Close']
+            upper = data['Close']
+            lower = data['Close']
+        else:
+            middle = data['Close'].rolling(window=period).mean()
+            std = data['Close'].rolling(window=period).std()
+            upper = middle + (std * std_dev)
+            lower = middle - (std * std_dev)
+        
+        return upper, middle, lower
+    
+    def calculate_obv(self, data):
+        """Calculate On-Balance Volume"""
+        obv = [0]
+        
+        for i in range(1, len(data)):
+            if data['Close'].iloc[i] > data['Close'].iloc[i-1]:
+                obv.append(obv[-1] + data['Volume'].iloc[i])
+            elif data['Close'].iloc[i] < data['Close'].iloc[i-1]:
+                obv.append(obv[-1] - data['Volume'].iloc[i])
+            else:
+                obv.append(obv[-1])
+        
+        return pd.Series(obv, index=data.index)
+    
+    def calculate_support_resistance(self, data, lookback=20):
+        """Calculate support and resistance levels"""
+        if len(data) < lookback:
+            return [], []
+        
+        recent = data.tail(lookback)
+        
+        # Find local highs and lows
+        highs = []
+        lows = []
+        
+        for i in range(2, len(recent)-2):
+            # Local high
+            if (recent['High'].iloc[i] > recent['High'].iloc[i-2] and
+                recent['High'].iloc[i] > recent['High'].iloc[i-1] and
+                recent['High'].iloc[i] > recent['High'].iloc[i+1] and
+                recent['High'].iloc[i] > recent['High'].iloc[i+2]):
+                highs.append(recent['High'].iloc[i])
+            
+            # Local low
+            if (recent['Low'].iloc[i] < recent['Low'].iloc[i-2] and
+                recent['Low'].iloc[i] < recent['Low'].iloc[i-1] and
+                recent['Low'].iloc[i] < recent['Low'].iloc[i+1] and
+                recent['Low'].iloc[i] < recent['Low'].iloc[i+2]):
+                lows.append(recent['Low'].iloc[i])
+        
+        # Cluster similar levels
+        support = self._cluster_levels(lows, tolerance=0.02) if lows else []
+        resistance = self._cluster_levels(highs, tolerance=0.02) if highs else []
+        
+        return support[:3], resistance[:3]  # Top 3 each
+    
+    def _cluster_levels(self, levels, tolerance=0.02):
+        """Cluster nearby price levels"""
+        if not levels:
+            return []
+        
+        levels.sort()
+        clusters = []
+        current_cluster = [levels[0]]
+        
+        for level in levels[1:]:
+            if level <= current_cluster[-1] * (1 + tolerance):
+                current_cluster.append(level)
+            else:
+                clusters.append(np.mean(current_cluster))
+                current_cluster = [level]
+        
+        clusters.append(np.mean(current_cluster))
+        return clusters
+    
+    def calculate_momentum(self, data, period=10):
+        """Calculate price momentum"""
+        if len(data) < period:
+            return 0
+        
+        return ((data['Close'].iloc[-1] / data['Close'].iloc[-period]) - 1) * 100
+    
+    def calculate_volatility(self, data, period=20):
+        """Calculate historical volatility"""
+        if len(data) < period:
+            return 0
+        
+        returns = data['Close'].pct_change().dropna()
+        if len(returns.tail(period)) < 2:
+            return 0
+        
+        return returns.tail(period).std() * np.sqrt(252) * 100  # Annualized
+    
+    def calculate_volume_profile(self, data, bins=20):
+        """Calculate volume at price profile"""
+        if data.empty:
+            return {}
+        
+        # Create price bins
+        min_price = data['Low'].min()
+        max_price = data['High'].max()
+        bin_edges = np.linspace(min_price, max_price, bins + 1)
+        
+        volume_profile = {}
+        
+        for i in range(len(bin_edges) - 1):
+            low = bin_edges[i]
+            high = bin_edges[i + 1]
+            price_level = (low + high) / 2
+            
+            # Sum volume for bars that touch this price range
+            mask = (data['Low'] <= high) & (data['High'] >= low)
+            volume = data.loc[mask, 'Volume'].sum()
+            
+            volume_profile[round(price_level, 2)] = volume
+        
+        return volume_profile
+
+FILE 3: market_scanner.py
+"""
+KING DOM TRADING SYSTEM - PRO SUMMER EDITION
+PRO-SUMMER COMMERCIAL GRADE MARKET SCANNER
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import yfinance as yf
+import requests
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import time
+from calculations import QuantitativeTradingSystem
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class MarketScanner:
+    """PRO-SUMMER COMMERCIAL GRADE MARKET SCANNER"""
+    
+    def __init__(self, config_file='config.json'):
+        self.logger = logging.getLogger(__name__)
+        self.quant_system = QuantitativeTradingSystem()
+        
+        # Load configuration
+        self.config = self.load_config(config_file)
+        
+        # API Keys (Sign up for FREE at these URLs)
+        self.finnhub_key = self.config.get('finnhub_key', 'YOUR_KEY_HERE')  # https://finnhub.io/register
+        self.polygon_key = self.config.get('polygon_key', 'YOUR_KEY_HERE')  # https://polygon.io/
+        self.alpaca_key = self.config.get('alpaca_key', 'YOUR_KEY_HERE')    # https://alpaca.markets/
+        
+        # Trading parameters
+        self.account_size = self.config.get('account_size', 10000)
+        self.max_risk_per_trade = self.config.get('max_risk_per_trade', 0.02)
+        self.min_volume = self.config.get('min_volume', 1000000)
+        self.min_price = self.config.get('min_price', 1.00)
+        
+        # Sector ETFs for correlation
+        self.sector_etfs = {
+            'Technology': 'XLK',
+            'Financials': 'XLF',
+            'Healthcare': 'XLV',
+            'Consumer': 'XLY',
+            'Energy': 'XLE',
+            'Industrials': 'XLI',
+            'Materials': 'XLB',
+            'Utilities': 'XLU',
+            'Real Estate': 'XLRE',
+            'Communication': 'XLC'
+        }
+        
+        # Cache
+        self.cache = {}
+        self.cache_time = {}
+        self.CACHE_DURATION = timedelta(minutes=5)
+        
+        self.logger.info("PRO-SUMMER Market Scanner Initialized!")
+    
+    def load_config(self, config_file):
+        """Load configuration from file"""
+        default_config = {
+            'finnhub_key': 'YOUR_KEY_HERE',
+            'polygon_key': 'YOUR_KEY_HERE',
+            'alpaca_key': 'YOUR_KEY_HERE',
+            'account_size': 10000,
+            'max_risk_per_trade': 0.02,
+            'min_volume': 1000000,
+            'min_price': 1.00,
+            'scan_workers': 10,
+            'watchlist': [
+                'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'INTC',
+                'JPM', 'BAC', 'WFC', 'GS', 'JNJ', 'PFE', 'WMT', 'XOM', 'CVX'
+            ]
+        }
+        
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                # Merge with defaults
+                for key in default_config:
+                    if key not in config:
+                        config[key] = default_config[key]
+                return config
+        except FileNotFoundError:
+            self.logger.warning(f"Config file {config_file} not found. Using defaults.")
+            return default_config
+    
+    def get_from_cache(self, key):
+        """Get item from cache if valid"""
+        if key in self.cache:
+            if datetime.now() - self.cache_time.get(key, datetime.now()) < self.CACHE_DURATION:
+                return self.cache[key]
+        return None
+    
+    def set_cache(self, key, value):
+        """Set item in cache"""
+        self.cache[key] = value
+        self.cache_time[key] = datetime.now()
+    
+    # ========== REAL-TIME DATA ==========
+    
+    def get_real_time_quote(self, ticker):
+        """Get real-time quote from Finnhub (FREE)"""
+        cache_key = f"realtime_{ticker}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={self.finnhub_key}"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
+            result = {
+                'price': data.get('c', 0),
+                'change': data.get('d', 0),
+                'percent_change': data.get('dp', 0),
+                'high': data.get('h', 0),
+                'low': data.get('l', 0),
+                'open': data.get('o', 0),
+                'previous_close': data.get('pc', 0),
+                'timestamp': datetime.fromtimestamp(data.get('t')) if data.get('t') else None,
+                'source': 'Finnhub'
+            }
+            
+            self.set_cache(cache_key, result)
+            return result
+            
+        except Exception as e:
+            self.logger.warning(f"Real-time quote failed for {ticker}: {e}")
+            # Fallback to yfinance
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                
+                result = {
+                    'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
+                    'change': info.get('regularMarketChange', 0),
+                    'percent_change': info.get('regularMarketChangePercent', 0),
+                    'high': info.get('dayHigh', 0),
+                    'low': info.get('dayLow', 0),
+                    'open': info.get('open', 0),
+                    'previous_close': info.get('previousClose', 0),
+                    'timestamp': datetime.now(),
+                    'source': 'YFinance (fallback)'
+                }
+                return result
+            except:
+                return None
+    
+    def get_order_book(self, ticker):
+        """Get order book data from Polygon (FREE)"""
+        cache_key = f"orderbook_{ticker}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}?apiKey={self.polygon_key}"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
+            if 'ticker' in data:
+                ticker_data = data['ticker']
+                
+                # Get bid/ask data
+                bid_price = ticker_data.get('bid', {}).get('price', 0) if isinstance(ticker_data.get('bid'), dict) else ticker_data.get('bid', 0)
+                ask_price = ticker_data.get('ask', {}).get('price', 0) if isinstance(ticker_data.get('ask'), dict) else ticker_data.get('ask', 0)
+                
+                result = {
+                    'bid': bid_price,
+                    'ask': ask_price,
+                    'bid_size': ticker_data.get('bidSize', 0),
+                    'ask_size': ticker_data.get('askSize', 0),
+                    'last_trade': ticker_data.get('lastTrade', {}),
+                    'todays_change': ticker_data.get('todaysChange', 0),
+                    'todays_change_percent': ticker_data.get('todaysChangePerc', 0),
+                    'updated': ticker_data.get('updated', 0),
+                    'source': 'Polygon'
+                }
+                
+                self.set_cache(cache_key, result)
+                return result
+        
+        except Exception as e:
+            self.logger.warning(f"Order book failed for {ticker}: {e}")
+        
+        return None
+    
+    # ========== VOLUME PROFILE ==========
+    
+    def calculate_volume_profile(self, data, bins=20):
+        """Calculate volume-at-price profile"""
+        if data.empty or len(data) < 10:
+            return None
+        
+        cache_key = f"volprofile_{data.index[-1]}_{bins}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Create price bins
+            min_price = data['Low'].min()
+            max_price = data['High'].max()
+            
+            if min_price == max_price:
+                return None
+            
+            price_range = max_price - min_price
+            bin_edges = np.linspace(min_price, max_price, bins + 1)
+            
+            volume_profile = {}
+            
+            for i in range(len(bin_edges) - 1):
+                bin_low = bin_edges[i]
+                bin_high = bin_edges[i + 1]
+                bin_mid = (bin_low + bin_high) / 2
+                
+                # Sum volume for bars that overlap with this bin
+                total_volume = 0
+                
+                for idx in range(len(data)):
+                    bar_low = data['Low'].iloc[idx]
+                    bar_high = data['High'].iloc[idx]
+                    bar_volume = data['Volume'].iloc[idx]
+                    
+                    # Check if bar overlaps with bin
+                    if bar_high >= bin_low and bar_low <= bin_high:
+                        # Calculate overlap percentage
+                        overlap_min = max(bar_low, bin_low)
+                        overlap_max = min(bar_high, bin_high)
+                        overlap_range = overlap_max - overlap_min
+                        bar_range = bar_high - bar_low
+                        
+                        if bar_range > 0:
+                            overlap_ratio = overlap_range / bar_range
+                            total_volume += bar_volume * overlap_ratio
+                        else:
+                            total_volume += bar_volume * 0.5
+                
+                volume_profile[round(bin_mid, 2)] = total_volume
+            
+            # Find high volume nodes
+            if volume_profile:
+                sorted_profile = sorted(volume_profile.items(), key=lambda x: x[1], reverse=True)
+                high_volume_nodes = sorted_profile[:5]
+                
+                # Calculate Value Area (70% of volume)
+                total_volume = sum(volume_profile.values())
+                target_volume = total_volume * 0.7
+                
+                sorted_prices = sorted(volume_profile.items(), key=lambda x: x[0])
+                cumulative = 0
+                value_area_prices = []
+                
+                for price, vol in sorted_prices:
+                    cumulative += vol
+                    value_area_prices.append(price)
+                    if cumulative >= target_volume:
+                        break
+                
+                result = {
+                    'profile': volume_profile,
+                    'high_volume_nodes': high_volume_nodes,
+                    'value_area_low': min(value_area_prices) if value_area_prices else 0,
+                    'value_area_high': max(value_area_prices) if value_area_prices else 0,
+                    'point_of_control': sorted_profile[0][0] if sorted_profile else 0,
+                    'total_volume': total_volume,
+                    'price_range': price_range
+                }
+                
+                self.set_cache(cache_key, result)
+                return result
+        
+        except Exception as e:
+            self.logger.error(f"Volume profile error: {e}")
+        
+        return None
+continue here, buddy..... 
