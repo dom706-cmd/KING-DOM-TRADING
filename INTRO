@@ -30,6 +30,11 @@ FILE 1: requirements.txt
 # KING DOM TRADING SYSTEM - PRO SUMMER EDITION
 # Install: pip install -r requirements.txt
 
+# Dashboard specific requirements
+Flask==3.0.0
+plotly==5.18.0
+flask-cors==4.0.0
+gunicorn==21.2.0
 yfinance==0.2.28
 pandas==2.1.4
 numpy==1.24.4
@@ -550,4 +555,1498 @@ class MarketScanner:
             self.logger.error(f"Volume profile error: {e}")
         
         return None
-continue here, buddy..... 
+    def get_real_time_quote(self, ticker):
+        """Get real-time quote from Finnhub (FREE)"""
+        # ... [Previous get_real_time_quote code remains exactly as provided] ...
+        except Exception as e:
+            self.logger.warning(f"Real-time quote failed for {ticker}: {e}")
+            # Fallback to yfinance
+            try:
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                
+                result = {
+                    'price': info.get('currentPrice', info.get('regularMarketPrice', 0)),
+                    'change': info.get('regularMarketChange', 0),
+                    'percent_change': info.get('regularMarketChangePercent', 0),
+                    'high': info.get('dayHigh', info.get('regularMarketDayHigh', 0)),
+                    'low': info.get('dayLow', info.get('regularMarketDayLow', 0)),
+                    'open': info.get('open', info.get('regularMarketOpen', 0)),
+                    'previous_close': info.get('previousClose', 0),
+                    'timestamp': datetime.now(),
+                    'source': 'Yahoo Finance (fallback)'
+                }
+                
+                self.set_cache(cache_key, result)
+                return result
+                
+            except Exception as fallback_e:
+                self.logger.error(f"Fallback also failed for {ticker}: {fallback_e}")
+                return None
+
+    # ========== MARKET DATA ENHANCEMENTS ==========
+
+    def get_volume_profile_levels(self, ticker, lookback_days=30, price_bins=10):
+        """Calculate key volume profile support/resistance levels"""
+        cache_key = f"volprofile_{ticker}_{lookback_days}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Get historical data
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=lookback_days)
+            data = self.quant_system.get_stock_data(
+                ticker, 
+                period=f"{lookback_days}d", 
+                interval="1d"
+            )
+            
+            if data.empty:
+                return {"poc": 0, "high_volume_nodes": [], "low_volume_nodes": []}
+            
+            # Use the quant system's volume profile calculator
+            profile = self.quant_system.calculate_volume_profile(data, bins=price_bins)
+            
+            if not profile:
+                return {"poc": 0, "high_volume_nodes": [], "low_volume_nodes": []}
+            
+            # Find Point of Control (POC) - price with highest volume
+            sorted_profile = sorted(profile.items(), key=lambda x: x[1], reverse=True)
+            poc_price = sorted_profile[0][0] if sorted_profile else 0
+            
+            # Identify high volume nodes (top 30% of volume)
+            high_volume_nodes = []
+            low_volume_nodes = []
+            
+            if sorted_profile:
+                max_volume = max(profile.values())
+                volume_threshold = max_volume * 0.3  # Top 30%
+                
+                for price, volume in sorted_profile:
+                    if volume >= volume_threshold:
+                        high_volume_nodes.append({"price": price, "volume": volume})
+                    else:
+                        low_volume_nodes.append({"price": price, "volume": volume})
+            
+            result = {
+                "poc": round(poc_price, 2),
+                "high_volume_nodes": high_volume_nodes[:5],  # Top 5 only
+                "low_volume_nodes": low_volume_nodes[:3],
+                "profile_range": {
+                    "min": round(min(profile.keys()), 2),
+                    "max": round(max(profile.keys()), 2)
+                }
+            }
+            
+            self.set_cache(cache_key, result)
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Volume profile failed for {ticker}: {e}")
+            return {"poc": 0, "high_volume_nodes": [], "low_volume_nodes": []}
+
+    def get_put_call_ratio(self, ticker):
+        """Get put/call ratio from Finnhub options data"""
+        cache_key = f"pcr_{ticker}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            url = f"https://finnhub.io/api/v1/stock/option-chain?symbol={ticker}&token={self.finnhub_key}"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if 'data' in data and data['data']:
+                    options_data = data['data']
+                    
+                    # Calculate put/call ratio
+                    put_volume = sum(item.get('volume', 0) for item in options_data 
+                                   if item.get('type', '').upper() == 'PUT')
+                    call_volume = sum(item.get('volume', 0) for item in options_data 
+                                    if item.get('type', '').upper() == 'CALL')
+                    
+                    # Also get open interest
+                    put_oi = sum(item.get('openInterest', 0) for item in options_data 
+                               if item.get('type', '').upper() == 'PUT')
+                    call_oi = sum(item.get('openInterest', 0) for item in options_data 
+                                if item.get('type', '').upper() == 'CALL')
+                    
+                    pcr_volume = put_volume / call_volume if call_volume > 0 else 0
+                    pcr_oi = put_oi / call_oi if call_oi > 0 else 0
+                    
+                    result = {
+                        'volume_ratio': round(pcr_volume, 3),
+                        'oi_ratio': round(pcr_oi, 3),
+                        'put_volume': put_volume,
+                        'call_volume': call_volume,
+                        'put_oi': put_oi,
+                        'call_oi': call_oi,
+                        'total_volume': put_volume + call_volume,
+                        'total_oi': put_oi + call_oi
+                    }
+                    
+                    self.set_cache(cache_key, result)
+                    return result
+                    
+        except Exception as e:
+            self.logger.warning(f"Put/call ratio failed for {ticker}: {e}")
+        
+        # Return default/neutral values
+        default_result = {
+            'volume_ratio': 1.0,
+            'oi_ratio': 1.0,
+            'put_volume': 0,
+            'call_volume': 0,
+            'put_oi': 0,
+            'call_oi': 0,
+            'total_volume': 0,
+            'total_oi': 0
+        }
+        
+        self.set_cache(cache_key, default_result)
+        return default_result
+
+    def get_news_sentiment(self, ticker):
+        """Get news sentiment from Finnhub and calculate sentiment score"""
+        cache_key = f"sentiment_{ticker}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Get news from last 7 days
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=7)
+            
+            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}"
+            url += f"&from={start_date.strftime('%Y-%m-%d')}"
+            url += f"&to={end_date.strftime('%Y-%m-%d')}"
+            url += f"&token={self.finnhub_key}"
+            
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                news_items = response.json()
+                
+                if news_items and isinstance(news_items, list):
+                    # Simple sentiment analysis based on headlines
+                    sentiment_scores = []
+                    relevant_news = []
+                    
+                    for item in news_items[:10]:  # Analyze top 10 news
+                        headline = item.get('headline', '')
+                        summary = item.get('summary', '')
+                        
+                        if headline:
+                            # Simple keyword-based sentiment
+                            text = f"{headline} {summary}".lower()
+                            
+                            # Positive keywords
+                            positive_words = ['up', 'gain', 'rise', 'surge', 'beat', 'win', 'approve', 
+                                            'growth', 'profit', 'buy', 'bullish', 'strong']
+                            
+                            # Negative keywords  
+                            negative_words = ['down', 'fall', 'drop', 'plunge', 'miss', 'lose', 'reject',
+                                            'decline', 'loss', 'sell', 'bearish', 'weak', 'cut']
+                            
+                            pos_count = sum(1 for word in positive_words if word in text)
+                            neg_count = sum(1 for word in negative_words if word in text)
+                            
+                            if pos_count + neg_count > 0:
+                                score = (pos_count - neg_count) / (pos_count + neg_count)
+                            else:
+                                score = 0
+                            
+                            sentiment_scores.append(score)
+                            relevant_news.append({
+                                'headline': headline[:100] + '...' if len(headline) > 100 else headline,
+                                'sentiment': round(score, 2),
+                                'date': item.get('datetime', item.get('date', ''))
+                            })
+                    
+                    avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0
+                    
+                    result = {
+                        'score': round(avg_sentiment, 3),
+                        'trend': 'BULLISH' if avg_sentiment > 0.1 else 'BEARISH' if avg_sentiment < -0.1 else 'NEUTRAL',
+                        'news_count': len(relevant_news),
+                        'latest_news': relevant_news[:3]  # Top 3 news
+                    }
+                    
+                    self.set_cache(cache_key, result)
+                    return result
+                    
+        except Exception as e:
+            self.logger.warning(f"News sentiment failed for {ticker}: {e}")
+        
+        # Return neutral default
+        default_result = {
+            'score': 0.0,
+            'trend': 'NEUTRAL',
+            'news_count': 0,
+            'latest_news': []
+        }
+        
+        self.set_cache(cache_key, default_result)
+        return default_result
+
+    # ========== TECHNICAL ANALYSIS ==========
+
+    def analyze_multi_timeframe(self, ticker):
+        """Analyze alignment across multiple timeframes"""
+        timeframes = [
+            {'period': '1d', 'interval': '1h', 'name': '1H'},
+            {'period': '5d', 'interval': '15m', 'name': '15M'},
+            {'period': '1mo', 'interval': '1d', 'name': '1D'},
+            {'period': '3mo', 'interval': '1d', 'name': '3D'}
+        ]
+        
+        analysis = {}
+        
+        for tf in timeframes:
+            try:
+                data = self.quant_system.get_stock_data(
+                    ticker, 
+                    period=tf['period'], 
+                    interval=tf['interval']
+                )
+                
+                if len(data) > 20:
+                    # Calculate indicators for this timeframe
+                    rsi = self.quant_system.calculate_rsi(data).iloc[-1]
+                    macd, signal = self.quant_system.calculate_macd(data)
+                    macd_value = macd.iloc[-1]
+                    signal_value = signal.iloc[-1]
+                    macd_signal = 'BULLISH' if macd_value > signal_value else 'BEARISH'
+                    
+                    # Get price trend
+                    recent_prices = data['Close'].tail(5)
+                    price_trend = 'UP' if recent_prices.iloc[-1] > recent_prices.iloc[0] else 'DOWN'
+                    
+                    analysis[tf['name']] = {
+                        'rsi': round(rsi, 2),
+                        'rsi_signal': 'OVERSOLD' if rsi < 30 else 'OVERBOUGHT' if rsi > 70 else 'NEUTRAL',
+                        'macd': round(macd_value, 3),
+                        'macd_signal': macd_signal,
+                        'price_trend': price_trend,
+                        'volume': int(data['Volume'].mean()),
+                        'alignment_score': self._calculate_alignment_score(rsi, macd_value, price_trend)
+                    }
+                    
+            except Exception as e:
+                self.logger.warning(f"Timeframe {tf['name']} analysis failed for {ticker}: {e}")
+                analysis[tf['name']] = {
+                    'rsi': 50,
+                    'rsi_signal': 'NEUTRAL',
+                    'macd': 0,
+                    'macd_signal': 'NEUTRAL',
+                    'price_trend': 'FLAT',
+                    'volume': 0,
+                    'alignment_score': 0
+                }
+        
+        # Calculate overall alignment
+        alignment_scores = [tf['alignment_score'] for tf in analysis.values() if 'alignment_score' in tf]
+        overall_alignment = sum(alignment_scores) / len(alignment_scores) if alignment_scores else 0
+        
+        analysis['overall'] = {
+            'alignment_score': round(overall_alignment, 2),
+            'alignment': 'STRONG BULLISH' if overall_alignment > 0.7 else 
+                        'BULLISH' if overall_alignment > 0.3 else
+                        'NEUTRAL' if overall_alignment > -0.3 else
+                        'BEARISH' if overall_alignment > -0.7 else
+                        'STRONG BEARISH',
+            'timeframes_aligned': sum(1 for score in alignment_scores if abs(score) > 0.5),
+            'total_timeframes': len(alignment_scores)
+        }
+        
+        return analysis
+
+    def _calculate_alignment_score(self, rsi, macd, price_trend):
+        """Calculate alignment score between indicators (-1 to +1)"""
+        # RSI component (-1 to +1)
+        rsi_score = 0
+        if rsi > 70:
+            rsi_score = -1  # Overbought = bearish
+        elif rsi < 30:
+            rsi_score = 1   # Oversold = bullish
+        else:
+            rsi_score = (50 - rsi) / 20  # Scale between -1 and 1
+        
+        # MACD component (-1 to +1)
+        macd_score = np.tanh(macd * 10)  # Scale MACD to reasonable range
+        
+        # Combine scores
+        combined = (rsi_score + macd_score) / 2
+        return np.clip(combined, -1, 1)
+
+    def calculate_sector_correlation(self, ticker, lookback_days=30):
+        """Calculate correlation with sector ETF"""
+        cache_key = f"correlation_{ticker}_{lookback_days}"
+        cached = self.get_from_cache(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Get sector for this ticker
+            sector = self._get_stock_sector(ticker)
+            sector_etf = self.sector_etfs.get(sector, 'SPY')  # Default to SPY if sector not found
+            
+            # Get data for both ticker and sector ETF
+            stock_data = self.quant_system.get_stock_data(
+                ticker, period=f"{lookback_days}d", interval="1d"
+            )
+            sector_data = self.quant_system.get_stock_data(
+                sector_etf, period=f"{lookback_days}d", interval="1d"
+            )
+            
+            if stock_data.empty or sector_data.empty:
+                return {"correlation": 0, "sector": sector, "etf": sector_etf, "trend": "UNKNOWN"}
+            
+            # Align dates
+            aligned_data = pd.concat(
+                [stock_data['Close'], sector_data['Close']], 
+                axis=1, 
+                join='inner'
+            )
+            aligned_data.columns = [ticker, sector_etf]
+            
+            # Calculate returns correlation
+            returns = aligned_data.pct_change().dropna()
+            correlation = returns.corr().iloc[0, 1]
+            
+            # Calculate beta (relative volatility)
+            covariance = returns.cov().iloc[0, 1]
+            sector_variance = returns[sector_etf].var()
+            beta = covariance / sector_variance if sector_variance != 0 else 1
+            
+            # Performance relative to sector
+            stock_return = (aligned_data[ticker].iloc[-1] / aligned_data[ticker].iloc[0] - 1) * 100
+            sector_return = (aligned_data[sector_etf].iloc[-1] / aligned_data[sector_etf].iloc[0] - 1) * 100
+            relative_performance = stock_return - sector_return
+            
+            result = {
+                'correlation': round(correlation, 3),
+                'beta': round(beta, 3),
+                'sector': sector,
+                'sector_etf': sector_etf,
+                'stock_return_pct': round(stock_return, 2),
+                'sector_return_pct': round(sector_return, 2),
+                'relative_performance': round(relative_performance, 2),
+                'outperformance': 'OUTPERFORMING' if relative_performance > 1 else 
+                                'UNDERPERFORMING' if relative_performance < -1 else 
+                                'IN_LINE'
+            }
+            
+            self.set_cache(cache_key, result)
+            return result
+            
+        except Exception as e:
+            self.logger.warning(f"Sector correlation failed for {ticker}: {e}")
+            return {"correlation": 0, "sector": "UNKNOWN", "etf": "SPY", "trend": "UNKNOWN"}
+
+    def _get_stock_sector(self, ticker):
+        """Determine which sector a stock belongs to"""
+        # Simple mapping - in production, you'd use an API or database
+        sector_map = {
+            'AAPL': 'Technology', 'MSFT': 'Technology', 'GOOGL': 'Technology',
+            'AMZN': 'Consumer', 'META': 'Technology', 'NVDA': 'Technology',
+            'TSLA': 'Consumer', 'AMD': 'Technology', 'INTC': 'Technology',
+            'JPM': 'Financials', 'BAC': 'Financials', 'WFC': 'Financials',
+            'GS': 'Financials', 'JNJ': 'Healthcare', 'PFE': 'Healthcare',
+            'WMT': 'Consumer', 'XOM': 'Energy', 'CVX': 'Energy'
+        }
+        
+        return sector_map.get(ticker, 'Technology')  # Default to Technology
+
+    # ========== PARALLEL SCANNING ==========
+
+    def scan_single_stock(self, ticker):
+        """Complete analysis for a single stock - runs in parallel"""
+        try:
+            start_time = time.time()
+            
+            # 1. Get real-time quote
+            quote = self.get_real_time_quote(ticker)
+            if not quote or quote['price'] < self.min_price:
+                return None
+            
+            # 2. Get volume profile
+            volume_profile = self.get_volume_profile_levels(ticker)
+            
+            # 3. Get put/call ratio
+            options_data = self.get_put_call_ratio(ticker)
+            
+            # 4. Get news sentiment
+            sentiment = self.get_news_sentiment(ticker)
+            
+            # 5. Multi-timeframe analysis
+            timeframe_analysis = self.analyze_multi_timeframe(ticker)
+            
+            # 6. Sector correlation
+            sector_correlation = self.calculate_sector_correlation(ticker)
+            
+            # 7. Technical indicators from quant system
+            stock_data = self.quant_system.get_stock_data(ticker, period='1mo')
+            if not stock_data.empty:
+                rsi = self.quant_system.calculate_rsi(stock_data).iloc[-1]
+                macd, signal = self.quant_system.calculate_macd(stock_data)
+                atr = self.quant_system.calculate_atr(stock_data).iloc[-1]
+                momentum = self.quant_system.calculate_momentum(stock_data)
+                volatility = self.quant_system.calculate_volatility(stock_data)
+                support, resistance = self.quant_system.calculate_support_resistance(stock_data)
+            else:
+                rsi = 50
+                macd, signal = 0, 0
+                atr = 0
+                momentum = 0
+                volatility = 0
+                support, resistance = [], []
+            
+            # 8. Calculate risk metrics
+            position_size = self._calculate_position_size(quote['price'], atr)
+            
+            # 9. Generate overall score
+            overall_score = self._calculate_overall_score(
+                rsi, momentum, sentiment['score'], 
+                timeframe_analysis['overall']['alignment_score'],
+                sector_correlation['relative_performance']
+            )
+            
+            result = {
+                'ticker': ticker,
+                'quote': quote,
+                'technical': {
+                    'rsi': round(rsi, 2),
+                    'macd': round(macd.iloc[-1] if hasattr(macd, 'iloc') else macd, 3),
+                    'atr': round(atr, 2),
+                    'momentum_pct': round(momentum, 2),
+                    'volatility_pct': round(volatility, 2),
+                    'support_levels': [round(s, 2) for s in support[:3]],
+                    'resistance_levels': [round(r, 2) for r in resistance[:3]]
+                },
+                'volume_profile': volume_profile,
+                'options': options_data,
+                'sentiment': sentiment,
+                'timeframe_analysis': timeframe_analysis,
+                'sector': sector_correlation,
+                'risk': {
+                    'position_size': position_size,
+                    'stop_loss': round(quote['price'] - (2 * atr), 2),
+                    'take_profit': round(quote['price'] + (3 * atr), 2),
+                    'risk_reward': 1.5
+                },
+                'overall_score': round(overall_score, 2),
+                'signal': 'STRONG BUY' if overall_score > 0.7 else
+                         'BUY' if overall_score > 0.3 else
+                         'NEUTRAL' if overall_score > -0.3 else
+                         'SELL' if overall_score > -0.7 else
+                         'STRONG SELL',
+                'scan_duration': round(time.time() - start_time, 2)
+            }
+            
+            self.logger.info(f"Scanned {ticker}: {result['signal']} (Score: {result['overall_score']})")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Failed to scan {ticker}: {e}")
+            return None
+
+    def scan_watchlist(self, watchlist=None, max_workers=None):
+        """Parallel scan of multiple stocks"""
+        if watchlist is None:
+            watchlist = self.config.get('watchlist', [])
+        
+        if max_workers is None:
+            max_workers = self.config.get('scan_workers', 10)
+        
+        self.logger.info(f"Starting parallel scan of {len(watchlist)} stocks with {max_workers} workers")
+        
+        results = []
+        start_time = time.time()
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all scanning tasks
+            future_to_ticker = {
+                executor.submit(self.scan_single_stock, ticker): ticker 
+                for ticker in watchlist
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    result = future.result(timeout=30)
+                    if result:
+                        results.append(result)
+                except Exception as e:
+                    self.logger.error(f"Scan task failed for {ticker}: {e}")
+        
+        # Sort by overall score (highest first)
+        results.sort(key=lambda x: x['overall_score'], reverse=True)
+        
+        scan_time = time.time() - start_time
+        
+        self.logger.info(f"Scan complete: {len(results)} stocks analyzed in {scan_time:.1f} seconds")
+        
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'scan_duration': round(scan_time, 2),
+            'stocks_scanned': len(watchlist),
+            'stocks_analyzed': len(results),
+            'top_picks': results[:5],  # Top 5 picks
+            'all_results': results,
+            'market_summary': self._generate_market_summary(results)
+        }
+
+    def _calculate_position_size(self, price, atr):
+        """Calculate position size based on risk management"""
+        if price <= 0 or atr <= 0:
+            return 0
+        
+        # Risk per trade = account_size * max_risk_per_trade
+        risk_amount = self.account_size * self.max_risk_per_trade
+        
+        # Stop loss based on 2x ATR
+        stop_distance = 2 * atr
+        
+        # Position size = risk_amount / stop_distance
+        if stop_distance > 0:
+            position_size = risk_amount / stop_distance
+        else:
+            position_size = 0
+        
+        # Convert to number of shares
+        shares = int(position_size / price) if price > 0 else 0
+        
+        # Don't risk more than 5% of account on any trade
+        max_shares = int((self.account_size * 0.05) / price)
+        
+        return min(shares, max_shares)
+
+    def _calculate_overall_score(self, rsi, momentum, sentiment, alignment, relative_perf):
+        """Calculate overall score from multiple factors (-1 to +1)"""
+        # Weight the components
+        weights = {
+            'technical': 0.35,      # RSI and momentum
+            'sentiment': 0.20,      # News sentiment
+            'alignment': 0.25,      # Multi-timeframe alignment
+            'relative': 0.20        # Relative sector performance
+        }
+        
+        # Normalize RSI to -1 to +1 scale
+        rsi_score = (50 - rsi) / 20  # RSI 30=1, 50=0, 70=-1
+        rsi_score = np.clip(rsi_score, -1, 1)
+        
+        # Normalize momentum (-1 to +1)
+        momentum_score = np.tanh(momentum / 10)
+        
+        # Technical score combines RSI and momentum
+        technical_score = (rsi_score + momentum_score) / 2
+        
+        # Combine all scores
+        overall = (
+            technical_score * weights['technical'] +
+            sentiment * weights['sentiment'] +
+            alignment * weights['alignment'] +
+            np.tanh(relative_perf / 20) * weights['relative']
+        )
+        
+        return np.clip(overall, -1, 1)
+
+    def _generate_market_summary(self, results):
+        """Generate overall market summary from scan results"""
+        if not results:
+            return {"market_trend": "NEUTRAL", "strength": 0}
+        
+        # Calculate average scores
+        avg_score = np.mean([r['overall_score'] for r in results])
+        avg_sentiment = np.mean([r['sentiment']['score'] for r in results])
+        
+        # Count signals
+        signal_counts = {
+            'STRONG_BUY': sum(1 for r in results if r['overall_score'] > 0.7),
+            'BUY': sum(1 for r in results if 0.3 < r['overall_score'] <= 0.7),
+            'NEUTRAL': sum(1 for r in results if -0.3 <= r['overall_score'] <= 0.3),
+            'SELL': sum(1 for r in results if -0.7 <= r['overall_score'] < -0.3),
+            'STRONG_SELL': sum(1 for r in results if r['overall_score'] < -0.7)
+        }
+        
+        # Determine market trend
+        if avg_score > 0.3:
+            market_trend = "BULLISH"
+            strength = min(avg_score * 100, 100)
+        elif avg_score < -0.3:
+            market_trend = "BEARISH"
+            strength = min(abs(avg_score) * 100, 100)
+        else:
+            market_trend = "NEUTRAL"
+            strength = 0
+        
+        return {
+            "market_trend": market_trend,
+            "market_strength": round(strength),
+            "average_score": round(avg_score, 3),
+            "average_sentiment": round(avg_sentiment, 3),
+            "signal_distribution": signal_counts,
+            "total_stocks": len(results)
+        }
+
+    # ========== PROFESSIONAL REPORT GENERATION ==========
+
+    def generate_report(self, scan_results, output_format='console'):
+        """Generate professional report in various formats"""
+        if output_format == 'console':
+            return self._generate_console_report(scan_results)
+        elif output_format == 'json':
+            return self._generate_json_report(scan_results)
+        elif output_format == 'csv':
+            return self._generate_csv_report(scan_results)
+        else:
+            self.logger.warning(f"Unknown format {output_format}, using console")
+            return self._generate_console_report(scan_results)
+
+    def _generate_console_report(self, scan_results):
+        """Generate professional console report"""
+        report_lines = []
+        
+        # Header
+        report_lines.append("=" * 80)
+        report_lines.append("KING DOM TRADING - PRO SUMMER SCANNER REPORT")
+        report_lines.append("=" * 80)
+        report_lines.append(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report_lines.append(f"Scan Duration: {scan_results['scan_duration']} seconds")
+        report_lines.append(f"Stocks Analyzed: {scan_results['stocks_analyzed']}/{scan_results['stocks_scanned']}")
+        report_lines.append("-" * 80)
+        
+        # Market Summary
+        market = scan_results['market_summary']
+        report_lines.append("MARKET SUMMARY:")
+        report_lines.append(f"  Overall Trend: {market['market_trend']} (Strength: {market['market_strength']}%)")
+        report_lines.append(f"  Average Score: {market['average_score']}")
+        report_lines.append(f"  Bullish Signals: {market['signal_distribution']['STRONG_BUY'] + market['signal_distribution']['BUY']}")
+        report_lines.append(f"  Bearish Signals: {market['signal_distribution']['STRONG_SELL'] + market['signal_distribution']['SELL']}")
+        report_lines.append("-" * 80)
+        
+        # Top Picks
+        report_lines.append("TOP 5 PICKS:")
+        for i, stock in enumerate(scan_results['top_picks'], 1):
+            report_lines.append(f"{i}. {stock['ticker']}:")
+            report_lines.append(f"   Price: ${stock['quote']['price']:.2f} ({stock['quote']['percent_change']:.2f}%)")
+            report_lines.append(f"   Signal: {stock['signal']} (Score: {stock['overall_score']:.2f})")
+            report_lines.append(f"   RSI: {stock['technical']['rsi']} | MACD: {stock['technical']['macd']:.3f}")
+            report_lines.append(f"   Sentiment: {stock['sentiment']['trend']} ({stock['sentiment']['score']:.3f})")
+            report_lines.append(f"   PCR: {stock['options']['volume_ratio']:.3f} | Sector: {stock['sector']['sector']}")
+            report_lines.append(f"   Position Size: {stock['risk']['position_size']} shares | Stop: ${stock['risk']['stop_loss']:.2f}")
+            report_lines.append("")
+        
+        # Volume Profile Analysis for Top Pick
+        if scan_results['top_picks']:
+            top = scan_results['top_picks'][0]
+            report_lines.append("-" * 80)
+            report_lines.append(f"VOLUME PROFILE ANALYSIS - {top['ticker']}:")
+            report_lines.append(f"  Point of Control: ${top['volume_profile']['poc']:.2f}")
+            report_lines.append(f"  Profile Range: ${top['volume_profile']['profile_range']['min']:.2f} - ${top['volume_profile']['profile_range']['max']:.2f}")
+            report_lines.append(f"  Key Support/Resistance Levels:")
+            
+            for level in top['volume_profile']['high_volume_nodes'][:3]:
+                report_lines.append(f"    ${level['price']:.2f} (Volume: {level['volume']:,})")
+        
+        # Multi-Timeframe Alignment for Top Pick
+        if scan_results['top_picks']:
+            top = scan_results['top_picks'][0]
+            report_lines.append("-" * 80)
+            report_lines.append(f"MULTI-TIMEFRAME ALIGNMENT - {top['ticker']}:")
+            for tf_name, tf_data in top['timeframe_analysis'].items():
+                if tf_name != 'overall':
+                    report_lines.append(f"  {tf_name}: RSI {tf_data['rsi']} ({tf_data['rsi_signal']}) | "
+                                      f"MACD {tf_data['macd']:.3f} | Trend: {tf_data['price_trend']}")
+            report_lines.append(f"  Overall Alignment: {top['timeframe_analysis']['overall']['alignment']}")
+        
+        # Risk Disclaimer
+        report_lines.append("=" * 80)
+        report_lines.append("RISK DISCLAIMER:")
+        report_lines.append("This report is for EDUCATIONAL and RESEARCH purposes only.")
+        report_lines.append("Not financial advice. Trading involves substantial risk of loss.")
+        report_lines.append("Past performance is not indicative of future results.")
+        report_lines.append("You are solely responsible for your own investment decisions.")
+        report_lines.append("=" * 80)
+        
+        return "\n".join(report_lines)
+
+    def _generate_json_report(self, scan_results):
+        """Generate JSON report for programmatic use"""
+        import json
+        
+        # Add metadata
+        full_report = {
+            'metadata': {
+                'system': 'KING DOM TRADING - PRO SUMMER SCANNER',
+                'version': '1.0.0',
+                'generated': datetime.now().isoformat(),
+                'account_size': self.account_size,
+                'max_risk_per_trade': self.max_risk_per_trade
+            },
+            'risk_disclaimer': "This report is for EDUCATIONAL and RESEARCH purposes only. Not financial advice. Trading involves substantial risk of loss.",
+            'scan_results': scan_results
+        }
+        
+        return json.dumps(full_report, indent=2, default=str)
+
+    def _generate_csv_report(self, scan_results):
+        """Generate CSV report for spreadsheet analysis"""
+        import csv
+        from io import StringIO
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Header row
+        writer.writerow([
+            'Ticker', 'Price', 'Change%', 'Signal', 'Score',
+            'RSI', 'MACD', 'Sentiment', 'PCR', 'Sector',
+            'Sector Perf%', 'Alignment', 'Position Size', 'Stop Loss'
+        ])
+        
+        # Data rows
+        for stock in scan_results['all_results']:
+            writer.writerow([
+                stock['ticker'],
+                f"${stock['quote']['price']:.2f}",
+                f"{stock['quote']['percent_change']:.2f}%",
+                stock['signal'],
+                f"{stock['overall_score']:.2f}",
+                f"{stock['technical']['rsi']:.1f}",
+                f"{stock['technical']['macd']:.3f}",
+                stock['sentiment']['trend'],
+                f"{stock['options']['volume_ratio']:.3f}",
+                stock['sector']['sector'],
+                f"{stock['sector']['relative_performance']:.1f}%",
+                stock['timeframe_analysis']['overall']['alignment'],
+                stock['risk']['position_size'],
+                f"${stock['risk']['stop_loss']:.2f}"
+            ])
+        
+        return output.getvalue()
+
+    # ========== MAIN EXECUTION ==========
+
+    def run_full_scan(self, watchlist=None, output_format='console'):
+        """Complete scan and report generation"""
+        self.logger.info("Starting full market scan...")
+        
+        # Run the scan
+        scan_results = self.scan_watchlist(watchlist)
+        
+        # Generate report
+        report = self.generate_report(scan_results, output_format)
+        
+        self.logger.info("Full scan complete!")
+        
+        return report
+
+
+def main():
+    """Main execution function"""
+    print("=" * 60)
+    print("KING DOM TRADING SYSTEM - PRO SUMMER EDITION")
+    print("=" * 60)
+    print("Professional Market Scanner Initializing...")
+    
+    # Initialize scanner
+    scanner = MarketScanner()
+    
+    # Run scan
+    report = scanner.run_full_scan(output_format='console')
+    
+    # Display report
+    print("\n" + report)
+    
+    # Save to file
+    with open('scanner_report.txt', 'w') as f:
+        f.write(report)
+    
+    print("\nReport saved to 'scanner_report.txt'")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+
+FILE4 sentiments.py
+"""
+KING DOM TRADING SYSTEM - Pro Features: Sentiment & Options Data
+"""
+import requests
+import pandas as pd
+from textblob import TextBlob
+import logging
+
+logger = logging.getLogger(__name__)
+
+class SentimentAnalyzer:
+    def __init__(self, finnhub_key):
+        self.finnhub_key = finnhub_key
+
+    def get_news_sentiment(self, ticker, hours=24):
+        """Fetch recent news and calculate sentiment score (-1 to +1)."""
+        try:
+            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={(pd.Timestamp.now()-pd.Timedelta(hours=hours)).strftime('%Y-%m-%d')}&to={pd.Timestamp.now().strftime('%Y-%m-%d')}&token={self.finnhub_key}"
+            news = requests.get(url).json()
+            if not news or isinstance(news, dict):
+                return 0.0
+            headlines = ' '.join([item.get('headline', '') for item in news[:10]])  # Top 10 headlines
+            polarity = TextBlob(headlines).sentiment.polarity
+            return round(polarity, 3)
+        except Exception as e:
+            logger.warning(f"News sentiment failed for {ticker}: {e}")
+            return 0.0
+
+    def get_put_call_ratio(self, ticker):
+        """Fetch the put/call ratio for a given stock using Finnhub."""
+        try:
+            # Finnhub offers basic options data. For aggregate PCR, you might use CBOE.
+            url = f"https://finnhub.io/api/v1/stock/option-chain?symbol={ticker}&token={self.finnhub_key}"
+            data = requests.get(url).json()
+            if 'data' in data:
+                df = pd.DataFrame(data['data'])
+                put_volume = df[df['type'] == 'put']['volume'].sum()
+                call_volume = df[df['type'] == 'call']['volume'].sum()
+                return round(put_volume / call_volume, 3) if call_volume > 0 else 1.0
+        except Exception as e:
+            logger.warning(f"Put/Call ratio failed for {ticker}: {e}")
+        return 1.0  # Neutral default
+
+FILE 5 dashboard.py
+"""
+KING DOM TRADING SYSTEM - Professional Web Dashboard
+File 6: dashboard.py
+"""
+from flask import Flask, render_template_string, jsonify, request
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
+import json
+import threading
+from market_scanner import MarketScanner
+import warnings
+warnings.filterwarnings('ignore')
+
+# Create Flask app
+app = Flask(__name__)
+
+# Global scanner instance
+scanner = None
+last_scan_results = None
+last_scan_time = None
+
+# HTML Template with Tailwind CSS
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KING DOM TRADING - Pro Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .dashboard-card { transition: all 0.3s ease; }
+        .dashboard-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .signal-buy { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+        .signal-sell { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+        .signal-neutral { background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); }
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 border-b border-gray-700">
+        <div class="container mx-auto px-4 py-3">
+            <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-crown text-yellow-400 text-2xl"></i>
+                    <h1 class="text-2xl font-bold">KING DOM TRADING <span class="text-yellow-400">PRO DASHBOARD</span></h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="last-update" class="text-gray-400">Last scan: {{ last_scan_time }}</span>
+                    <button onclick="runScan()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-semibold">
+                        <i class="fas fa-sync-alt mr-2"></i>Run New Scan
+                    </button>
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600"></div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Market Overview -->
+    <div class="container mx-auto px-4 py-6">
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6 col-span-1 lg:col-span-2">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    <i class="fas fa-chart-line text-green-400 mr-3"></i>Market Overview
+                </h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="text-center p-4 rounded-lg bg-gray-700">
+                        <div class="text-2xl font-bold text-green-400">{{ market_strength }}%</div>
+                        <div class="text-sm text-gray-400">Market Strength</div>
+                    </div>
+                    <div class="text-center p-4 rounded-lg bg-gray-700">
+                        <div class="text-2xl font-bold {{ 'text-green-400' if market_trend == 'BULLISH' else 'text-red-400' if market_trend == 'BEARISH' else 'text-gray-400' }}">
+                            {{ market_trend }}
+                        </div>
+                        <div class="text-sm text-gray-400">Trend</div>
+                    </div>
+                    <div class="text-center p-4 rounded-lg bg-gray-700">
+                        <div class="text-2xl font-bold text-blue-400">{{ stocks_analyzed }}</div>
+                        <div class="text-sm text-gray-400">Stocks Scanned</div>
+                    </div>
+                    <div class="text-center p-4 rounded-lg bg-gray-700">
+                        <div class="text-2xl font-bold text-yellow-400">{{ bullish_signals }}</div>
+                        <div class="text-sm text-gray-400">Bullish Signals</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    <i class="fas fa-balance-scale text-blue-400 mr-3"></i>Signal Distribution
+                </h2>
+                <canvas id="signalChart" height="150"></canvas>
+            </div>
+
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    <i class="fas fa-bolt text-yellow-400 mr-3"></i>Top Performer
+                </h2>
+                {% if top_stock %}
+                <div class="text-center">
+                    <div class="text-3xl font-bold mb-2">{{ top_stock.ticker }}</div>
+                    <div class="text-lg font-semibold {{ 'text-green-400' if top_stock.overall_score > 0 else 'text-red-400' }}">
+                        Score: {{ "%.2f"|format(top_stock.overall_score) }}
+                    </div>
+                    <div class="text-sm text-gray-400 mt-2">{{ top_stock.signal }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Top 5 Stocks Table -->
+        <div class="dashboard-card bg-gray-800 rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-bold mb-4 flex items-center">
+                <i class="fas fa-trophy text-yellow-400 mr-3"></i>Top 5 Trading Opportunities
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left border-b border-gray-700">
+                            <th class="pb-3">Ticker</th>
+                            <th class="pb-3">Price</th>
+                            <th class="pb-3">Signal</th>
+                            <th class="pb-3">Score</th>
+                            <th class="pb-3">RSI</th>
+                            <th class="pb-3">Sentiment</th>
+                            <th class="pb-3">PCR</th>
+                            <th class="pb-3">Sector</th>
+                            <th class="pb-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for stock in top_stocks %}
+                        <tr class="border-b border-gray-700 hover:bg-gray-750">
+                            <td class="py-4">
+                                <div class="font-bold text-lg">{{ stock.ticker }}</div>
+                            </td>
+                            <td class="py-4">
+                                <div class="font-semibold">${{ "%.2f"|format(stock.quote.price) }}</div>
+                                <div class="text-sm {{ 'text-green-400' if stock.quote.percent_change > 0 else 'text-red-400' }}">
+                                    {{ "%.2f"|format(stock.quote.percent_change) }}%
+                                </div>
+                            </td>
+                            <td class="py-4">
+                                <span class="px-3 py-1 rounded-full text-sm font-bold 
+                                    {{ 'signal-buy' if stock.signal in ['STRONG BUY', 'BUY'] else 
+                                       'signal-sell' if stock.signal in ['STRONG SELL', 'SELL'] else 
+                                       'signal-neutral' }}">
+                                    {{ stock.signal }}
+                                </span>
+                            </td>
+                            <td class="py-4">
+                                <div class="text-lg font-bold {{ 'text-green-400' if stock.overall_score > 0 else 'text-red-400' }}">
+                                    {{ "%.2f"|format(stock.overall_score) }}
+                                </div>
+                            </td>
+                            <td class="py-4">
+                                <div class="{{ 'text-red-400' if stock.technical.rsi > 70 else 'text-green-400' if stock.technical.rsi < 30 else 'text-gray-400' }}">
+                                    {{ "%.1f"|format(stock.technical.rsi) }}
+                                </div>
+                            </td>
+                            <td class="py-4">
+                                <div class="flex items-center">
+                                    <i class="fas fa-{{ 'smile text-green-400' if stock.sentiment.score > 0.1 else 'frown text-red-400' if stock.sentiment.score < -0.1 else 'meh text-gray-400' }} mr-2"></i>
+                                    {{ stock.sentiment.trend }}
+                                </div>
+                            </td>
+                            <td class="py-4">
+                                <div class="{{ 'text-red-400' if stock.options.volume_ratio > 1.2 else 'text-green-400' if stock.options.volume_ratio < 0.8 else 'text-gray-400' }}">
+                                    {{ "%.3f"|format(stock.options.volume_ratio) }}
+                                </div>
+                            </td>
+                            <td class="py-4">
+                                <span class="px-2 py-1 bg-gray-700 rounded text-sm">{{ stock.sector.sector }}</span>
+                            </td>
+                            <td class="py-4">
+                                <button onclick="showDetails('{{ stock.ticker }}')" class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm mr-2">
+                                    <i class="fas fa-chart-bar"></i>
+                                </button>
+                                <button onclick="runSingleScan('{{ stock.ticker }}')" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-sync"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Volume Profile Chart -->
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    <i class="fas fa-chart-bar text-purple-400 mr-3"></i>Volume Profile - {{ selected_ticker }}
+                </h2>
+                <div id="volumeProfileChart" class="h-80"></div>
+            </div>
+
+            <!-- Multi-Timeframe Alignment -->
+            <div class="dashboard-card bg-gray-800 rounded-xl p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center">
+                    <i class="fas fa-layer-group text-blue-400 mr-3"></i>Multi-Timeframe Alignment
+                </h2>
+                <div id="timeframeChart" class="h-80"></div>
+            </div>
+        </div>
+
+        <!-- Detailed Analysis -->
+        <div class="dashboard-card bg-gray-800 rounded-xl p-6 mb-8">
+            <h2 class="text-xl font-bold mb-4 flex items-center">
+                <i class="fas fa-search text-green-400 mr-3"></i>Detailed Analysis - <span id="detail-ticker" class="ml-2">{{ selected_ticker }}</span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <h3 class="font-bold mb-3 text-gray-300"><i class="fas fa-thermometer-half mr-2"></i>Technical Indicators</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between"><span>RSI:</span><span id="detail-rsi" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>MACD:</span><span id="detail-macd" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>ATR:</span><span id="detail-atr" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Momentum:</span><span id="detail-momentum" class="font-semibold">-</span></div>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-3 text-gray-300"><i class="fas fa-newspaper mr-2"></i>Sentiment & Options</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between"><span>News Sentiment:</span><span id="detail-sentiment" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Put/Call Ratio:</span><span id="detail-pcr" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Total Volume:</span><span id="detail-volume" class="font-semibold">-</span></div>
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-3 text-gray-300"><i class="fas fa-shield-alt mr-2"></i>Risk Management</h3>
+                    <div class="space-y-2">
+                        <div class="flex justify-between"><span>Position Size:</span><span id="detail-position" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Stop Loss:</span><span id="detail-stop" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Take Profit:</span><span id="detail-take" class="font-semibold">-</span></div>
+                        <div class="flex justify-between"><span>Risk/Reward:</span><span id="detail-rr" class="font-semibold">-</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Real-time Updates -->
+        <div class="dashboard-card bg-gray-800 rounded-xl p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold flex items-center">
+                    <i class="fas fa-broadcast-tower text-red-400 mr-3 pulse"></i>Real-time Updates
+                </h2>
+                <div class="flex space-x-2">
+                    <div class="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
+                    <span class="text-sm">Live</span>
+                </div>
+            </div>
+            <div id="live-updates" class="h-40 overflow-y-auto border border-gray-700 rounded p-3">
+                <!-- Updates will appear here -->
+                <div class="text-gray-400 text-center py-8">Waiting for scan results...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 border-t border-gray-700 py-6 mt-8">
+        <div class="container mx-auto px-4 text-center text-gray-400">
+            <div class="mb-4">
+                <i class="fas fa-crown text-yellow-400 text-2xl"></i>
+            </div>
+            <p class="mb-2">KING DOM TRADING SYSTEM - PRO SUMMER EDITION</p>
+            <p class="text-sm">This dashboard is for EDUCATIONAL and RESEARCH purposes only. Not financial advice.</p>
+            <p class="text-xs mt-4">Trading involves substantial risk of loss. Past performance is not indicative of future results.</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        let currentData = {{ scan_data|tojson }};
+        
+        // Initialize charts
+        function initCharts() {
+            // Signal Distribution Chart
+            const signalCtx = document.getElementById('signalChart').getContext('2d');
+            new Chart(signalCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Strong Buy', 'Buy', 'Neutral', 'Sell', 'Strong Sell'],
+                    datasets: [{
+                        data: [
+                            currentData.market_summary.signal_distribution.STRONG_BUY,
+                            currentData.market_summary.signal_distribution.BUY,
+                            currentData.market_summary.signal_distribution.NEUTRAL,
+                            currentData.market_summary.signal_distribution.SELL,
+                            currentData.market_summary.signal_distribution.STRONG_SELL
+                        ],
+                        backgroundColor: [
+                            '#10b981', '#34d399', '#6b7280', '#f87171', '#ef4444'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af' } } }
+                }
+            });
+
+            // Set default stock for charts
+            if (currentData.top_picks && currentData.top_picks[0]) {
+                updateStockDetails(currentData.top_picks[0]);
+            }
+        }
+
+        // Run new scan
+        function runScan() {
+            fetch('/run_scan')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    }
+                });
+        }
+
+        // Run single stock scan
+        function runSingleScan(ticker) {
+            fetch(`/scan_stock/${ticker}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateLiveUpdate(`Rescanned ${ticker}: ${data.stock.signal} (Score: ${data.stock.overall_score})`);
+                        updateStockDetails(data.stock);
+                    }
+                });
+        }
+
+        // Show stock details
+        function showDetails(ticker) {
+            const stock = currentData.all_results.find(s => s.ticker === ticker);
+            if (stock) {
+                updateStockDetails(stock);
+                // Scroll to details
+                document.getElementById('detail-ticker').scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+
+        // Update stock details
+        function updateStockDetails(stock) {
+            document.getElementById('detail-ticker').textContent = stock.ticker;
+            document.getElementById('detail-rsi').textContent = stock.technical.rsi.toFixed(1);
+            document.getElementById('detail-macd').textContent = stock.technical.macd.toFixed(3);
+            document.getElementById('detail-atr').textContent = stock.technical.atr.toFixed(2);
+            document.getElementById('detail-momentum').textContent = stock.technical.momentum_pct.toFixed(1) + '%';
+            document.getElementById('detail-sentiment').textContent = stock.sentiment.trend + ' (' + stock.sentiment.score.toFixed(3) + ')';
+            document.getElementById('detail-pcr').textContent = stock.options.volume_ratio.toFixed(3);
+            document.getElementById('detail-volume').textContent = stock.options.total_volume.toLocaleString();
+            document.getElementById('detail-position').textContent = stock.risk.position_size + ' shares';
+            document.getElementById('detail-stop').textContent = '$' + stock.risk.stop_loss.toFixed(2);
+            document.getElementById('detail-take').textContent = '$' + stock.risk.take_profit.toFixed(2);
+            document.getElementById('detail-rr').textContent = stock.risk.risk_reward.toFixed(1) + ':1';
+
+            // Update charts
+            updateVolumeProfileChart(stock);
+            updateTimeframeChart(stock);
+        }
+
+        // Update volume profile chart
+        function updateVolumeProfileChart(stock) {
+            const volumeData = stock.volume_profile;
+            if (!volumeData || !volumeData.high_volume_nodes) return;
+
+            const prices = volumeData.high_volume_nodes.map(node => node.price);
+            const volumes = volumeData.high_volume_nodes.map(node => node.volume);
+
+            const trace = {
+                x: prices,
+                y: volumes,
+                type: 'bar',
+                name: 'Volume',
+                marker: { color: '#8b5cf6' }
+            };
+
+            const layout = {
+                title: `Volume Profile - ${stock.ticker}`,
+                xaxis: { title: 'Price', gridcolor: '#374151', color: '#9ca3af' },
+                yaxis: { title: 'Volume', gridcolor: '#374151', color: '#9ca3af' },
+                plot_bgcolor: '#1f2937',
+                paper_bgcolor: '#1f2937',
+                font: { color: '#9ca3af' }
+            };
+
+            Plotly.newPlot('volumeProfileChart', [trace], layout);
+        }
+
+        // Update timeframe chart
+        function updateTimeframeChart(stock) {
+            const tfData = stock.timeframe_analysis;
+            const timeframes = ['15M', '1H', '1D', '3D'];
+            
+            const alignmentScores = timeframes.map(tf => 
+                tfData[tf] ? tfData[tf].alignment_score : 0
+            );
+
+            const trace = {
+                x: timeframes,
+                y: alignmentScores,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Alignment Score',
+                line: { color: '#3b82f6', width: 3 },
+                marker: { size: 10 }
+            };
+
+            const layout = {
+                title: `Multi-Timeframe Alignment - ${stock.ticker}`,
+                xaxis: { title: 'Timeframe', gridcolor: '#374151', color: '#9ca3af' },
+                yaxis: { 
+                    title: 'Alignment Score', 
+                    range: [-1.1, 1.1],
+                    gridcolor: '#374151', 
+                    color: '#9ca3af'
+                },
+                shapes: [
+                    { type: 'line', x0: -0.5, x1: 3.5, y0: 0, y1: 0, line: { color: '#6b7280', width: 1 } },
+                    { type: 'rect', x0: -0.5, x1: 3.5, y0: 0.5, y1: 1.1, fillcolor: 'rgba(16, 185, 129, 0.1)', line: { width: 0 } },
+                    { type: 'rect', x0: -0.5, x1: 3.5, y0: -0.5, y1: -1.1, fillcolor: 'rgba(239, 68, 68, 0.1)', line: { width: 0 } }
+                ],
+                plot_bgcolor: '#1f2937',
+                paper_bgcolor: '#1f2937',
+                font: { color: '#9ca3af' }
+            };
+
+            Plotly.newPlot('timeframeChart', [trace], layout);
+        }
+
+        // Update live updates
+        function updateLiveUpdate(message) {
+            const updatesDiv = document.getElementById('live-updates');
+            const now = new Date().toLocaleTimeString();
+            const updateItem = `<div class="mb-2 p-2 bg-gray-750 rounded"><span class="text-gray-400 text-sm">[${now}]</span> ${message}</div>`;
+            updatesDiv.insertAdjacentHTML('afterbegin', updateItem);
+            
+            // Limit to 10 updates
+            const children = updatesDiv.children;
+            if (children.length > 10) {
+                updatesDiv.removeChild(children[children.length - 1]);
+            }
+        }
+
+        // Auto-refresh every 5 minutes
+        setInterval(() => {
+            updateLiveUpdate('Auto-refresh in progress...');
+            runScan();
+        }, 300000);
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            updateLiveUpdate('Dashboard initialized successfully.');
+        });
+    </script>
+</body>
+</html>
+'''
+
+def run_background_scan():
+    """Run scanner in background"""
+    global scanner, last_scan_results, last_scan_time
+    
+    print("Running background market scan...")
+    scanner = MarketScanner()
+    scan_results = scanner.scan_watchlist()
+    last_scan_results = scan_results
+    last_scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Scan complete at {last_scan_time}")
+    return scan_results
+
+@app.route('/')
+def dashboard():
+    """Main dashboard page"""
+    global last_scan_results, last_scan_time
+    
+    if last_scan_results is None:
+        # Run initial scan
+        scan_thread = threading.Thread(target=run_background_scan)
+        scan_thread.start()
+        scan_thread.join(timeout=30)
+    
+    if last_scan_results:
+        market_summary = last_scan_results['market_summary']
+        top_stocks = last_scan_results['top_picks'][:5] if last_scan_results['top_picks'] else []
+        top_stock = top_stocks[0] if top_stocks else None
+        
+        # Prepare data for template
+        template_data = {
+            'last_scan_time': last_scan_time or 'Never',
+            'market_strength': market_summary.get('market_strength', 0),
+            'market_trend': market_summary.get('market_trend', 'NEUTRAL'),
+            'stocks_analyzed': last_scan_results.get('stocks_analyzed', 0),
+            'bullish_signals': (market_summary.get('signal_distribution', {}).get('STRONG_BUY', 0) + 
+                              market_summary.get('signal_distribution', {}).get('BUY', 0)),
+            'top_stock': top_stock,
+            'top_stocks': top_stocks,
+            'selected_ticker': top_stock['ticker'] if top_stock else 'N/A',
+            'scan_data': last_scan_results
+        }
+        
+        return render_template_string(HTML_TEMPLATE, **template_data)
+    else:
+        # Show loading screen
+        loading_html = '''
+        <!DOCTYPE html>
+        <html>
+        <head><title>Loading Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-gray-900 text-white h-screen flex items-center justify-center">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-yellow-400 mx-auto mb-8"></div>
+                <h1 class="text-3xl font-bold mb-4">KING DOM TRADING DASHBOARD</h1>
+                <p class="text-xl text-gray-400">Running initial market scan...</p>
+                <p class="text-gray-500 mt-4">This may take 30-60 seconds</p>
+                <script>
+                    setTimeout(() => { location.reload(); }, 5000);
+                </script>
+            </div>
+        </body>
+        </html>
+        '''
+        return loading_html
+
+@app.route('/run_scan')
+def run_scan():
+    """Run a new scan"""
+    global scanner, last_scan_results, last_scan_time
+    
+    def scan_task():
+        run_background_scan()
+    
+    # Run in background thread
+    thread = threading.Thread(target=scan_task)
+    thread.start()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Scan started in background',
+        'time': datetime.now().isoformat()
+    })
+
+@app.route('/scan_stock/<ticker>')
+def scan_single_stock(ticker):
+    """Scan a single stock"""
+    global scanner
+    
+    if scanner is None:
+        scanner = MarketScanner()
+    
+    result = scanner.scan_single_stock(ticker)
+    
+    return jsonify({
+        'success': result is not None,
+        'stock': result,
+        'ticker': ticker
+    })
+
+@app.route('/api/scan_data')
+def get_scan_data():
+    """Get raw scan data as JSON"""
+    global last_scan_results
+    
+    if last_scan_results:
+        return jsonify(last_scan_results)
+    else:
+        return jsonify({'error': 'No scan data available'})
+
+@app.route('/api/stock/<ticker>')
+def get_stock_data(ticker):
+    """Get data for a specific stock"""
+    global last_scan_results
+    
+    if last_scan_results and 'all_results' in last_scan_results:
+        for stock in last_scan_results['all_results']:
+            if stock['ticker'] == ticker:
+                return jsonify(stock)
+    
+    return jsonify({'error': 'Stock not found'})
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'last_scan': last_scan_time,
+        'stocks_analyzed': len(last_scan_results.get('all_results', [])) if last_scan_results else 0,
+        'timestamp': datetime.now().isoformat()
+    })
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("KING DOM TRADING - PRO DASHBOARD")
+    print("=" * 60)
+    print("Dashboard starting on http://localhost:5000")
+    print("Initial market scan will run automatically...")
+    print("\nFeatures:")
+    print("• Real-time market scanning")
+    print("• Interactive charts (Volume Profile, Timeframe Alignment)")
+    print("• Top 5 trading opportunities")
+    print("• Detailed stock analysis")
+    print("• Professional risk management")
+    print("=" * 60)
+    
+    # Run initial scan in background
+    scan_thread = threading.Thread(target=run_background_scan)
+    scan_thread.start()
+    
+    # Start Flask app
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+
+FILE 6
+
