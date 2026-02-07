@@ -1,0 +1,10 @@
+{
+    "finnhub_key": "YOUR_FINNHUB_KEY_HERE",
+    "polygon_key": "YOUR_POLYGON_KEY_HERE",
+    "account_size": 10000,
+    "max_risk_per_trade": 0.02,
+    "min_volume": 1000000,
+    "min_price": 1.00,
+    "scan_workers": 10,
+    "watchlist": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
+}
