@@ -2437,7 +2437,7 @@ def api_scan_start():
         data.setdefault("min_or_range_pct", "0.8")
         data.setdefault("max_or_range_pct", "4.5")
         data.setdefault("min_combined_score", "0.42")
-        data.setdefault("orb_min_ml_score", "0.30")
+        data.setdefault("orb_min_ml_score", "0.00")
         data.setdefault("orb_max_chase_r", "0.25")
         data.setdefault("orb_retest_max_chase_r", "0.15")
         data.setdefault("orb_breakout_now_max_chase_r", "0.08")
@@ -2472,7 +2472,7 @@ def api_scan_start():
         "min_vwap_enabled": _is_truthy(data.get("min_vwap_enabled", "0")),
         "min_pct_over_vwap": _param_float(data, "min_pct_over_vwap", 1.0),
         "orb_scalp_under10": bool(orb_scalp_under10),
-        "orb_min_ml_score": _param_float(data, "orb_min_ml_score", 0.35),
+        "orb_min_ml_score": _param_float(data, "orb_min_ml_score", 0.0 if orb_scalp_under10 else 0.35),
         "orb_max_chase_r": _param_float(data, "orb_max_chase_r", 0.35),
         "orb_retest_max_chase_r": _param_float(data, "orb_retest_max_chase_r", 0.20),
         "orb_breakout_now_max_chase_r": _param_float(data, "orb_breakout_now_max_chase_r", 0.10),
