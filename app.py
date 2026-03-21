@@ -143,6 +143,7 @@ from universe.nasdaq_symbols import fetch_us_equity_symbols, UniverseConfig
 from scanner.orb import scan_symbols, ORBConfig
 from core.errors import IntradayDataFailure, TrendContextFailure, EntryNowMLFailure, failure_string
 from providers.alpaca_provider import AlpacaProvider
+from providers.etrade_provider import ETradeProvider
 from providers.symbols import to_provider_symbol
 from providers.streaming import AlpacaStreamCache
 from monitor.live_monitor import LiveMonitorManager
@@ -183,6 +184,19 @@ try:
     _ALPACA_PROVIDER = AlpacaProvider()
 except Exception as _provider_e:
     _PROVIDER_ERROR = f"{type(_provider_e).__name__}: {_provider_e}"
+
+_BROKER_PROVIDER = _ALPACA_PROVIDER
+_BROKER_PROVIDER_NAME = "alpaca"
+_BROKER_PROVIDER_ERROR: str | None = _PROVIDER_ERROR
+if (os.getenv("BROKER_PROVIDER") or "alpaca").strip().lower() == "etrade":
+    try:
+        _BROKER_PROVIDER = ETradeProvider()
+        _BROKER_PROVIDER_NAME = "etrade"
+        _BROKER_PROVIDER_ERROR = None
+    except Exception as _broker_e:
+        _BROKER_PROVIDER = None
+        _BROKER_PROVIDER_NAME = "etrade"
+        _BROKER_PROVIDER_ERROR = f"{type(_broker_e).__name__}: {_broker_e}"
 
 _MONITOR = LiveMonitorManager()
 _STREAM = None
@@ -3108,9 +3122,9 @@ def api_position_manager():
 
 @app.get("/api/broker_snapshot")
 def api_broker_snapshot():
-    provider = _ALPACA_PROVIDER
+    provider = _BROKER_PROVIDER
     if provider is None:
-        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+        return jsonify(ok=False, error=(_BROKER_PROVIDER_ERROR or "provider_not_initialized"), broker=_BROKER_PROVIDER_NAME), 503
     if not hasattr(provider, "get_broker_snapshot"):
         return jsonify(ok=False, error="broker_snapshot_not_supported"), 501
     try:
@@ -3122,9 +3136,9 @@ def api_broker_snapshot():
 
 @app.post("/api/broker_action")
 def api_broker_action():
-    provider = _ALPACA_PROVIDER
+    provider = _BROKER_PROVIDER
     if provider is None:
-        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+        return jsonify(ok=False, error=(_BROKER_PROVIDER_ERROR or "provider_not_initialized"), broker=_BROKER_PROVIDER_NAME), 503
     payload = request.get_json(silent=True) or {}
     action = str(payload.get("action") or "").strip().lower()
     symbol = str(payload.get("symbol") or "").strip().upper()
@@ -3648,9 +3662,9 @@ def index():
     ml_state["model_loaded"] = (ml_state.get("status") == "ready")
 
     broker_snapshot = None
-    if _ALPACA_PROVIDER is not None and hasattr(_ALPACA_PROVIDER, "get_broker_snapshot"):
+    if _BROKER_PROVIDER is not None and hasattr(_BROKER_PROVIDER, "get_broker_snapshot"):
         try:
-            broker_snapshot = _ALPACA_PROVIDER.get_broker_snapshot(timeout_s=8.0)
+            broker_snapshot = _BROKER_PROVIDER.get_broker_snapshot(timeout_s=8.0)
         except Exception:
             broker_snapshot = None
 
@@ -3670,6 +3684,8 @@ def index():
         min_or_range_pct=min_or_range_pct,
         max_or_range_pct=max_or_range_pct,
         provider=provider,
+        broker_provider_name=_BROKER_PROVIDER_NAME,
+        broker_provider_error=_BROKER_PROVIDER_ERROR,
         broker_snapshot=broker_snapshot,
         context_snapshot=_CONTEXT_ENGINE.snapshot(),
         recent_alerts=_RUNTIME_STORE.recent_alerts(limit=25),

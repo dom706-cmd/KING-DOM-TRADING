@@ -1027,7 +1027,7 @@ th {
           <div>
             <div class="sectionLabel">Broker</div>
             <h3 style="margin:0;">Account cockpit</h3>
-            <div class="muted" style="margin-top:4px;">Live broker snapshot, buying power, and open positions import.</div>
+            <div class="muted" style="margin-top:4px;">Live broker snapshot, buying power, and open positions import. Backend: <b>{{ broker_provider_name or 'alpaca' }}</b>{% if broker_provider_error %} <span class="positionError">({{ broker_provider_error }})</span>{% endif %}</div>
           </div>
           <div class="positionToolbar">
             <button type="button" id="brokerRefreshBtn">Refresh broker</button>
