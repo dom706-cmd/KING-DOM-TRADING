@@ -2806,6 +2806,258 @@ def _normalize_target_rr(row: dict[str, Any]) -> dict[str, Any]:
     return r
 
 
+def _time_bucket_label(now_et: datetime) -> str:
+    mins = now_et.hour * 60 + now_et.minute
+    if mins < 9 * 60 + 30:
+        return "premarket"
+    if mins < 10 * 60:
+        return "open_drive"
+    if mins < 11 * 60 + 30:
+        return "morning"
+    if mins < 14 * 60:
+        return "midday"
+    if mins < 15 * 60 + 30:
+        return "power_hour"
+    if mins < 16 * 60:
+        return "closing_hour"
+    return "after_hours"
+
+
+def _minutes_to_close(now_et: datetime) -> int | None:
+    close_dt = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    delta = int((close_dt - now_et).total_seconds() // 60)
+    return delta if delta >= 0 else None
+
+
+def _position_plan_payload(symbol: str, position: dict[str, Any], provider, context_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+    symbol = str(symbol or "").strip().upper()
+    side = str(position.get("side") or "long").strip().lower()
+    entry = _safe_float(position.get("entry"))
+    stop = _safe_float(position.get("stop"))
+    shares = _safe_float(position.get("shares")) or 0.0
+    target = _safe_float(position.get("target"))
+    notes = str(position.get("notes") or "").strip()
+    must_flat = bool(position.get("must_flat") or False)
+
+    if not symbol:
+        raise ValueError("missing_symbol")
+    if side not in {"long", "short"}:
+        raise ValueError("invalid_side")
+    if entry is None or stop is None:
+        raise ValueError("missing_entry_or_stop")
+
+    intraday, live_price = _entry_now_intraday_context(provider, symbol, include_prepost=False)
+    trend_ctx = _entry_now_trend_context(intraday)
+    vwap_last = trend_ctx.get("vwap_last")
+    vwap_delta_pct = trend_ctx.get("vwap_delta_pct")
+    trend_state = trend_ctx.get("trend_state")
+    trend_slope_pct = trend_ctx.get("trend_slope_pct")
+
+    tail = intraday.iloc[-15:] if len(intraday) >= 15 else intraday
+    hi15 = float(_col(tail, 'High', 'high').astype(float).max()) if not tail.empty else None
+    lo15 = float(_col(tail, 'Low', 'low').astype(float).min()) if not tail.empty else None
+
+    risk_per_share = abs(float(entry) - float(stop)) if entry is not None and stop is not None else None
+    if risk_per_share is None or risk_per_share <= 0:
+        raise ValueError("invalid_risk_per_share")
+
+    if side == "long":
+        current_r = (float(live_price) - float(entry)) / risk_per_share
+        stop_distance_r = (float(live_price) - float(stop)) / risk_per_share
+        r1 = float(entry) + risk_per_share
+        r2 = float(entry) + 2.0 * risk_per_share
+        r3 = float(entry) + 3.0 * risk_per_share
+    else:
+        current_r = (float(entry) - float(live_price)) / risk_per_share
+        stop_distance_r = (float(stop) - float(live_price)) / risk_per_share
+        r1 = float(entry) - risk_per_share
+        r2 = float(entry) - 2.0 * risk_per_share
+        r3 = float(entry) - 3.0 * risk_per_share
+
+    target_active = target if target is not None else r2
+    if side == "long":
+        target_distance_r = (float(target_active) - float(live_price)) / risk_per_share
+    else:
+        target_distance_r = (float(live_price) - float(target_active)) / risk_per_share
+
+    pnl_open = (float(live_price) - float(entry)) * float(shares) if side == "long" else (float(entry) - float(live_price)) * float(shares)
+    spread_pct = None
+    live_state = _get_live_state(symbol)
+    bid = _safe_float(live_state.get("bid"))
+    ask = _safe_float(live_state.get("ask"))
+    if bid is not None and ask is not None and (bid + ask) > 0:
+        spread_pct = ((ask - bid) / ((ask + bid) / 2.0)) * 100.0
+
+    now_et = datetime.now(_ET)
+    minutes_to_close = _minutes_to_close(now_et)
+    time_bucket = _time_bucket_label(now_et)
+    context_snapshot = context_snapshot or {}
+    risk_on_score = _safe_float(context_snapshot.get("risk_on_score"))
+    breadth_score = _safe_float(context_snapshot.get("breadth_score"))
+    spy_trend = str(context_snapshot.get("spy_trend_state") or "unknown")
+    qqq_trend = str(context_snapshot.get("qqq_trend_state") or "unknown")
+    volatility_regime = str(context_snapshot.get("volatility_regime") or "unknown")
+
+    against_trend = (side == "long" and trend_state in {"down", "lost_vwap"}) or (side == "short" and trend_state in {"up", "reclaim_vwap"})
+    vwap_good = (side == "long" and (vwap_delta_pct is None or float(vwap_delta_pct) >= -0.15)) or (side == "short" and (vwap_delta_pct is None or float(vwap_delta_pct) <= 0.15))
+    near_stop = stop_distance_r <= 0.35
+    near_1r = abs(current_r - 1.0) <= 0.20
+    deep_in_money = current_r >= 1.25
+    weak_spread = spread_pct is not None and spread_pct >= 0.45
+    late_day = minutes_to_close is not None and minutes_to_close <= 30
+    very_late = minutes_to_close is not None and minutes_to_close <= 12
+    risk_off_market = ((risk_on_score is not None and risk_on_score < -0.35) or (breadth_score is not None and breadth_score < -0.35) or spy_trend == "down")
+
+    action = "HOLD"
+    urgency = 40
+    rationale: list[str] = []
+    exit_plan: list[str] = []
+
+    if stop_distance_r <= 0:
+        action = "EXIT NOW"
+        urgency = 100
+        rationale.append("stop breached")
+        exit_plan.append("flat now; thesis broken")
+    elif near_stop and against_trend:
+        action = "EXIT NOW"
+        urgency = 96
+        rationale.extend(["near stop", "trend against position"])
+        exit_plan.append("do not give it more room")
+    elif very_late and current_r < 0.35 and (must_flat or against_trend or weak_spread):
+        action = "EXIT INTO CLOSE"
+        urgency = 94
+        rationale.append("late day with weak cushion")
+        if must_flat:
+            rationale.append("must flat by close")
+        exit_plan.append("use marketable limit near bid/ask; do not carry")
+    elif late_day and near_1r and (against_trend or risk_off_market):
+        action = "TRIM / PAY YOURSELF"
+        urgency = 82
+        rationale.extend(["near 1R", "late day context not ideal"])
+        exit_plan.append(f"take at least partial near {target_active:.2f}")
+    elif deep_in_money and late_day:
+        action = "TRAIL WINNER"
+        urgency = 76
+        rationale.extend(["late day winner", "protect gains"])
+        trail = vwap_last if vwap_last is not None else (lo15 if side == 'long' else hi15)
+        if trail is not None:
+            exit_plan.append(f"trail stop near {float(trail):.2f}")
+        exit_plan.append("consider partial into strength before close")
+    elif current_r >= 0.60 and vwap_good and not against_trend:
+        action = "HOLD / LET IT WORK"
+        urgency = 54
+        rationale.extend(["trend intact", "position has cushion"])
+        if current_r >= 1.0:
+            exit_plan.append("consider stop to breakeven or better")
+    elif current_r < 0.25 and not vwap_good:
+        action = "REDUCE RISK"
+        urgency = 74
+        rationale.extend(["not getting paid yet", "VWAP relationship weak"])
+        exit_plan.append("tighten stop or cut partial on failed bounce")
+    else:
+        action = "WAIT / REASSESS"
+        urgency = 60
+        rationale.append("mixed signals")
+        exit_plan.append("wait for reclaim / break of local range")
+
+    overnight = "NO HOLD"
+    overnight_reasons: list[str] = []
+    if must_flat:
+        overnight = "NO HOLD"
+        overnight_reasons.append("marked intraday only")
+    elif current_r >= 1.0 and vwap_good and not against_trend and not weak_spread and not risk_off_market and minutes_to_close is not None and minutes_to_close <= 20:
+        overnight = "PARTIAL HOLD OK"
+        overnight_reasons.extend(["good cushion", "trend intact", "close carry acceptable"])
+    elif current_r >= 0.35 and not against_trend and not weak_spread:
+        overnight = "MAYBE HOLD SMALL"
+        overnight_reasons.append("acceptable only with reduced size")
+    else:
+        overnight = "NO HOLD"
+        overnight_reasons.append("insufficient edge for overnight")
+
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "side": side,
+        "entry": entry,
+        "stop": stop,
+        "shares": shares,
+        "target": target_active,
+        "notes": notes,
+        "must_flat": must_flat,
+        "live_price": live_price,
+        "bid": bid,
+        "ask": ask,
+        "spread_pct": spread_pct,
+        "pnl_open": pnl_open,
+        "risk_per_share": risk_per_share,
+        "current_r": current_r,
+        "stop_distance_r": stop_distance_r,
+        "target_distance_r": target_distance_r,
+        "r1": r1,
+        "r2": r2,
+        "r3": r3,
+        "vwap_last": vwap_last,
+        "vwap_delta_pct": vwap_delta_pct,
+        "trend_state": trend_state,
+        "trend_slope_pct": trend_slope_pct,
+        "hi15": hi15,
+        "lo15": lo15,
+        "minutes_to_close": minutes_to_close,
+        "time_bucket": time_bucket,
+        "market_context": {
+            "spy_trend_state": spy_trend,
+            "qqq_trend_state": qqq_trend,
+            "risk_on_score": risk_on_score,
+            "breadth_score": breadth_score,
+            "volatility_regime": volatility_regime,
+        },
+        "flags": {
+            "near_stop": near_stop,
+            "near_1r": near_1r,
+            "deep_in_money": deep_in_money,
+            "against_trend": against_trend,
+            "vwap_good": vwap_good,
+            "weak_spread": weak_spread,
+            "late_day": late_day,
+            "very_late": very_late,
+            "risk_off_market": risk_off_market,
+        },
+        "action": action,
+        "urgency": urgency,
+        "rationale": rationale,
+        "exit_plan": exit_plan,
+        "overnight": overnight,
+        "overnight_reasons": overnight_reasons,
+    }
+
+
+@app.post("/api/position_manager")
+def api_position_manager():
+    payload = request.get_json(silent=True) or {}
+    positions = payload.get("positions") or []
+    if not isinstance(positions, list) or not positions:
+        return jsonify(ok=False, error="missing_positions"), 400
+    provider = _ALPACA_PROVIDER
+    if provider is None:
+        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+
+    ctx = _CONTEXT_ENGINE.snapshot() if '_CONTEXT_ENGINE' in globals() else {}
+    rows = []
+    errors = []
+    for raw in positions[:25]:
+        try:
+            row = _position_plan_payload(str(raw.get("symbol") or ""), raw, provider, ctx)
+            rows.append(row)
+        except Exception as e:
+            errors.append({
+                "symbol": str((raw or {}).get("symbol") or "").strip().upper(),
+                "error": f"{type(e).__name__}: {e}",
+            })
+    rows.sort(key=lambda r: (-int(r.get("urgency") or 0), str(r.get("symbol") or "")))
+    return jsonify(ok=True, context_snapshot=ctx, rows=rows, errors=errors, count=len(rows))
+
+
 @app.get("/api/live_quotes")
 def api_live_quotes():
     raw = (request.args.get("symbols") or "").strip()

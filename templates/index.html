@@ -475,6 +475,24 @@ th {
 .resultsCard .notes{max-width:320px; font-size:11px;}
 .secondaryCard h3, .utilityCard h3, .resultsCard h2{letter-spacing:0.01em;}
 .secondaryCard .muted, .utilityCard .muted{font-size:12px;}
+.positionDeskGrid{display:grid; grid-template-columns: 360px minmax(0,1fr); gap:10px; align-items:start;}
+.positionInputList{display:flex; flex-direction:column; gap:8px; max-height:420px; overflow:auto;}
+.positionRow{display:grid; grid-template-columns: 84px 70px 78px 78px 72px 96px 1fr auto; gap:8px; align-items:end; padding:8px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; background:rgba(255,255,255,0.02);}
+.positionRow input,.positionRow select{width:100%;}
+.positionToolbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.positionOutputList{display:flex; flex-direction:column; gap:10px;}
+.positionCard{border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px; background:rgba(0,0,0,0.16);}
+.positionTop{display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;}
+.actionBadge{display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:0.04em;}
+.action-exit{background:rgba(239,68,68,0.16); color:#fca5a5; border:1px solid rgba(239,68,68,0.3);}
+.action-trim,.action-reduce{background:rgba(245,158,11,0.15); color:#fde68a; border:1px solid rgba(245,158,11,0.28);}
+.action-hold,.action-trail{background:rgba(34,197,94,0.14); color:#86efac; border:1px solid rgba(34,197,94,0.28);}
+.action-wait{background:rgba(148,163,184,0.16); color:#e5e7eb; border:1px solid rgba(148,163,184,0.24);}
+.metricRow{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;}
+.planList{margin:8px 0 0 16px; padding:0;}
+.planList li{margin:3px 0;}
+.positionError{color:#fca5a5; font-size:12px;}
+@media (max-width: 1180px){ .positionDeskGrid{grid-template-columns:1fr;} .positionRow{grid-template-columns: repeat(2, minmax(0,1fr));} }
 @media (max-width: 1180px){
   .workspaceGrid{grid-template-columns:1fr;}
   .topBar{flex-direction:column;}
@@ -984,6 +1002,38 @@ th {
   </div>
   {% endif %}
 
+      <div class="card compactCard utilityCard" id="positionDeskCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Trade manager</div>
+            <h3 style="margin:0;">Position Desk</h3>
+            <div class="muted" style="margin-top:4px;">Manage live positions with actual hold / trim / exit / overnight guidance using live price, VWAP, trend, spread, and time-to-close context.</div>
+          </div>
+          <div class="positionToolbar">
+            <button type="button" id="positionDeskAddRowBtn">Add row</button>
+            <button type="button" id="positionDeskRefreshBtn">Refresh guidance</button>
+          </div>
+        </div>
+        <div class="positionDeskGrid" style="margin-top:10px;">
+          <div>
+            <div class="positionToolbar" style="margin-bottom:8px;">
+              <input id="positionDeskBulkSymbols" placeholder="AAPL, TSLA, NVDA" style="flex:1; min-width:220px;" />
+              <button type="button" id="positionDeskBulkAddBtn">Add symbols</button>
+            </div>
+            <div class="muted" style="margin-bottom:8px;">Enter your live positions manually for now. Later we can wire E*TRADE / buying power / account state into this.</div>
+            <div id="positionDeskInputs" class="positionInputList"></div>
+          </div>
+          <div>
+            <div class="positionToolbar" style="justify-content:space-between; margin-bottom:8px;">
+              <div class="denseMeta"><span class="tag">Output</span><span id="positionDeskStatus" class="muted">No positions loaded.</span></div>
+              <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="positionDeskAutoRefresh" checked /> Auto-refresh</label>
+            </div>
+            <div id="positionDeskErrors" class="positionError"></div>
+            <div id="positionDeskOutput" class="positionOutputList"><div class="muted">Add one or more positions to get guidance.</div></div>
+          </div>
+        </div>
+      </div>
+
       <div class="utilityGrid">
         <div class="card compactCard utilityCard secondaryCard">
           <div class="sectionLabel">Analyzer</div>
@@ -1080,6 +1130,9 @@ th {
 <script>
 // Prevent early boot failure before the later scan-status script defines the real function.
 window.refreshVisibleQuotes = window.refreshVisibleQuotes || function refreshVisibleQuotesStub(){};
+window.PositionDeskSeed = [
+  {symbol:'', side:'long', entry:'', stop:'', shares:'', target:'', must_flat:false, notes:''}
+];
 </script>
 <script>
 (function(){
@@ -2727,6 +2780,95 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 })();
 </script>
 
+<script>
+(function(){
+  const LS_POSITION_DESK = 'kingdom_position_desk_v1';
+  let positionDeskTimer = null;
+
+  function pdEsc(s){ return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function pdNum(v, d=2){ const n=Number(v); return Number.isFinite(n) ? n.toFixed(d) : '—'; }
+  function pdMoney(v, d=2){ const n=Number(v); return Number.isFinite(n) ? ('$'+n.toFixed(Math.abs(n)>=100?0:d)) : '—'; }
+  function pdActionClass(action){ const a=String(action||'').toLowerCase(); if(a.includes('exit')) return 'action-exit'; if(a.includes('trim')) return 'action-trim'; if(a.includes('reduce')) return 'action-reduce'; if(a.includes('trail')) return 'action-trail'; if(a.includes('hold')) return 'action-hold'; return 'action-wait'; }
+  function pdDefaultRow(sym=''){ return {symbol:sym, side:'long', entry:'', stop:'', shares:'', target:'', must_flat:false, notes:''}; }
+  function pdLoad(){ try{ const raw=localStorage.getItem(LS_POSITION_DESK); const j=JSON.parse(raw||'null'); return Array.isArray(j)&&j.length?j:window.PositionDeskSeed.slice(); }catch(e){ return window.PositionDeskSeed.slice(); } }
+  function pdSave(rows){ try{ localStorage.setItem(LS_POSITION_DESK, JSON.stringify(rows)); }catch(e){} }
+  function pdCollect(){
+    return Array.from(document.querySelectorAll('.positionRow')).map((row) => ({
+      symbol: row.querySelector('[data-k="symbol"]').value.trim().toUpperCase(),
+      side: row.querySelector('[data-k="side"]').value,
+      entry: row.querySelector('[data-k="entry"]').value,
+      stop: row.querySelector('[data-k="stop"]').value,
+      shares: row.querySelector('[data-k="shares"]').value,
+      target: row.querySelector('[data-k="target"]').value,
+      must_flat: row.querySelector('[data-k="must_flat"]').checked,
+      notes: row.querySelector('[data-k="notes"]').value.trim(),
+    }));
+  }
+  function pdRenderInputs(rows){
+    const wrap=document.getElementById('positionDeskInputs'); if(!wrap) return;
+    wrap.innerHTML = rows.map((r,idx)=>`
+      <div class="positionRow" data-idx="${idx}">
+        <div><div class="muted">Symbol</div><input data-k="symbol" value="${pdEsc(r.symbol||'')}" placeholder="AAPL" /></div>
+        <div><div class="muted">Side</div><select data-k="side"><option value="long" ${(r.side||'long')==='long'?'selected':''}>Long</option><option value="short" ${(r.side||'long')==='short'?'selected':''}>Short</option></select></div>
+        <div><div class="muted">Entry</div><input data-k="entry" value="${pdEsc(r.entry||'')}" inputmode="decimal" placeholder="12.40" /></div>
+        <div><div class="muted">Stop</div><input data-k="stop" value="${pdEsc(r.stop||'')}" inputmode="decimal" placeholder="12.05" /></div>
+        <div><div class="muted">Shares</div><input data-k="shares" value="${pdEsc(r.shares||'')}" inputmode="decimal" placeholder="500" /></div>
+        <div><div class="muted">Target</div><input data-k="target" value="${pdEsc(r.target||'')}" inputmode="decimal" placeholder="optional" /></div>
+        <div><div class="muted">Notes</div><input data-k="notes" value="${pdEsc(r.notes||'')}" placeholder="swing? catalyst?" /></div>
+        <div style="display:flex; gap:8px; align-items:center; justify-content:flex-end;">
+          <label style="display:flex; gap:6px; align-items:center; font-size:11px;"><input type="checkbox" data-k="must_flat" ${r.must_flat?'checked':''} /> flat</label>
+          <button type="button" data-act="remove">✕</button>
+        </div>
+      </div>`).join('');
+    wrap.querySelectorAll('input,select').forEach(el=>el.addEventListener('change', ()=>{ pdSave(pdCollect()); }));
+    wrap.querySelectorAll('[data-act="remove"]').forEach(btn=>btn.addEventListener('click', ()=>{ const rows=pdCollect(); rows.splice(Number(btn.closest('.positionRow')?.dataset.idx||-1),1); const next=rows.length?rows:[pdDefaultRow()]; pdSave(next); pdRenderInputs(next); pdRefresh(); }));
+  }
+  async function pdRefresh(){
+    const rows = pdCollect().filter(r => r.symbol && r.entry && r.stop);
+    pdSave(pdCollect());
+    const out=document.getElementById('positionDeskOutput'); const status=document.getElementById('positionDeskStatus'); const err=document.getElementById('positionDeskErrors');
+    if(err) err.textContent='';
+    if(!rows.length){ if(status) status.textContent='Add a symbol + entry + stop.'; if(out) out.innerHTML='<div class="muted">Add one or more positions to get guidance.</div>'; return; }
+    if(status) status.textContent=`Refreshing ${rows.length} position${rows.length===1?'':'s'}…`;
+    try{
+      const res = await fetch('/api/position_manager', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({positions: rows})});
+      const j = await res.json();
+      if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
+      if(status) status.textContent=`${j.count||0} active position${(j.count||0)===1?'':'s'} • live guidance`; 
+      if(err) err.innerHTML = (j.errors||[]).map(e=>`${pdEsc(e.symbol||'?')}: ${pdEsc(e.error||'error')}`).join('<br/>');
+      const html = (j.rows||[]).map(r => `
+        <div class="positionCard">
+          <div class="positionTop">
+            <div>
+              <div class="denseMeta"><span class="tag">${pdEsc(r.side||'')}</span><b style="font-size:16px;">${pdEsc(r.symbol||'')}</b><span class="tag">urgency ${pdEsc(r.urgency)}</span><span class="tag">${pdEsc(r.time_bucket||'')}</span></div>
+              <div class="metricRow"><span class="tag">Live</span><b>${pdMoney(r.live_price)}</b><span class="tag">PnL</span><b>${pdMoney(r.pnl_open)}</b><span class="tag">R now</span><b>${pdNum(r.current_r,2)}R</b><span class="tag">Stop dist</span><b>${pdNum(r.stop_distance_r,2)}R</b><span class="tag">to target</span><b>${pdNum(r.target_distance_r,2)}R</b></div>
+              <div class="metricRow"><span class="tag">Entry</span>${pdMoney(r.entry)}<span class="tag">Stop</span>${pdMoney(r.stop)}<span class="tag">1R</span>${pdMoney(r.r1)}<span class="tag">2R</span>${pdMoney(r.r2)}<span class="tag">3R</span>${pdMoney(r.r3)}<span class="tag">VWAP</span>${pdMoney(r.vwap_last)}<span class="tag">Trend</span>${pdEsc(r.trend_state||'—')}</div>
+            </div>
+            <div style="text-align:right; min-width:220px;">
+              <div class="actionBadge ${pdActionClass(r.action)}">${pdEsc(r.action||'WAIT')}</div>
+              <div class="muted" style="margin-top:6px;">Overnight: <b>${pdEsc(r.overnight||'—')}</b></div>
+              <div class="muted" style="margin-top:4px;">Minutes to close: <b>${pdEsc(r.minutes_to_close ?? '—')}</b></div>
+            </div>
+          </div>
+          <div class="metricRow"><span class="tag">Spread</span>${pdNum(r.spread_pct,2)}%<span class="tag">Δ VWAP</span>${pdNum(r.vwap_delta_pct,2)}%<span class="tag">SPY</span>${pdEsc(r.market_context?.spy_trend_state||'—')}<span class="tag">QQQ</span>${pdEsc(r.market_context?.qqq_trend_state||'—')}<span class="tag">Risk-on</span>${pdNum(r.market_context?.risk_on_score,2)}<span class="tag">Breadth</span>${pdNum(r.market_context?.breadth_score,2)}</div>
+          <ul class="planList">${(r.rationale||[]).map(x=>`<li>${pdEsc(x)}</li>`).join('') || '<li>No rationale returned.</li>'}</ul>
+          <div class="metricRow"><span class="tag">Plan</span><span>${(r.exit_plan||[]).map(pdEsc).join(' • ') || 'No explicit exit plan.'}</span></div>
+          <div class="metricRow"><span class="tag">Overnight reasons</span><span>${(r.overnight_reasons||[]).map(pdEsc).join(' • ') || '—'}</span></div>
+        </div>`).join('');
+      if(out) out.innerHTML = html || '<div class="muted">No valid rows returned.</div>';
+    }catch(e){ if(status) status.textContent='Position Desk refresh failed'; if(err) err.textContent=String(e.message || e); }
+  }
+  function pdBind(){
+    document.getElementById('positionDeskAddRowBtn')?.addEventListener('click', ()=>{ const rows=pdCollect(); rows.push(pdDefaultRow()); pdSave(rows); pdRenderInputs(rows); });
+    document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
+    document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
+    const auto=document.getElementById('positionDeskAutoRefresh');
+    auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); } });
+    const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); }
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pdBind); else pdBind();
+})();
+</script>
 
 <script>
 (function(){
