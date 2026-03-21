@@ -2870,6 +2870,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
           </div>
         </div>`).join('');
       if(out) out.innerHTML = html || '<div class="muted">No valid rows returned.</div>';
+      const topBtn = out?.querySelector('[data-chart-symbol]');
+      if(topBtn) pdLoadChart(topBtn).catch(()=>{});
     }catch(e){ if(status) status.textContent='Position Desk refresh failed'; if(err) err.textContent=String(e.message || e); }
   }
   async function pdLoadChart(btn){
@@ -2890,6 +2892,10 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     addLine(j.overlays?.bb_mid||[], 'rgba(148,163,184,0.45)', 1);
     addLine(j.overlays?.bb_lower||[], 'rgba(203,213,225,0.65)', 1);
     Object.entries(j.levels||{}).forEach(([k,v])=>{ if(v===null||v===undefined||Number.isNaN(Number(v))) return; candle.createPriceLine({price:Number(v), color:(k==='stop'||k==='or_low')?'#ef4444':(k==='entry'?'#fbbf24':(k.startsWith('r')||k==='target'||k==='or_high')?'#22c55e':'#a78bfa'), lineWidth:(k==='entry'||k==='stop')?2:1, lineStyle:(k==='entry'||k==='stop')?0:2, axisLabelVisible:true, title:k.toUpperCase()}); });
+    (j.labels||[]).forEach(label => {
+      if(label?.price===null || label?.price===undefined) return;
+      candle.createPriceLine({price:Number(label.price), color:String(label.color||'#ffffff'), lineWidth:1, lineStyle:2, axisLabelVisible:true, title:String(label.text||label.key||'')});
+    });
     chart.timeScale().fitContent();
   }
   function pdBind(){

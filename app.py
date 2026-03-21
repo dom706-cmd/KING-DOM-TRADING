@@ -3175,6 +3175,27 @@ def api_position_chart():
     except Exception:
         pass
 
+    labels = []
+    if stop is not None:
+        labels.append({"key": "stop", "price": stop, "text": "GET OUT HERE", "color": "#ef4444"})
+    if entry is not None:
+        labels.append({"key": "entry", "price": entry, "text": "YOU BOUGHT HERE", "color": "#fbbf24"})
+    if target is not None:
+        labels.append({"key": "target", "price": target, "text": "PAY YOURSELF", "color": "#22c55e"})
+    if "r1" in levels:
+        labels.append({"key": "r1", "price": levels["r1"], "text": "1R FIRST PAY WINDOW", "color": "#22c55e"})
+    if "r2" in levels:
+        labels.append({"key": "r2", "price": levels["r2"], "text": "2R STRONG EXIT ZONE", "color": "#16a34a"})
+    if "or_high" in levels:
+        labels.append({"key": "or_high", "price": levels["or_high"], "text": "ORB HIGH", "color": "#a78bfa"})
+    if "or_low" in levels:
+        labels.append({"key": "or_low", "price": levels["or_low"], "text": "ORB LOW", "color": "#a78bfa"})
+    if len(vw) > 0:
+        try:
+            labels.append({"key": "vwap", "price": float(vw.iloc[-1]), "text": "WEAK IF LOSES VWAP", "color": "#facc15"})
+        except Exception:
+            pass
+
     return jsonify(
         ok=True,
         symbol=symbol,
@@ -3189,6 +3210,7 @@ def api_position_chart():
             "bb_lower": _line_payload(bb_lower),
         },
         levels=levels,
+        labels=labels,
     )
 
 
