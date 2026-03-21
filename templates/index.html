@@ -491,6 +491,7 @@ th {
 .banner-caution{background:rgba(245,158,11,0.18); color:#fde68a; border:1px solid rgba(245,158,11,0.3);}
 .banner-ok{background:rgba(34,197,94,0.16); color:#bbf7d0; border:1px solid rgba(34,197,94,0.28);}
 .banner-neutral{background:rgba(148,163,184,0.16); color:#e5e7eb; border:1px solid rgba(148,163,184,0.24);}
+.brokerActionRow{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px;}
 .scoreTable{width:100%; border-collapse:collapse;}
 .scoreTable th,.scoreTable td{padding:7px 8px; border-bottom:1px solid rgba(255,255,255,0.07); font-size:12px;}
 .positionTop{display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;}
@@ -2928,6 +2929,13 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
           <ul class="planList">${(r.rationale||[]).map(x=>`<li>${pdEsc(x)}</li>`).join('') || '<li>No rationale returned.</li>'}</ul>
           <div class="metricRow"><span class="tag">Plan</span><span>${(r.exit_plan||[]).map(pdEsc).join(' • ') || 'No explicit exit plan.'}</span></div>
           <div class="metricRow"><span class="tag">Overnight reasons</span><span>${(r.overnight_reasons||[]).map(pdEsc).join(' • ') || '—'}</span></div>
+          <div class="brokerActionRow">
+            <button type="button" class="btn" data-broker-act="trim25" data-broker-symbol="${pdEsc(r.symbol||'')}">Trim 25%</button>
+            <button type="button" class="btn" data-broker-act="trim50" data-broker-symbol="${pdEsc(r.symbol||'')}">Trim 50%</button>
+            <button type="button" class="btn btn-danger" data-broker-act="flatten" data-broker-symbol="${pdEsc(r.symbol||'')}">Flatten</button>
+            <input data-broker-limit="${pdEsc(r.symbol||'')}" placeholder="limit px" inputmode="decimal" style="width:110px;" />
+            <button type="button" class="btn" data-broker-act="limit_exit" data-broker-symbol="${pdEsc(r.symbol||'')}" data-broker-qty="${pdEsc(r.shares||'')}">Limit exit</button>
+          </div>
           <div class="positionChartShell">
             <div class="positionChartHead">
               <div class="denseMeta"><span class="tag">Decision chart</span><span class="positionGuide">Candles + VWAP + EMA9/20 + Bollinger + your trade levels</span></div>
@@ -2988,6 +2996,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
     document.addEventListener('click', (e)=>{ const btn=e.target.closest('[data-chart-symbol]'); if(!btn) return; pdLoadChart(btn).catch(err=>{ const host=document.getElementById(`chart_${btn.dataset.chartSymbol}`); if(host) host.innerHTML=`<div class="positionError" style="padding:12px;">${pdEsc(err.message||err)}</div>`; }); });
+    document.addEventListener('click', async (e)=>{ const btn=e.target.closest('[data-broker-act]'); if(!btn) return; const action=btn.getAttribute('data-broker-act'); const symbol=btn.getAttribute('data-broker-symbol'); const limitInput=document.querySelector(`[data-broker-limit="${symbol}"]`); const limitPrice=limitInput?.value; const ok=window.confirm(`Confirm ${action} for ${symbol}?`); if(!ok) return; try{ const res=await fetch('/api/broker_action',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, symbol, confirm:true, limit_price: limitPrice, qty: btn.getAttribute('data-broker-qty')})}); const j=await res.json(); if(!res.ok||!j||j.ok===false) throw new Error((j&&(j.error||j.message))||`HTTP ${res.status}`); await brokerRefresh(); await pdRefresh(); }catch(err){ window.alert(`Broker action failed: ${String(err.message||err)}`); } });
     document.addEventListener('change', (e)=>{ const sel=e.target.closest('[data-chart-timeframe]'); if(!sel) return; const symbol=sel.getAttribute('data-chart-timeframe'); const btn=document.querySelector(`[data-chart-symbol="${symbol}"]`); if(btn) pdLoadChart(btn).catch(()=>{}); });
     const auto=document.getElementById('positionDeskAutoRefresh');
     auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); } });

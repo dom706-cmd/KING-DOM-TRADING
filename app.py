@@ -3120,6 +3120,38 @@ def api_broker_snapshot():
         return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
 
 
+@app.post("/api/broker_action")
+def api_broker_action():
+    provider = _ALPACA_PROVIDER
+    if provider is None:
+        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("action") or "").strip().lower()
+    symbol = str(payload.get("symbol") or "").strip().upper()
+    qty = _safe_float(payload.get("qty"))
+    pct = _safe_float(payload.get("pct"))
+    limit_price = _safe_float(payload.get("limit_price"))
+    confirm = bool(payload.get("confirm") or False)
+    if not confirm:
+        return jsonify(ok=False, error="confirmation_required"), 400
+    if action not in {"trim25", "trim50", "flatten", "limit_exit"}:
+        return jsonify(ok=False, error="unsupported_action"), 400
+    if not hasattr(provider, "submit_exit_order"):
+        return jsonify(ok=False, error="broker_action_not_supported"), 501
+    try:
+        if action == "trim25":
+            out = provider.submit_exit_order(symbol=symbol, notional_pct=0.25)
+        elif action == "trim50":
+            out = provider.submit_exit_order(symbol=symbol, notional_pct=0.50)
+        elif action == "flatten":
+            out = provider.submit_exit_order(symbol=symbol)
+        else:
+            out = provider.submit_exit_order(symbol=symbol, qty=qty, limit_price=limit_price)
+        return jsonify(ok=True, broker="alpaca", action=action, symbol=symbol, order=out)
+    except Exception as e:
+        return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
+
+
 @app.post("/api/position_chart")
 def api_position_chart():
     payload = request.get_json(silent=True) or {}

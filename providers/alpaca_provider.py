@@ -723,6 +723,48 @@ class AlpacaProvider(MarketDataProvider):
             "positions": positions,
             "position_count": len(positions),
         }
+
+    def submit_exit_order(self, *, symbol: str, qty: float | None = None, notional_pct: float | None = None, limit_price: float | None = None, timeout_s: float = 15.0) -> dict[str, Any]:
+        sym = str(symbol or '').strip().upper()
+        if not sym:
+            raise RuntimeError('missing_symbol')
+        positions = {str(p.get('symbol') or '').upper(): p for p in self.get_positions(timeout_s=timeout_s)}
+        pos = positions.get(sym)
+        if not pos:
+            raise RuntimeError(f'no_open_position:{sym}')
+        side = str(pos.get('side') or '').lower()
+        qty_open = float(pos.get('qty') or 0.0)
+        if qty_open <= 0:
+            raise RuntimeError(f'no_open_qty:{sym}')
+        close_side = 'sell' if side == 'long' else 'buy'
+        final_qty = qty_open
+        if qty is not None:
+            final_qty = min(qty_open, max(0.0, float(qty)))
+        elif notional_pct is not None:
+            final_qty = min(qty_open, max(0.0, qty_open * float(notional_pct)))
+        if final_qty <= 0:
+            raise RuntimeError(f'invalid_exit_qty:{sym}')
+        payload: dict[str, Any] = {
+            'symbol': sym,
+            'side': close_side,
+            'type': 'limit' if limit_price is not None else 'market',
+            'time_in_force': 'day',
+            'qty': str(round(final_qty, 6)).rstrip('0').rstrip('.'),
+        }
+        if limit_price is not None:
+            payload['limit_price'] = str(float(limit_price))
+        url = f"{self._alpaca_trading_base_url()}/v2/orders"
+        body = json.dumps(payload).encode('utf-8')
+        req = Request(url, headers={**self._alpaca_data_headers(), 'content-type': 'application/json'}, data=body, method='POST')
+        try:
+            with urlopen(req, timeout=timeout_s) as resp:
+                data = resp.read()
+            out = json.loads(data.decode('utf-8'))
+            if not isinstance(out, dict):
+                raise RuntimeError('unexpected_order_response')
+            return out
+        except Exception as e:
+            raise RuntimeError(f"Alpaca submit_exit_order failed for {sym}: {e}") from e
     def get_news_batch(
         self,
         symbols: list[str],
