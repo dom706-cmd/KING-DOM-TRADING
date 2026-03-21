@@ -383,83 +383,122 @@ th {
 
 /* Hide redundant Heat panel (Realm’s Hottest) */
 .heatCard{display:none !important;}
+
+.appShell{max-width:1680px;margin:0 auto;}
+.topBar{
+  display:flex;
+  align-items:stretch;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+.hero{
+  flex:1 1 auto;
+  height:96px;
+  margin-bottom:0;
+}
+.quickLinks{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  min-width:220px;
+}
+.quickCard{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:12px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  box-shadow: 0 12px 30px rgba(0,0,0,0.22);
+}
+.quickLink{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:rgba(0,0,0,0.28);
+  color:rgba(245,242,234,0.92);
+  text-decoration:none;
+  font-weight:700;
+}
+.quickStat{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;}
+.workspaceGrid{
+  display:grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap:12px;
+  align-items:start;
+}
+.sidebarStack,.contentStack,.utilityGrid{display:flex; flex-direction:column; gap:12px; min-width:0;}
+.utilityGrid{display:grid; grid-template-columns: repeat(2, minmax(0, 1fr));}
+.compactCard{padding:12px; margin-top:0;}
+.card h2,.card h3,.card h4{line-height:1.15;}
+.toolPalette,.statusCard,.secondaryCard,.resultsCard,.utilityCard{margin-top:0 !important;}
+.toolSectionTitle{font-size:12px; text-transform:uppercase; letter-spacing:0.12em; color:var(--muted2); font-weight:800;}
+.toolRow{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+.toolDivider{height:1px; background:rgba(255,255,255,0.08); margin:12px 0;}
+.hint{font-size:12px; color:var(--muted2); margin-top:6px;}
+.panelSub{margin-top:10px; padding:10px; border:1px solid var(--border); border-radius:12px; background: rgba(255,255,255,0.03);}
+.miniField{display:flex; flex-direction:column; gap:4px;}
+.sectionIntro{display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;}
+.denseMeta{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.sectionLabel{font-size:12px; text-transform:uppercase; letter-spacing:0.12em; color:var(--muted2); font-weight:800; margin-bottom:6px;}
+.watchControls,.filterRow{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+.resultsCard .tableWrap{max-height:62vh;}
+@media (max-width: 1180px){
+  .workspaceGrid{grid-template-columns:1fr;}
+  .topBar{flex-direction:column;}
+  .quickLinks{min-width:0; flex-direction:row; flex-wrap:wrap;}
+  .quickCard{flex:1 1 240px;}
+}
+@media (max-width: 900px){
+  body{margin:12px;}
+  .utilityGrid{grid-template-columns:1fr;}
+  .hero{height:88px;}
+}
 </style>
 </head>
 <body data-candidate-count="{{ count }}" data-scan-mode="{{ mode }}" data-end-offset="{{ end_offset }}" data-offset="{{ offset }}" data-max-symbols="{{ max_symbols }}" data-universe-size="{{ universe_size }}">
-  <div class="hero">
-    <div class="heroTitle">
-  <div style="margin-bottom:8px;"><a href="/crypto" style="display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:rgba(0,0,0,0.35); color:rgba(245,242,234,0.92); text-decoration:none;">Open Crypto Realm →</a></div>
-      <div class="bubble">
-        <div class="title">KingDom Trading</div>
-        <div class="sub">5‑Minute ORB Scanner • Provider: {{ (provider or "alpaca")|e }}</div>
+<div class="appShell">
+  <div class="topBar">
+    <div class="hero">
+      <div class="heroTitle">
+        <div class="bubble">
+          <div class="title">KingDom Trading</div>
+          <div class="sub">5‑Minute ORB Scanner • Provider: {{ (provider or "alpaca")|e }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="quickLinks">
+      <div class="quickCard">
+        <a class="quickLink" href="/crypto">Open Crypto Realm →</a>
+        <div class="quickStat">
+          <span class="tag">Candidates</span><b>{{ count }}</b>
+          <span class="tag">Scanned</span><b>{{ scanned }}</b>
+        </div>
+      </div>
+      <div class="quickCard">
+        <div class="sectionLabel">Session</div>
+        <div class="denseMeta">
+          <span class="tag">Mode</span><span>{{ mode }}</span>
+          <span class="tag">Universe</span><span>{{ universe }}</span>
+        </div>
       </div>
     </div>
   </div>
-<div class="card" style="margin-top:12px;">
-  <h3 style="margin-top:0;">Ticker Analyzer (any price)</h3>
-  <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
-    <div>
-      <label>Symbol</label><br/>
-      <input id="analyzeSymbol" placeholder="TSLA" style="width:140px;" />
-    </div>
-    <button type="button" id="analyzeBtn">Analyze</button>
-    <div id="analyzeStatus" class="muted"></div>
-  </div>
-  <div id="analyzeResult" style="margin-top:12px;"></div>
 
-  <hr style="margin:14px 0;">
+  <form method="get" action="/" class="workspaceGrid" id="scanForm">
+    <div class="sidebarStack">
+      <div class="card toolPalette compactCard">
+        <div class="toolRow" style="justify-content:space-between;">
+          <div>
+            <div class="toolSectionTitle">Scanner controls</div>
+            <div class="muted" style="margin-top:4px;">Tightened for speed: set filters, scan, then work the live desk.</div>
+          </div>
+        </div>
 
-  <div>
-    <h4 style="margin:0 0 6px 0;">Entry‑Now Planner (current price)</h4>
-    <div class="muted" style="margin-top:-2px;">Computes stop + targets if entering <b>right now</b>, plus VWAP/trend + ML context (real data).</div>
-    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:10px;">
-      <div>
-        <label>Side</label><br/>
-        <select id="entryNowSide" style="width:140px;">
-          <option value="auto" selected>Auto</option>
-          <option value="long">Long</option>
-          <option value="short">Short</option>
-        </select>
-      </div>
-      <button type="button" id="entryNowBtn">Plan Entry Now</button>
-      <div id="entryNowStatus" class="muted"></div>
-    </div>
-    <div id="entryNowResult" style="margin-top:12px;"></div>
-  </div>
-</div>
-
-<div class="card" style="margin-top:12px;">
-  <h3 style="margin-top:0;">Watchlist (saved in your browser)</h3>
-  <div class="muted">Add candidates below. This list persists across refreshes (localStorage).</div>
-  <div style="margin-top:8px; display:flex; gap:14px; flex-wrap:wrap; align-items:center;">
-    <label style="display:flex; gap:8px; align-items:center;">
-      <input type="checkbox" id="autoAddPassed" checked />
-      Auto-add “passed” candidates after each scan
-    </label>
-    <button type="button" id="watchExport">Export CSV</button>
-    <button type="button" id="watchClear">Clear</button>
-<button class="btn" id="watchlistRefreshBtn" type="button">Refresh Prices</button>
-
-  </div>
-  
-  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <span class="tag">Sort watchlist</span>
-    <select id="watchSortKey">
-      <option value="score">Score</option>
-      <option value="ml">ML</option>
-      <option value="sent">Sent</option>
-    </select>
-    <select id="watchSortDir">
-      <option value="desc">High → Low</option>
-      <option value="asc">Low → High</option>
-    </select>
-  </div>
-<div id="watchlist" style="margin-top:10px;"></div>
-</div>
-  <p>Trade plans are built only from real market data. If a symbol fails, you’ll see the real error.</p>
-
-  <form method="get" action="/" class="card" id="scanForm">
-    <div class="filtersGrid">
+        <div class="toolDivider"></div>
+        <div class="filtersGrid">
       <div class="field">
         <label>Universe</label>
         <select name="universe">
@@ -549,372 +588,255 @@ th {
         <div class="muted" style="margin-top:6px;">Higher = sentiment has more weight in Score (if enabled).</div>
       </div>
       <input type="hidden" name="mode" value="until"/>
-</div>
-
-    <div class="dashboardGrid">
-      <div class="colStack leftCol">
-        <div class="card toolPalette" style="margin-top:0;">
-          <div class="toolRow" style="justify-content:space-between;">
-            <div>
-              <div class="toolSectionTitle">Tool Palette</div>
-              <div class="muted" style="margin-top:-2px;">Fast toggles for scanning + ranking.</div>
-            </div>
-            <!-- pills removed -->
-          </div>
-          </div>
-          <div class="toolDivider"></div>
-
-          <div class="toolRow">
-            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
-              <input type="checkbox" name="use_ml" value="1" id="useMlBox" {% if request.args.get('use_ml','1') == '1' %}checked{% endif %} />
-              <span>Use ML ranking</span>
-            </label>
-            <span class="hint">prefers <code>models/model_a_liquid.pkl</code> + <code>models/model_b_outlier.pkl</code> (fallback: <code>models/orb_ranker*.pkl</code>)</span>
-          </div>
-
-          <div class="toolRow" style="margin-top:10px;">
-            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
-              <input type="checkbox" name="use_sentiment" value="1" id="useSentBox" {% if request.args.get('use_sentiment','0') == '1' %}checked{% endif %} />
-              <span>Use sentiment</span>
-            </label>
-            <span class="hint">slower / rate-limits</span>
-          </div>
-
-          <div class="toolRow" style="margin-top:10px;">
-            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
-              <input type="checkbox" name="use_catalyst" value="1" id="useCatalystBox" {% if request.args.get('use_catalyst','0') == '1' %}checked{% endif %} />
-              <span>Use news/catalyst scoring</span>
-            </label>
-            <span class="hint">ranks names with fresh catalysts</span>
-          </div>
-
-          <div class="toolRow" style="margin-top:10px; gap:12px; flex-wrap:wrap;">
-            <label style="display:flex; gap:6px; align-items:center;">
-              <span class="muted" style="font-size:12px;">Cat α</span>
-              <input name="catalyst_alpha" id="catalystAlpha" inputmode="decimal" style="width:90px;" value="{{ request.args.get('catalyst_alpha', '0.08') }}" />
-            </label>
-            <label style="display:flex; gap:6px; align-items:center;">
-              <span class="muted" style="font-size:12px;">Lookback h</span>
-              <input name="catalyst_lookback_hours" id="catalystLookback" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_lookback_hours', '72') }}" />
-            </label>
-            <label style="display:flex; gap:6px; align-items:center;">
-              <span class="muted" style="font-size:12px;">TopN/news</span>
-              <input name="catalyst_topn" id="catalystTopN" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_topn', '6') }}" />
-            </label>
-          </div>
-
-          <div style="margin-top:10px;">
-            <label class="text-gray-600" style="font-size:13px;">Regime profile (ranking/confidence weights)</label><br/>
-            <select name="regime_profile" id="regimeProfile" style="width:100%;">
-              {% set _rp = request.args.get('regime_profile','auto') %}
-              <option value="auto" {% if _rp == 'auto' %}selected{% endif %}>Auto (phase aware)</option>
-              <option value="extended" {% if _rp == 'extended' %}selected{% endif %}>Extended (pre/after hours)</option>
-              <option value="open_drive" {% if _rp == 'open_drive' %}selected{% endif %}>Open Drive</option>
-              <option value="midday" {% if _rp == 'midday' %}selected{% endif %}>Midday</option>
-              <option value="powerhour" {% if _rp == 'powerhour' %}selected{% endif %}>Power Hour</option>
-            </select>
-          </div>
-
-          <div class="toolDivider"></div>
-
-          <div class="toolRow">
-            <label style="display:flex; gap:8px; align-items:center;">
-              <input type="checkbox" id="autoScan" />
-              Auto-scan every 60s
-            </label>
-          </div>
-          <div style="margin-top:8px;">
-            <label class="text-gray-600" style="font-size:13px;">Auto-scan mode</label><br/>
-            <select id="autoScanMode" style="width:100%;">
-              <option value="until">Until candidates appear (stop when found)</option>
-              <option value="continuous">Continuous (keep scanning)</option>
-            </select>
-            <div id="autoScanNextInfo" class="text-gray-600" style="margin-top:8px; font-size:13px;"></div>
-          </div>
-
-          <div class="toolDivider"></div>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <button type="button" id="runScanBtn" style="width:100%; padding: 12px 14px; border-radius: 14px;" >Run Scan</button>
-          </div>
-
-          <div class="toolDivider"></div>
-          <div class="toolRow" style="justify-content:flex-start; gap:10px;">
-            <a class="btn" href="/?mode=page&universe={{ universe }}&max_symbols={{ max_symbols }}&limit={{ limit }}&offset={{ offset + max_symbols }}{% if request.args.get("use_ml", "1") == "1" %}&use_ml=1{% endif %}{% if request.args.get("use_sentiment") == "1" %}&use_sentiment=1{% endif %}{% if request.args.get("sentiment_provider") %}&sentiment_provider={{ request.args.get("sentiment_provider") }}{% endif %}{% if request.args.get("sentiment_alpha") %}&sentiment_alpha={{ request.args.get("sentiment_alpha") }}{% endif %}">Next page →</a>
-          </div>
         </div>
-</div>
 
-      <div class="mainRow">
-        <div class="card statusCard" style="margin-top:0;">
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-    <div style="min-width:0;">
-      <div><span class="tag">Provider</span> {{ provider }}</div>
-      <div style="margin-top:6px;">
-        <span class="tag">Scan mode</span> {{ mode }} &nbsp;
-        <span class="tag">Scanned</span> {{ scanned }} symbols in {{ chunks }} chunk(s)
-        {% if mode == "until" %}<span class="tag">Stopped at offset</span> {{ end_offset }}{% endif %}
-      </div>
-      <div style="margin-top:6px;">
-        <span class="tag">Daily prefilter passed</span> {{ daily_ok }}
-      </div>
-    </div>
-    <div style="min-width:220px; text-align:right;">
-      <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
-        <span class="tag">Scanning</span>
-        <span class="muted" style="font-size:12px;">live scan status</span>
-      </div>
-      <div id="scanStatus" style="margin-top:10px; display:none;"></div>
-      <div id="scanStatusEmpty" class="muted" style="margin-top:10px;">Not scanning.</div>
-    </div>
-  </div>
-
-  <hr/>
-  <div id="lastRunDynamic" class="muted" style="margin:8px 0 10px 0;"></div>
-
-  <div><b>Prefilter</b>: skipped (normalize): <span id="pf_norm">{{ skipped_normalize }}</span>, daily empty: <span id="pf_empty">{{ daily_empty }}</span>, filtered price: <span id="pf_price">{{ filtered_price }}</span>, filtered avg$vol: <span id="pf_avg">{{ filtered_avg_dvol }}</span>, daily ok: <span id="pf_ok">{{ daily_ok }}</span></div>
-  <div style="margin-top:6px;"><b>ORB rejects</b>: OR range: <span id="r_or">{{ rej_or_range }}</span>, today $vol: <span id="r_today">{{ rej_today_dvol }}</span>, RVOL: <span id="r_rvol">{{ rej_rvol }}</span>, risk/share: <span id="r_risk">{{ rej_risk_per_share }}</span>, shares: <span id="r_shares">{{ rej_shares }}</span>, notional: <span id="r_notional">{{ rej_notional }}</span></div>
-  <div style="margin-top:6px;"><b>Data failures</b>: intraday empty: <span id="f_intra_empty">{{ fail_intraday_empty }}</span>, OR window missing: <span id="f_or_missing">{{ fail_or_window_missing }}</span>, other: <span id="f_other">{{ fail_other }}</span></div>
-
-  <div style="margin-top:12px; display:flex; align-items:center; gap:10px;">
-    <span class="tag">Final candidates</span> <b id="finalCandidates" style="font-size:16px;">{{ count }}</b>
-    <button type="button" class="btn btn-danger" id="clearCandidatesBtn" title="Clear persisted candidates from this browser">Clear candidates</button>
-  </div>
-</div>
-        <div class="card heatCard" style="margin-top:0;">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
-            <div>
-              <div class="toolSectionTitle">Current Heat</div>
-              <div style="font-size:16px; font-weight:900;">The Realm’s Hottest</div>
-              <div class="muted" style="margin-top:4px;">Top picks refresh after each scan completes.</div>
-      </div>
-          </div>
-
-          <div class="heatControls" style="margin-top:12px;">
-            <span class="tag">Side</span>
-            <select id="heatSide">
-              <option value="all">All</option>
-              <option value="long">Long</option>
-              <option value="short">Short</option>
-            </select>
-
-            <span class="tag">State</span>
-            <select id="heatState">
-              <option value="all">All</option>
-              <option value="triggered">Triggered</option>
-              <option value="near">Near</option>
-              <option value="not">Not triggered</option>
-            </select>
-          
-
-            <span class="tag">Count</span>
-            <select id="heatCount">
-              <option value="5">5</option>
-              <option value="10" selected>10</option>
-              <option value="15">15</option>
-              <option value="25">25</option>
-            </select>
-          
-          </div>
-
-          <div class="heatList" id="heatList"></div>
-        
-</div>
-      </div>
-    </div>
-
-    <div class="card" id="beastDeskCard" style="margin-top:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-        <div>
-          <h3 style="margin:0;">Beast Desk</h3>
-          <div class="muted" style="margin-top:4px;">Live top-candidate monitoring + tape-aware confidence + catalyst visibility.</div>
+        <div class="toolDivider"></div>
+        <div class="toolRow">
+          <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+            <input type="checkbox" name="use_ml" value="1" id="useMlBox" {% if request.args.get('use_ml','1') == '1' %}checked{% endif %} />
+            <span>Use ML ranking</span>
+          </label>
+          <span class="hint">prefers <code>models/model_a_liquid.pkl</code> + <code>models/model_b_outlier.pkl</code> (fallback: <code>models/orb_ranker*.pkl</code>)</span>
         </div>
-        <div class="inlineStat">
-          <span class="tag">Stream</span>
-          <span id="streamConnBadge" class="badge badge-gray">Checking…</span>
-          <span class="tag">Feed</span>
-          <span id="streamFeedLabel" class="mono">—</span>
-          <span class="muted" id="streamInfoMini"></span>
-        </div>
-      </div>
 
-      <div class="monitorControls" style="margin-top:12px;">
-        <label style="display:flex; gap:6px; align-items:center;">
-          <span class="muted" style="font-size:12px;">Monitor Top N</span>
-          <input id="liveMonitorTopN" inputmode="numeric" value="10" style="width:80px;" />
-        </label>
-        <label style="display:flex; gap:6px; align-items:center;">
-          <span class="muted" style="font-size:12px;">Source</span>
-          <select id="liveMonitorSource" style="min-width:170px;">
-            <option value="candidates" selected>Candidates (filtered)</option>
-            <option value="scan">Top Candidates (latest scan)</option>
-            <option value="pinned">Pinned (saved)</option>
+        <div class="toolRow" style="margin-top:10px;">
+          <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+            <input type="checkbox" name="use_sentiment" value="1" id="useSentBox" {% if request.args.get('use_sentiment','0') == '1' %}checked{% endif %} />
+            <span>Use sentiment</span>
+          </label>
+          <span class="hint">slower / rate-limits</span>
+        </div>
+
+        <div class="toolRow" style="margin-top:10px;">
+          <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+            <input type="checkbox" name="use_catalyst" value="1" id="useCatalystBox" {% if request.args.get('use_catalyst','0') == '1' %}checked{% endif %} />
+            <span>Use news/catalyst scoring</span>
+          </label>
+          <span class="hint">ranks names with fresh catalysts</span>
+        </div>
+
+        <div class="toolRow" style="margin-top:10px; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span class="muted" style="font-size:12px;">Cat α</span>
+            <input name="catalyst_alpha" id="catalystAlpha" inputmode="decimal" style="width:90px;" value="{{ request.args.get('catalyst_alpha', '0.08') }}" />
+          </label>
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span class="muted" style="font-size:12px;">Lookback h</span>
+            <input name="catalyst_lookback_hours" id="catalystLookback" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_lookback_hours', '72') }}" />
+          </label>
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span class="muted" style="font-size:12px;">TopN/news</span>
+            <input name="catalyst_topn" id="catalystTopN" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_topn', '6') }}" />
+          </label>
+        </div>
+
+        <div style="margin-top:10px;">
+          <label class="text-gray-600" style="font-size:13px;">Regime profile (ranking/confidence weights)</label><br/>
+          <select name="regime_profile" id="regimeProfile" style="width:100%;">
+            {% set _rp = request.args.get('regime_profile','auto') %}
+            <option value="auto" {% if _rp == 'auto' %}selected{% endif %}>Auto (phase aware)</option>
+            <option value="extended" {% if _rp == 'extended' %}selected{% endif %}>Extended (pre/after hours)</option>
+            <option value="open_drive" {% if _rp == 'open_drive' %}selected{% endif %}>Open Drive</option>
+            <option value="midday" {% if _rp == 'midday' %}selected{% endif %}>Midday</option>
+            <option value="powerhour" {% if _rp == 'powerhour' %}selected{% endif %}>Power Hour</option>
           </select>
-        </label>
-        <input id="liveMonitorSymbols" placeholder="Optional manual symbols (comma-separated)" style="flex:1; min-width:260px;" />
-        <button type="button" id="monitorStartBtn" >Start Monitor</button>
-        <button type="button" id="monitorRefreshBtn" >Refresh</button>
-        <button type="button" class="btn btn-danger" id="monitorStopBtn" >Stop</button>
+        </div>
+
+        <div class="toolDivider"></div>
+
+        <div class="toolRow">
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="autoScan" />
+            Auto-scan every 60s
+          </label>
+        </div>
+        <div style="margin-top:8px;">
+          <label class="text-gray-600" style="font-size:13px;">Auto-scan mode</label><br/>
+          <select id="autoScanMode" style="width:100%;">
+            <option value="until">Until candidates appear (stop when found)</option>
+            <option value="continuous">Continuous (keep scanning)</option>
+          </select>
+          <div id="autoScanNextInfo" class="text-gray-600" style="margin-top:8px; font-size:13px;"></div>
+        </div>
+
+        <div class="toolDivider"></div>
+        <button type="button" id="runScanBtn" style="width:100%; padding: 12px 14px; border-radius: 14px;">Run Scan</button>
+
+        <div class="toolDivider"></div>
+        <div class="toolRow" style="justify-content:flex-start; gap:10px;">
+          <a class="btn" href="/?mode=page&universe={{ universe }}&max_symbols={{ max_symbols }}&limit={{ limit }}&offset={{ offset + max_symbols }}{% if request.args.get("use_ml", "1") == "1" %}&use_ml=1{% endif %}{% if request.args.get("use_sentiment") == "1" %}&use_sentiment=1{% endif %}{% if request.args.get("sentiment_provider") %}&sentiment_provider={{ request.args.get("sentiment_provider") }}{% endif %}{% if request.args.get("sentiment_alpha") %}&sentiment_alpha={{ request.args.get("sentiment_alpha") }}{% endif %}">Next page →</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="contentStack">
+      <div class="card statusCard compactCard">
+        <div class="sectionIntro">
+          <div style="min-width:0;">
+            <div class="sectionLabel">Scan snapshot</div>
+            <div class="denseMeta">
+              <span class="tag">Provider</span><span>{{ provider }}</span>
+              <span class="tag">Scan mode</span><span>{{ mode }}</span>
+              <span class="tag">Scanned</span><span>{{ scanned }} symbols / {{ chunks }} chunk(s)</span>
+              {% if mode == "until" %}<span class="tag">Stopped at offset</span><span>{{ end_offset }}</span>{% endif %}
+              <span class="tag">Daily prefilter passed</span><span>{{ daily_ok }}</span>
+            </div>
+          </div>
+          <div style="min-width:220px;">
+            <div class="denseMeta" style="justify-content:flex-end;">
+              <span class="tag">Scanning</span>
+              <span class="muted" style="font-size:12px;">live scan status</span>
+            </div>
+            <div id="scanStatus" style="margin-top:10px; display:none;"></div>
+            <div id="scanStatusEmpty" class="muted" style="margin-top:10px; text-align:right;">Not scanning.</div>
+          </div>
+        </div>
+
+        <div id="lastRunDynamic" class="muted" style="margin:10px 0 10px 0;"></div>
+        <div><b>Prefilter</b>: skipped (normalize): <span id="pf_norm">{{ skipped_normalize }}</span>, daily empty: <span id="pf_empty">{{ daily_empty }}</span>, filtered price: <span id="pf_price">{{ filtered_price }}</span>, filtered avg$vol: <span id="pf_avg">{{ filtered_avg_dvol }}</span>, daily ok: <span id="pf_ok">{{ daily_ok }}</span></div>
+        <div style="margin-top:6px;"><b>ORB rejects</b>: OR range: <span id="r_or">{{ rej_or_range }}</span>, today $vol: <span id="r_today">{{ rej_today_dvol }}</span>, RVOL: <span id="r_rvol">{{ rej_rvol }}</span>, risk/share: <span id="r_risk">{{ rej_risk_per_share }}</span>, shares: <span id="r_shares">{{ rej_shares }}</span>, notional: <span id="r_notional">{{ rej_notional }}</span></div>
+        <div style="margin-top:6px;"><b>Data failures</b>: intraday empty: <span id="f_intra_empty">{{ fail_intraday_empty }}</span>, OR window missing: <span id="f_or_missing">{{ fail_or_window_missing }}</span>, other: <span id="f_other">{{ fail_other }}</span></div>
+
+        <div class="denseMeta" style="margin-top:12px;">
+          <span class="tag">Final candidates</span> <b id="finalCandidates" style="font-size:16px;">{{ count }}</b>
+          <button type="button" class="btn btn-danger" id="clearCandidatesBtn" title="Clear persisted candidates from this browser">Clear candidates</button>
+        </div>
       </div>
 
-      <div class="muted" style="margin-top:8px;">
-        By default, monitor pulls the <b>visible order from the filtered Candidates table</b> below (so your Side filter + sorting carry over). Enter manual symbols to override, or switch Source to latest scan candidates.
-      </div>
-      <div class="legendRow">
-        <span class="tag">Decision</span>
-        <span class="actionPill action-go">🟢 GO</span>
-        <span class="actionPill action-wait">🟡 WAIT</span>
-        <span class="actionPill action-pass">🔴 PASS</span>
-        <span class="muted" style="font-size:12px;">GO = trigger + live tape + decent grade + measurable expansion. WAIT = setup not confirmed yet or has not expanded enough. PASS = invalid / stopped / ugly tape / wide spread / weak confidence.</span>
-      </div>
+      <div class="card compactCard" id="beastDeskCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Live desk</div>
+            <h3 style="margin:0;">Beast Desk</h3>
+            <div class="muted" style="margin-top:4px;">Live top-candidate monitoring + tape-aware confidence + catalyst visibility.</div>
+          </div>
+          <div class="inlineStat">
+            <span class="tag">Stream</span>
+            <span id="streamConnBadge" class="badge badge-gray">Checking…</span>
+            <span class="tag">Feed</span>
+            <span id="streamFeedLabel" class="mono">—</span>
+            <span class="muted" id="streamInfoMini"></span>
+          </div>
+        </div>
 
-
-      <div class="panelSub" style="margin-top:10px; padding:10px; border:1px solid var(--border); border-radius:12px; background: rgba(255,255,255,0.03);">
-        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Min grade for GO</div>
-            <select id="liveMonitorMinGrade" style="min-width:90px;">
-              <option value="A">A</option>
-              <option value="B" selected>B</option>
-              <option value="C">C</option>
+        <div class="monitorControls" style="margin-top:12px;">
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span class="muted" style="font-size:12px;">Monitor Top N</span>
+            <input id="liveMonitorTopN" inputmode="numeric" value="10" style="width:80px;" />
+          </label>
+          <label style="display:flex; gap:6px; align-items:center;">
+            <span class="muted" style="font-size:12px;">Source</span>
+            <select id="liveMonitorSource" style="min-width:170px;">
+              <option value="candidates" selected>Candidates (filtered)</option>
+              <option value="scan">Top Candidates (latest scan)</option>
+              <option value="pinned">Pinned (saved)</option>
             </select>
           </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Max spread %</div>
-            <input id="liveMonitorMaxSpreadPct" inputmode="decimal" value="0.50" style="width:90px;" />
-          </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Max quote age (ms)</div>
-            <input id="liveMonitorMaxQuoteAgeMs" inputmode="numeric" value="2500" style="width:110px;" />
-          </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Max trade age (ms)</div>
-            <input id="liveMonitorMaxTradeAgeMs" inputmode="numeric" value="2500" style="width:110px;" />
-          </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Risk $/trade</div>
-            <input id="liveMonitorRiskDollars" inputmode="decimal" value="50" style="width:90px;" />
-          </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Near-trigger %</div>
-            <input id="liveMonitorNearTriggerPct" inputmode="decimal" value="0.25" style="width:90px;" />
-          </label>
-          <label class="miniField">
-            <div class="muted" style="font-size:12px;">Min expansion (R)</div>
-            <input id="liveMonitorMinExpansionR" inputmode="decimal" value="0.20" style="width:90px;" />
-          </label>
-
-          <label style="display:flex; gap:8px; align-items:center; margin-left:6px;">
-            <input type="checkbox" id="liveMonitorLongOnly" checked />
-            <span class="muted" style="font-size:12px;">Long-only (cash)</span>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="liveMonitorHideShortRows" checked />
-            <span class="muted" style="font-size:12px;">Hide shorts</span>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="liveMonitorRequireTapeLive" />
-            <span class="muted" style="font-size:12px;">Require tape live</span>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="liveMonitorRequireTrigger" />
-            <span class="muted" style="font-size:12px;">Require trigger</span>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="liveMonitorRequireVwapAlign" />
-            <span class="muted" style="font-size:12px;">Require VWAP align</span>
-          </label>
-
-          <label style="display:flex; gap:8px; align-items:center; margin-left:auto;">
-            <input type="checkbox" id="liveMonitorEnableSound" />
-            <span class="muted" style="font-size:12px;">Sound</span>
-          </label>
-          <label style="display:flex; gap:8px; align-items:center;">
-            <input type="checkbox" id="liveMonitorEnableNotify" />
-            <span class="muted" style="font-size:12px;">Desktop notify</span>
-          </label>
+          <input id="liveMonitorSymbols" placeholder="Optional manual symbols (comma-separated)" style="flex:1; min-width:260px;" />
+          <button type="button" id="monitorStartBtn">Start Monitor</button>
+          <button type="button" id="monitorRefreshBtn">Refresh</button>
+          <button type="button" class="btn btn-danger" id="monitorStopBtn">Stop</button>
         </div>
-        <div class="muted" style="margin-top:8px; font-size:12px;">
-          Risk sizing uses <b>risk_per_share</b> from the scan plan when available: Shares ≈ Risk$/risk_per_share.
-          Near-trigger alerts fire when a symbol is within Near-trigger % of its OR trigger.
+
+        <div class="muted" style="margin-top:8px;">
+          By default, monitor pulls the <b>visible order from the filtered Candidates table</b> below (so your Side filter + sorting carry over). Enter manual symbols to override, or switch Source to latest scan candidates.
         </div>
-      </div>
-
-      <div id="monitorStatusLine" style="margin-top:10px;"></div>
-      <div class="kpiRow" id="monitorKpiRow">
-        <div class="kpiCard"><div class="k">Status</div><div class="v" id="kpiMonitorStatus">Idle</div></div>
-        <div class="kpiCard"><div class="k">Ready / Triggered</div><div class="v" id="kpiReadyTriggered">0 / 0</div></div>
-        <div class="kpiCard"><div class="k">Top Live Symbol</div><div class="v" id="kpiTopLive">—</div></div>
-        <div class="kpiCard"><div class="k">Tape Live</div><div class="v" id="kpiTapeLive">0</div></div>
-        <div class="kpiCard"><div class="k">Grades</div><div class="v" id="kpiGrades">—</div></div>
-        <div class="kpiCard"><div class="k">Refresh Count</div><div class="v" id="kpiRefreshCount">0</div></div>
-      </div>
-
-      <div id="monitorSummaryDetails" class="muted" style="margin-top:10px;"></div>
-
-      <div class="monitorTableWrap">
-        <table class="monitorTable">
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th>Symbol</th>
-              <th>Live Conf</th>
-              <th>State</th>
-              <th>Tape</th>
-              <th>Price / Spread</th>
-              <th>Trigger</th>
-              <th>Catalyst</th>
-              <th>Scan Rank</th>
-              <th>Reasons / Flags</th>
-            </tr>
-          </thead>
-          <tbody id="monitorTableBody">
-            <tr><td colspan="10" class="muted">Start the monitor to see live updates.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card" id="contextCard" style="margin-top:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-        <div>
-          <h3 style="margin:0;">Market Context</h3>
-          <div class="muted" style="margin-top:4px;">Live SPY / QQQ direction, sector leadership, volatility regime, and cohort tape quality.</div>
+        <div class="legendRow">
+          <span class="tag">Decision</span>
+          <span class="actionPill action-go">🟢 GO</span>
+          <span class="actionPill action-wait">🟡 WAIT</span>
+          <span class="actionPill action-pass">🔴 PASS</span>
+          <span class="muted" style="font-size:12px;">GO = trigger + live tape + decent grade + measurable expansion. WAIT = setup not confirmed yet or has not expanded enough. PASS = invalid / stopped / ugly tape / wide spread / weak confidence.</span>
         </div>
-        <div class="inlineStat">
-          <span class="tag">Mode</span><span>Monitor-first</span>
-          <span class="tag">Replay</span><span id="contextReplayHint">available</span>
+
+        <div class="panelSub">
+          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+            <label class="miniField">
+              <div class="muted" style="font-size:12px;">Min grade for GO</div>
+              <select id="liveMonitorMinGrade" style="min-width:90px;">
+                <option value="A">A</option>
+                <option value="B" selected>B</option>
+                <option value="C">C</option>
+              </select>
+            </label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Max spread %</div><input id="liveMonitorMaxSpreadPct" inputmode="decimal" value="0.50" style="width:90px;" /></label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Max quote age (ms)</div><input id="liveMonitorMaxQuoteAgeMs" inputmode="numeric" value="2500" style="width:110px;" /></label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Max trade age (ms)</div><input id="liveMonitorMaxTradeAgeMs" inputmode="numeric" value="2500" style="width:110px;" /></label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Risk $/trade</div><input id="liveMonitorRiskDollars" inputmode="decimal" value="50" style="width:90px;" /></label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Near-trigger %</div><input id="liveMonitorNearTriggerPct" inputmode="decimal" value="0.25" style="width:90px;" /></label>
+            <label class="miniField"><div class="muted" style="font-size:12px;">Min expansion (R)</div><input id="liveMonitorMinExpansionR" inputmode="decimal" value="0.20" style="width:90px;" /></label>
+
+            <label style="display:flex; gap:8px; align-items:center; margin-left:6px;"><input type="checkbox" id="liveMonitorLongOnly" checked /><span class="muted" style="font-size:12px;">Long-only (cash)</span></label>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorHideShortRows" checked /><span class="muted" style="font-size:12px;">Hide shorts</span></label>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorRequireTapeLive" /><span class="muted" style="font-size:12px;">Require tape live</span></label>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorRequireTrigger" /><span class="muted" style="font-size:12px;">Require trigger</span></label>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorRequireVwapAlign" /><span class="muted" style="font-size:12px;">Require VWAP align</span></label>
+            <label style="display:flex; gap:8px; align-items:center; margin-left:auto;"><input type="checkbox" id="liveMonitorEnableSound" /><span class="muted" style="font-size:12px;">Sound</span></label>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorEnableNotify" /><span class="muted" style="font-size:12px;">Desktop notify</span></label>
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">Risk sizing uses <b>risk_per_share</b> from the scan plan when available: Shares ≈ Risk$/risk_per_share. Near-trigger alerts fire when a symbol is within Near-trigger % of its OR trigger.</div>
+        </div>
+
+        <div id="monitorStatusLine" style="margin-top:10px;"></div>
+        <div class="kpiRow" id="monitorKpiRow">
+          <div class="kpiCard"><div class="k">Status</div><div class="v" id="kpiMonitorStatus">Idle</div></div>
+          <div class="kpiCard"><div class="k">Ready / Triggered</div><div class="v" id="kpiReadyTriggered">0 / 0</div></div>
+          <div class="kpiCard"><div class="k">Top Live Symbol</div><div class="v" id="kpiTopLive">—</div></div>
+          <div class="kpiCard"><div class="k">Tape Live</div><div class="v" id="kpiTapeLive">0</div></div>
+          <div class="kpiCard"><div class="k">Grades</div><div class="v" id="kpiGrades">—</div></div>
+          <div class="kpiCard"><div class="k">Refresh Count</div><div class="v" id="kpiRefreshCount">0</div></div>
+        </div>
+
+        <div id="monitorSummaryDetails" class="muted" style="margin-top:10px;"></div>
+        <div class="monitorTableWrap">
+          <table class="monitorTable">
+            <thead>
+              <tr><th>Action</th><th>Symbol</th><th>Live Conf</th><th>State</th><th>Tape</th><th>Price / Spread</th><th>Trigger</th><th>Catalyst</th><th>Scan Rank</th><th>Reasons / Flags</th></tr>
+            </thead>
+            <tbody id="monitorTableBody">
+              <tr><td colspan="10" class="muted">Start the monitor to see live updates.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
-      <div id="contextSummary" class="muted" style="margin-top:10px;">Loading context…</div>
-      <div id="contextTags" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
-    </div>
 
-    <div class="card" id="alertTapeCard" style="margin-top:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-        <div>
-          <h3 style="margin:0;">Alert Tape</h3>
-          <div class="muted" style="margin-top:4px;">Only state transitions appear here. Static presence does not fire alerts.</div>
+      <div class="card resultsCard compactCard" id="passedCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Scan results</div>
+            <h2 style="margin:0 0 6px 0;">Top Candidates</h2>
+            <div class="muted">Passed names and active candidate table in one place, closer to the monitor.</div>
+          </div>
         </div>
-        <div class="inlineStat">
-          <span class="tag">Source</span><span>SQLite + SSE</span>
-          <span class="tag">Recent</span><span id="alertTapeCount">0</span>
+        <h3 style="margin:14px 0 6px 0;">Passed this scan</h3>
+        <div class="muted">These are the symbols that passed the filters in the most recent scan results shown below.</div>
+        <div id="passedThisRun" style="margin:10px 0 18px 0;"></div>
+
+        <div class="filterRow">
+          <span class="tag">Filter</span>
+          <select id="candSideFilter">
+            <option value="all">All sides</option>
+            <option value="long" selected>Long</option>
+            <option value="short">Short</option>
+          </select>
+          <input id="candSearchFilter" placeholder="Search symbol/notes…" style="min-width:220px; flex:1;" />
+          <span class="tag">Show</span>
+          <select id="candShowLimit">
+            <option value="10" selected>10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="all">All</option>
+          </select>
+          <span id="candVisibleCount" class="muted" style="font-size:12px;"></span>
         </div>
-      </div>
-      <div id="alertTapeBody" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
-        <div class="muted">No alerts yet.</div>
-      </div>
-    </div>
-  </form>
 
-
-
-  {% if (candidates|length) == 0 %}
-{% endif %}
-
-  
-</div>
-
-<div class="card" id="passedCard">
+        <div class="filterRow" style="margin-top:10px;">
+          <span class="tag">Sort candidates</span>
+          <select id="candSortKey"><option value="score">Score</option><option value="ml">ML</option><option value="sent">Sent</option></select>
+          <select id="candSortDir"><option value="desc">High → Low</option><option value="asc">Low → High</option></select>
+        </div>
+<div class="tableWrap" id="candidatesWrap"><table>
     <h2>Passed this scan</h2>
 <div class="muted">These are the symbols that passed the filters in the most recent scan results shown below.</div>
 <div id="passedThisRun" style="margin:10px 0 18px 0;"></div>
@@ -1033,8 +955,8 @@ th {
   </div>
 
   {% if data_failures %}
-  <div class="card">
-    <h2>Data failures (provider issues only)</h2>
+  <div class="card compactCard utilityCard">
+    <h2 style="margin-top:0;">Data failures (provider issues only)</h2>
     <table>
       <thead><tr><th>Add</th>
           <th>Symbol</th><th>Error</th></tr></thead>
@@ -1046,6 +968,97 @@ th {
     </table>
   </div>
   {% endif %}
+
+      <div class="utilityGrid">
+        <div class="card compactCard utilityCard secondaryCard">
+          <div class="sectionLabel">Analyzer</div>
+          <h3 style="margin:0 0 6px 0;">Ticker Analyzer (any price)</h3>
+          <div class="watchControls">
+            <div>
+              <label>Symbol</label><br/>
+              <input id="analyzeSymbol" placeholder="TSLA" style="width:140px;" />
+            </div>
+            <button type="button" id="analyzeBtn">Analyze</button>
+            <div id="analyzeStatus" class="muted"></div>
+          </div>
+          <div id="analyzeResult" style="margin-top:12px;"></div>
+
+          <div class="toolDivider"></div>
+          <h4 style="margin:0 0 6px 0;">Entry‑Now Planner (current price)</h4>
+          <div class="muted">Computes stop + targets if entering <b>right now</b>, plus VWAP/trend + ML context (real data).</div>
+          <div class="watchControls" style="margin-top:10px;">
+            <div>
+              <label>Side</label><br/>
+              <select id="entryNowSide" style="width:140px;">
+                <option value="auto" selected>Auto</option>
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+            </div>
+            <button type="button" id="entryNowBtn">Plan Entry Now</button>
+            <div id="entryNowStatus" class="muted"></div>
+          </div>
+          <div id="entryNowResult" style="margin-top:12px;"></div>
+          <p class="muted" style="margin-top:12px;">Trade plans are built only from real market data. If a symbol fails, you’ll see the real error.</p>
+        </div>
+
+        <div class="card compactCard utilityCard secondaryCard">
+          <div class="sectionLabel">Watchlist</div>
+          <h3 style="margin:0 0 6px 0;">Saved in your browser</h3>
+          <div class="muted">Add candidates below. This list persists across refreshes (localStorage).</div>
+          <div class="watchControls" style="margin-top:10px;">
+            <label style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" id="autoAddPassed" checked />
+              Auto-add “passed” candidates after each scan
+            </label>
+            <button type="button" id="watchExport">Export CSV</button>
+            <button type="button" id="watchClear">Clear</button>
+            <button class="btn" id="watchlistRefreshBtn" type="button">Refresh Prices</button>
+          </div>
+          <div class="watchControls" style="margin-top:10px;">
+            <span class="tag">Sort watchlist</span>
+            <select id="watchSortKey"><option value="score">Score</option><option value="ml">ML</option><option value="sent">Sent</option></select>
+            <select id="watchSortDir"><option value="desc">High → Low</option><option value="asc">Low → High</option></select>
+          </div>
+          <div id="watchlist" style="margin-top:10px;"></div>
+        </div>
+      </div>
+
+      <div class="card compactCard utilityCard" id="contextCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Market read</div>
+            <h3 style="margin:0;">Market Context</h3>
+            <div class="muted" style="margin-top:4px;">Live SPY / QQQ direction, sector leadership, volatility regime, and cohort tape quality.</div>
+          </div>
+          <div class="inlineStat">
+            <span class="tag">Mode</span><span>Monitor-first</span>
+            <span class="tag">Replay</span><span id="contextReplayHint">available</span>
+          </div>
+        </div>
+        <div id="contextSummary" class="muted" style="margin-top:10px;">Loading context…</div>
+        <div id="contextTags" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+      </div>
+
+      <div class="card compactCard utilityCard" id="alertTapeCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Tape</div>
+            <h3 style="margin:0;">Alert Tape</h3>
+            <div class="muted" style="margin-top:4px;">Only state transitions appear here. Static presence does not fire alerts.</div>
+          </div>
+          <div class="inlineStat">
+            <span class="tag">Source</span><span>SQLite + SSE</span>
+            <span class="tag">Recent</span><span id="alertTapeCount">0</span>
+          </div>
+        </div>
+        <div id="alertTapeBody" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+          <div class="muted">No alerts yet.</div>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
 
 <script>
 // Prevent early boot failure before the later scan-status script defines the real function.
