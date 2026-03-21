@@ -1170,7 +1170,10 @@ def api_monitor_stop():
 
 @app.get('/favicon.ico')
 def favicon():
-    return ('', 204)
+    try:
+        return send_from_directory(str((ROOT / 'static').resolve()), 'icon.png')
+    except Exception:
+        return ('', 204)
 
 @app.route('/api/analyze', methods=['GET','POST'])
 def api_analyze():
