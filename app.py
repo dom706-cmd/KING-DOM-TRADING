@@ -3095,6 +3095,103 @@ def api_position_manager():
     return jsonify(ok=True, context_snapshot=ctx, rows=rows, errors=errors, count=len(rows))
 
 
+@app.post("/api/position_chart")
+def api_position_chart():
+    payload = request.get_json(silent=True) or {}
+    symbol = str(payload.get("symbol") or "").strip().upper()
+    if not symbol:
+        return jsonify(ok=False, error="missing_symbol"), 400
+    provider = _ALPACA_PROVIDER
+    if provider is None:
+        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+
+    entry = _safe_float(payload.get("entry"))
+    stop = _safe_float(payload.get("stop"))
+    target = _safe_float(payload.get("target"))
+    side = str(payload.get("side") or "long").strip().lower()
+
+    intraday, live_price = _entry_now_intraday_context(provider, symbol, include_prepost=False)
+    import pandas as _pd
+    close = _col(intraday, 'Close', 'close').astype(float)
+    high = _col(intraday, 'High', 'high').astype(float)
+    low = _col(intraday, 'Low', 'low').astype(float)
+    open_ = _col(intraday, 'Open', 'open').astype(float)
+    vw = vwap(intraday).astype(float)
+    ema9 = close.ewm(span=9, adjust=False).mean()
+    ema20 = close.ewm(span=20, adjust=False).mean()
+    bb_mid = close.rolling(20).mean()
+    bb_std = close.rolling(20).std(ddof=0)
+    bb_upper = bb_mid + (2.0 * bb_std)
+    bb_lower = bb_mid - (2.0 * bb_std)
+
+    bars = []
+    for ts, o, h, l, c in zip(intraday.index, open_, high, low, close):
+        try:
+            bars.append({
+                "time": int(_pd.Timestamp(ts).timestamp()),
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+            })
+        except Exception:
+            continue
+
+    def _line_payload(series):
+        out = []
+        for ts, val in series.items():
+            if val is None:
+                continue
+            try:
+                fv = float(val)
+            except Exception:
+                continue
+            if fv != fv:
+                continue
+            out.append({"time": int(_pd.Timestamp(ts).timestamp()), "value": fv})
+        return out
+
+    risk_per_share = abs(float(entry) - float(stop)) if entry is not None and stop is not None else None
+    levels = {}
+    if entry is not None:
+        levels["entry"] = entry
+    if stop is not None:
+        levels["stop"] = stop
+    if target is not None:
+        levels["target"] = target
+    if risk_per_share is not None and risk_per_share > 0 and entry is not None:
+        if side == "long":
+            levels["r1"] = float(entry) + risk_per_share
+            levels["r2"] = float(entry) + 2.0 * risk_per_share
+            levels["r3"] = float(entry) + 3.0 * risk_per_share
+        else:
+            levels["r1"] = float(entry) - risk_per_share
+            levels["r2"] = float(entry) - 2.0 * risk_per_share
+            levels["r3"] = float(entry) - 3.0 * risk_per_share
+    try:
+        first_5 = intraday.iloc[:5]
+        levels["or_high"] = float(_col(first_5, 'High', 'high').astype(float).max())
+        levels["or_low"] = float(_col(first_5, 'Low', 'low').astype(float).min())
+    except Exception:
+        pass
+
+    return jsonify(
+        ok=True,
+        symbol=symbol,
+        live_price=live_price,
+        bars=bars,
+        overlays={
+            "vwap": _line_payload(vw),
+            "ema9": _line_payload(ema9),
+            "ema20": _line_payload(ema20),
+            "bb_upper": _line_payload(bb_upper),
+            "bb_mid": _line_payload(bb_mid),
+            "bb_lower": _line_payload(bb_lower),
+        },
+        levels=levels,
+    )
+
+
 @app.get("/api/live_quotes")
 def api_live_quotes():
     raw = (request.args.get("symbols") or "").strip()
