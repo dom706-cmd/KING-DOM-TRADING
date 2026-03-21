@@ -2414,6 +2414,10 @@ def api_scan_start():
 
     data.setdefault("disable_auto_monitor", os.getenv("ORB_DISABLE_AUTO_MONITOR_DEFAULT", "1"))
 
+    strategy_norm = str(strategy).strip().lower()
+    max_price_for_profile = _param_float(data, "max_price", 30.0)
+    orb_scalp_under10 = strategy_norm == "orb" and max_price_for_profile <= 10.0
+
     # Trade-facing scan defaults should be quality-first unless explicitly overridden.
     # These gates can still be turned off by passing 0/false, but the default live scan
     # should not run in loose discovery mode.
@@ -2424,6 +2428,23 @@ def api_scan_start():
     data.setdefault("no_chop_enabled", "1")
     data.setdefault("min_vwap_enabled", "1")
     data.setdefault("min_pct_over_vwap", "1.0")
+
+    # Under-$10 ORB scalp profile: stricter liquidity / RVOL / chase defaults for cheap names.
+    if orb_scalp_under10:
+        data.setdefault("long_only", "1")
+        data.setdefault("min_rvol", "2.25")
+        data.setdefault("min_today_dollar_vol", "4000000")
+        data.setdefault("min_avg20_dollar_vol", "2000000")
+        data.setdefault("min_or_range_pct", "0.8")
+        data.setdefault("max_or_range_pct", "4.5")
+        data.setdefault("min_combined_score", "0.48")
+        data.setdefault("orb_min_ml_score", "0.40")
+        data.setdefault("orb_max_chase_r", "0.25")
+        data.setdefault("orb_retest_max_chase_r", "0.15")
+        data.setdefault("orb_breakout_now_max_chase_r", "0.08")
+        data.setdefault("orb_breakout_now_min_ml_score", "0.50")
+        data.setdefault("orb_retest_min_ml_score", "0.45")
+        data.setdefault("orb_min_minutes_after_open", "12")
 
     thresholds_used = {
         "strategy": strategy,
@@ -2449,6 +2470,14 @@ def api_scan_start():
         "no_chop_enabled": _is_truthy(data.get("no_chop_enabled", "0")),
         "min_vwap_enabled": _is_truthy(data.get("min_vwap_enabled", "0")),
         "min_pct_over_vwap": _param_float(data, "min_pct_over_vwap", 1.0),
+        "orb_scalp_under10": bool(orb_scalp_under10),
+        "orb_min_ml_score": _param_float(data, "orb_min_ml_score", 0.35),
+        "orb_max_chase_r": _param_float(data, "orb_max_chase_r", 0.35),
+        "orb_retest_max_chase_r": _param_float(data, "orb_retest_max_chase_r", 0.20),
+        "orb_breakout_now_max_chase_r": _param_float(data, "orb_breakout_now_max_chase_r", 0.10),
+        "orb_breakout_now_min_ml_score": _param_float(data, "orb_breakout_now_min_ml_score", 0.45),
+        "orb_retest_min_ml_score": _param_float(data, "orb_retest_min_ml_score", 0.40),
+        "orb_min_minutes_after_open": _param_int(data, "orb_min_minutes_after_open", 10),
         "range_window_min": _param_int(data, "range_window_min", 60),
         "range_band_k": _param_float(data, "range_band_k", 2.0),
         "rr_touch_lookback_min": _param_int(data, "rr_touch_lookback_min", 15),
