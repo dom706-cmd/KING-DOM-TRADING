@@ -486,6 +486,13 @@ th {
 .positionChartHead{display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.07);}
 .positionChartBox{height:360px;}
 .positionGuide{font-size:11px; color:var(--muted);}
+.positionStateBanner{margin-top:8px; padding:8px 10px; border-radius:10px; font-weight:900; letter-spacing:0.04em; text-transform:uppercase;}
+.banner-danger{background:rgba(239,68,68,0.18); color:#fecaca; border:1px solid rgba(239,68,68,0.3);}
+.banner-caution{background:rgba(245,158,11,0.18); color:#fde68a; border:1px solid rgba(245,158,11,0.3);}
+.banner-ok{background:rgba(34,197,94,0.16); color:#bbf7d0; border:1px solid rgba(34,197,94,0.28);}
+.banner-neutral{background:rgba(148,163,184,0.16); color:#e5e7eb; border:1px solid rgba(148,163,184,0.24);}
+.scoreTable{width:100%; border-collapse:collapse;}
+.scoreTable th,.scoreTable td{padding:7px 8px; border-bottom:1px solid rgba(255,255,255,0.07); font-size:12px;}
 .positionTop{display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;}
 .actionBadge{display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; font-size:11px; font-weight:800; letter-spacing:0.04em;}
 .action-exit{background:rgba(239,68,68,0.16); color:#fca5a5; border:1px solid rgba(239,68,68,0.3);}
@@ -1033,6 +1040,7 @@ th {
               <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="positionDeskAutoRefresh" checked /> Auto-refresh</label>
             </div>
             <div id="positionDeskErrors" class="positionError"></div>
+            <div id="positionDeskScoreboard" class="positionChartShell" style="margin-bottom:10px;"><div class="positionGuide" style="padding:10px;">No active scoreboard yet.</div></div>
             <div id="positionDeskOutput" class="positionOutputList"><div class="muted">Add one or more positions to get guidance.</div></div>
           </div>
         </div>
@@ -2795,6 +2803,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   function pdNum(v, d=2){ const n=Number(v); return Number.isFinite(n) ? n.toFixed(d) : '—'; }
   function pdMoney(v, d=2){ const n=Number(v); return Number.isFinite(n) ? ('$'+n.toFixed(Math.abs(n)>=100?0:d)) : '—'; }
   function pdActionClass(action){ const a=String(action||'').toLowerCase(); if(a.includes('exit')) return 'action-exit'; if(a.includes('trim')) return 'action-trim'; if(a.includes('reduce')) return 'action-reduce'; if(a.includes('trail')) return 'action-trail'; if(a.includes('hold')) return 'action-hold'; return 'action-wait'; }
+  function pdBannerClass(action){ const a=String(action||'').toLowerCase(); if(a.includes('exit')) return 'banner-danger'; if(a.includes('trim')||a.includes('reduce')) return 'banner-caution'; if(a.includes('hold')||a.includes('trail')) return 'banner-ok'; return 'banner-neutral'; }
+  function pdBannerText(r){ const a=String(r?.action||'').toLowerCase(); if(a.includes('exit now')) return 'DANGER — FLAT THIS IF IT CONFIRMS'; if(a.includes('exit into close')) return 'DO NOT GET CUTE INTO THE BELL'; if(a.includes('trim')) return 'PAY YOURSELF AND DE-RISK'; if(a.includes('trail')) return 'WINNER — PROTECT IT, DO NOT ROUND-TRIP'; if(a.includes('hold')) return 'SAFE HOLD — ONLY WHILE STRUCTURE HOLDS'; if(a.includes('reduce')) return 'WEAK HOLD — CUT RISK ON FAILURE'; return 'MIXED — WAIT FOR CONFIRMATION'; }
   function pdDefaultRow(sym=''){ return {symbol:sym, side:'long', entry:'', stop:'', shares:'', target:'', must_flat:false, notes:''}; }
   function pdLoad(){ try{ const raw=localStorage.getItem(LS_POSITION_DESK); const j=JSON.parse(raw||'null'); return Array.isArray(j)&&j.length?j:window.PositionDeskSeed.slice(); }catch(e){ return window.PositionDeskSeed.slice(); } }
   function pdSave(rows){ try{ localStorage.setItem(LS_POSITION_DESK, JSON.stringify(rows)); }catch(e){} }
@@ -2842,6 +2852,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
       if(status) status.textContent=`${j.count||0} active position${(j.count||0)===1?'':'s'} • live guidance`; 
       if(err) err.innerHTML = (j.errors||[]).map(e=>`${pdEsc(e.symbol||'?')}: ${pdEsc(e.error||'error')}`).join('<br/>');
+      const board=document.getElementById('positionDeskScoreboard');
+      if(board){ const rows=(j.scoreboard||[]).map(r=>`<tr><td><b>${pdEsc(r.symbol||'')}</b></td><td>${pdEsc(r.action||'')}</td><td>${pdEsc(r.urgency)}</td><td>${pdNum(r.current_r,2)}R</td><td>${pdEsc(r.minutes_to_close ?? '—')}</td><td>${pdEsc(r.overnight||'—')}</td><td>${pdNum((Number(r.confidence)||0)*100,0)}%</td></tr>`).join(''); board.innerHTML = `<div class="positionChartHead"><div class="denseMeta"><span class="tag">Position scoreboard</span><span class="positionGuide">Sorted by urgency so the problem child floats to the top.</span></div></div><table class="scoreTable"><thead><tr><th>Symbol</th><th>Action</th><th>Urgency</th><th>R</th><th>Mins to close</th><th>Overnight</th><th>Confidence</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No active rows.</td></tr>'}</tbody></table>`; }
       const html = (j.rows||[]).map(r => `
         <div class="positionCard">
           <div class="positionTop">
@@ -2856,6 +2868,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
               <div class="muted" style="margin-top:4px;">Minutes to close: <b>${pdEsc(r.minutes_to_close ?? '—')}</b></div>
             </div>
           </div>
+          <div class="positionStateBanner ${pdBannerClass(r.action)}">${pdEsc(pdBannerText(r))}</div>
           <div class="metricRow"><span class="tag">Spread</span>${pdNum(r.spread_pct,2)}%<span class="tag">Δ VWAP</span>${pdNum(r.vwap_delta_pct,2)}%<span class="tag">SPY</span>${pdEsc(r.market_context?.spy_trend_state||'—')}<span class="tag">QQQ</span>${pdEsc(r.market_context?.qqq_trend_state||'—')}<span class="tag">Risk-on</span>${pdNum(r.market_context?.risk_on_score,2)}<span class="tag">Breadth</span>${pdNum(r.market_context?.breadth_score,2)}</div>
           <div class="metricRow"><span class="tag">Dummies version</span><span>trim near <b>${pdMoney(r.trim_price)}</b> • move stop toward <b>${pdMoney(r.lock_price)}</b> • hard get-out at <b>${pdMoney(r.hard_exit_price)}</b> • winner trail near <b>${pdMoney(r.soft_trail)}</b></span></div>
           <ul class="planList">${(r.rationale||[]).map(x=>`<li>${pdEsc(x)}</li>`).join('') || '<li>No rationale returned.</li>'}</ul>
@@ -2876,6 +2889,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       if(out) out.innerHTML = html || '<div class="muted">No valid rows returned.</div>';
       const topBtn = out?.querySelector('[data-chart-symbol]');
       if(topBtn) pdLoadChart(topBtn).catch(()=>{});
+      positionDeskCharts.forEach((bundle, sym)=>{ const btn=document.querySelector(`[data-chart-symbol="${sym}"]`); if(btn && btn !== topBtn) pdLoadChart(btn).catch(()=>{}); });
     }catch(e){ if(status) status.textContent='Position Desk refresh failed'; if(err) err.textContent=String(e.message || e); }
   }
   async function pdLoadChart(btn){

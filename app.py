@@ -3092,7 +3092,18 @@ def api_position_manager():
                 "error": f"{type(e).__name__}: {e}",
             })
     rows.sort(key=lambda r: (-int(r.get("urgency") or 0), str(r.get("symbol") or "")))
-    return jsonify(ok=True, context_snapshot=ctx, rows=rows, errors=errors, count=len(rows))
+    scoreboard = []
+    for r in rows:
+        scoreboard.append({
+            "symbol": r.get("symbol"),
+            "action": r.get("action"),
+            "urgency": r.get("urgency"),
+            "current_r": r.get("current_r"),
+            "minutes_to_close": r.get("minutes_to_close"),
+            "overnight": r.get("overnight"),
+            "confidence": r.get("confidence"),
+        })
+    return jsonify(ok=True, context_snapshot=ctx, rows=rows, scoreboard=scoreboard, errors=errors, count=len(rows))
 
 
 @app.post("/api/position_chart")
