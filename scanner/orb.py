@@ -1583,6 +1583,69 @@ def _tape_proxy_score(c: Candidate) -> float:
     ))
 
 
+def _rr_setup_rule_score(c: Candidate, feats: dict[str, float]) -> float:
+    rvol_score = _clip(float(c.rvol or 0.0) / 2.5, 0.0, 1.0)
+    vol_score = _clip(float(c.today_dollar_vol or 0.0) / 20_000_000.0, 0.0, 1.0)
+    or_score = _clip(1.0 - abs(float(c.or_range_pct or 0.0) - 2.0) / 2.5, 0.0, 1.0)
+    touch_age = float(getattr(c, 'rr_touch_age_min', feats.get('touch_age_min', 999.0)) or 999.0)
+    touch_score = _clip(1.0 - (touch_age / 45.0), 0.0, 1.0)
+    return float(round(
+        0.25 * rvol_score +
+        0.25 * vol_score +
+        0.20 * or_score +
+        0.30 * touch_score,
+        6
+    ))
+
+
+def _rr_alignment_score(c: Candidate) -> float:
+    trend = (c.trend_state or '').lower()
+    vwap_delta = float(c.vwap_delta_pct or 0.0)
+    above_vwap = bool(c.above_vwap) if c.above_vwap is not None else False
+    score = 0.0
+    if above_vwap:
+        score += 0.40
+    elif vwap_delta >= -0.50:
+        score += 0.30
+    elif vwap_delta >= -1.00:
+        score += 0.20
+    else:
+        score += 0.10
+
+    if trend == 'reclaim_vwap':
+        score += 0.35
+    elif trend in {'chop', 'lost_vwap'}:
+        score += 0.22
+    elif trend == 'up':
+        score += 0.20
+    else:
+        score += 0.08
+
+    return _clip(score, 0.0, 1.0)
+
+
+def _rr_tape_proxy_score(c: Candidate, feats: dict[str, float]) -> float:
+    slope = float(feats.get('slope', c.trend_slope_pct or 0.0))
+    vwap_delta = float(c.vwap_delta_pct or 0.0)
+    trend = (c.trend_state or '').lower()
+    slope_score = _clip((slope + 0.05) / 0.50, 0.0, 1.0)
+    vwap_score = _clip((vwap_delta + 1.20) / 2.40, 0.0, 1.0)
+    state_score = {
+        'reclaim_vwap': 1.00,
+        'chop': 0.65,
+        'lost_vwap': 0.55,
+        'up': 0.70,
+        'down': 0.20,
+        '': 0.45,
+    }.get(trend, 0.45)
+    return float(round(
+        0.35 * slope_score +
+        0.40 * vwap_score +
+        0.25 * state_score,
+        6
+    ))
+
+
 def _passes_orb_directional_gate(
     c: Candidate,
     *,
@@ -1804,19 +1867,19 @@ def _passes_rr_actionable_long_gate(c: Candidate, feats: dict[str, float]) -> tu
     chase_r = (price - entry) / risk if price > 0 and entry > 0 else 999.0
     touch_age_min = max(0.0, 390.0 - float(feats.get('tod_min', 390.0)))
 
-    # Conservative loosening: require obviously bad trend/chop to reject,
-    # but don't suffocate every reclaim candidate that is only slightly messy.
-    if trend == 'down':
+    # Deliberately looser RR actionable gate: reclaims often begin from messy,
+    # slightly-below-VWAP conditions. Reject only clearly broken states.
+    if trend == 'down' and not (vwap_delta >= -0.40 and slope >= 0.03):
         return False, 'rr_trend_still_down', touch_age_min, chase_r
-    if trend == 'lost_vwap' and not (vwap_delta >= -0.35 and slope >= 0.01):
+    if trend == 'lost_vwap' and not (vwap_delta >= -0.75 and slope >= -0.02):
         return False, 'rr_trend_still_down', touch_age_min, chase_r
-    if trend == 'chop' and not (vwap_delta >= -0.15 and slope >= -0.01):
+    if trend == 'chop' and not (vwap_delta >= -0.35 and slope >= -0.03):
         return False, 'rr_chop', touch_age_min, chase_r
-    if vwap_delta < -3.0:
+    if vwap_delta < -4.0:
         return False, 'rr_too_far_below_vwap', touch_age_min, chase_r
-    if chase_r > 1.25:
+    if chase_r > 2.0:
         return False, 'rr_chase_too_high', touch_age_min, chase_r
-    if float(feats.get('tod_min', 0.0)) >= 345.0:
+    if float(feats.get('tod_min', 0.0)) >= 360.0:
         return False, 'rr_too_late', touch_age_min, chase_r
     return True, None, touch_age_min, chase_r
 
@@ -3098,7 +3161,7 @@ def scan_range_reversion_symbols(
             c.catalyst_tags = None
 
         ml_base = float(c.ml_score or 0.0) if use_ml else 0.0
-        rule_norm = _candidate_setup_rule_score(c)
+        rule_norm = _rr_setup_rule_score(c, feats)
         sent_term = float(sentiment_alpha) * float(c.sentiment_score or 0.0) if c.sentiment_score is not None else 0.0
         cat_term = float(catalyst_alpha) * float(c.catalyst_score or 0.0) if c.catalyst_score is not None else 0.0
         sw = regime.get("score_weights", {})
@@ -3114,8 +3177,8 @@ def scan_range_reversion_symbols(
         c.combined_score = float(score)
 
         setup_q = rule_norm
-        tape_q = _tape_proxy_score(c)
-        align_q = _alignment_score(c)
+        tape_q = _rr_tape_proxy_score(c, feats)
+        align_q = _rr_alignment_score(c)
         cw = regime.get("confidence_weights", {})
         conf = (
             float(cw.get("setup", 0.35)) * setup_q +
@@ -3135,10 +3198,10 @@ def scan_range_reversion_symbols(
         gate_reasons: list[str] = []
         if not rr_ok and rr_reason:
             gate_reasons.append(rr_reason)
-        if use_ml and float(c.ml_score or 0.0) < float(rr_min_ml_value):
-            gate_reasons.append("rr_ml_too_low")
-        if float(c.confidence_score or 0.0) < float(rr_min_confidence_value):
-            gate_reasons.append("rr_confidence_too_low")
+        # RR ML is currently more useful as a ranking/diagnostic signal than
+        # a hard reject gate for forensic runs. Keep it visible in score_breakdown/UI,
+        # but don't let the model gate hide whether actionable RR setups exist.
+        # RR confidence is also diagnostic-only for now.
 
         c.gate_passes = not gate_reasons
         c.gate_fail_reasons = gate_reasons
