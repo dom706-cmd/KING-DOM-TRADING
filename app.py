@@ -2907,25 +2907,44 @@ def _position_plan_payload(symbol: str, position: dict[str, Any], provider, cont
     late_day = minutes_to_close is not None and minutes_to_close <= 30
     very_late = minutes_to_close is not None and minutes_to_close <= 12
     risk_off_market = ((risk_on_score is not None and risk_on_score < -0.35) or (breadth_score is not None and breadth_score < -0.35) or spy_trend == "down")
+    breakeven_price = float(entry)
+    if side == "long":
+        lock_price = float(entry) + (0.25 * risk_per_share)
+        soft_trail = max(float(stop), float(entry), float(vwap_last) if vwap_last is not None else float(stop), float(lo15) if lo15 is not None else float(stop))
+        hard_exit_price = max(float(stop), float(vwap_last) if vwap_last is not None else float(stop))
+        trim_price = target_active if target_active is not None else r1
+    else:
+        lock_price = float(entry) - (0.25 * risk_per_share)
+        soft_trail = min(float(stop), float(entry), float(vwap_last) if vwap_last is not None else float(stop), float(hi15) if hi15 is not None else float(stop))
+        hard_exit_price = min(float(stop), float(vwap_last) if vwap_last is not None else float(stop))
+        trim_price = target_active if target_active is not None else r1
 
     action = "HOLD"
     urgency = 40
     rationale: list[str] = []
     exit_plan: list[str] = []
+    confidence = 0.5
+    management_mode = "neutral"
 
     if stop_distance_r <= 0:
         action = "EXIT NOW"
         urgency = 100
+        confidence = 0.98
+        management_mode = "damage_control"
         rationale.append("stop breached")
         exit_plan.append("flat now; thesis broken")
     elif near_stop and against_trend:
         action = "EXIT NOW"
         urgency = 96
+        confidence = 0.92
+        management_mode = "damage_control"
         rationale.extend(["near stop", "trend against position"])
-        exit_plan.append("do not give it more room")
+        exit_plan.append(f"hard exit if {symbol} loses {hard_exit_price:.2f}")
     elif very_late and current_r < 0.35 and (must_flat or against_trend or weak_spread):
         action = "EXIT INTO CLOSE"
         urgency = 94
+        confidence = 0.90
+        management_mode = "closeout"
         rationale.append("late day with weak cushion")
         if must_flat:
             rationale.append("must flat by close")
@@ -2933,30 +2952,41 @@ def _position_plan_payload(symbol: str, position: dict[str, Any], provider, cont
     elif late_day and near_1r and (against_trend or risk_off_market):
         action = "TRIM / PAY YOURSELF"
         urgency = 82
+        confidence = 0.78
+        management_mode = "de_risk"
         rationale.extend(["near 1R", "late day context not ideal"])
-        exit_plan.append(f"take at least partial near {target_active:.2f}")
+        exit_plan.append(f"take at least partial near {trim_price:.2f}")
+        exit_plan.append(f"move stop toward {lock_price:.2f} if partial fills")
     elif deep_in_money and late_day:
         action = "TRAIL WINNER"
         urgency = 76
+        confidence = 0.76
+        management_mode = "protect_winner"
         rationale.extend(["late day winner", "protect gains"])
-        trail = vwap_last if vwap_last is not None else (lo15 if side == 'long' else hi15)
-        if trail is not None:
-            exit_plan.append(f"trail stop near {float(trail):.2f}")
+        exit_plan.append(f"trail stop near {soft_trail:.2f}")
         exit_plan.append("consider partial into strength before close")
     elif current_r >= 0.60 and vwap_good and not against_trend:
         action = "HOLD / LET IT WORK"
         urgency = 54
+        confidence = 0.68
+        management_mode = "trend_hold"
         rationale.extend(["trend intact", "position has cushion"])
         if current_r >= 1.0:
-            exit_plan.append("consider stop to breakeven or better")
+            exit_plan.append(f"consider stop to breakeven or better ({breakeven_price:.2f}+)")
+        else:
+            exit_plan.append(f"if it re-tests and holds VWAP, stay patient above {hard_exit_price:.2f}")
     elif current_r < 0.25 and not vwap_good:
         action = "REDUCE RISK"
         urgency = 74
+        confidence = 0.72
+        management_mode = "weak_hold"
         rationale.extend(["not getting paid yet", "VWAP relationship weak"])
-        exit_plan.append("tighten stop or cut partial on failed bounce")
+        exit_plan.append(f"tighten stop or cut partial on failed bounce below/above {hard_exit_price:.2f}")
     else:
         action = "WAIT / REASSESS"
         urgency = 60
+        confidence = 0.55
+        management_mode = "neutral"
         rationale.append("mixed signals")
         exit_plan.append("wait for reclaim / break of local range")
 
@@ -3025,6 +3055,13 @@ def _position_plan_payload(symbol: str, position: dict[str, Any], provider, cont
         },
         "action": action,
         "urgency": urgency,
+        "confidence": confidence,
+        "management_mode": management_mode,
+        "breakeven_price": breakeven_price,
+        "lock_price": lock_price,
+        "soft_trail": soft_trail,
+        "hard_exit_price": hard_exit_price,
+        "trim_price": trim_price,
         "rationale": rationale,
         "exit_plan": exit_plan,
         "overnight": overnight,

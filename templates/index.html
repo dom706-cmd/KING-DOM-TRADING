@@ -2840,8 +2840,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         <div class="positionCard">
           <div class="positionTop">
             <div>
-              <div class="denseMeta"><span class="tag">${pdEsc(r.side||'')}</span><b style="font-size:16px;">${pdEsc(r.symbol||'')}</b><span class="tag">urgency ${pdEsc(r.urgency)}</span><span class="tag">${pdEsc(r.time_bucket||'')}</span></div>
-              <div class="metricRow"><span class="tag">Live</span><b>${pdMoney(r.live_price)}</b><span class="tag">PnL</span><b>${pdMoney(r.pnl_open)}</b><span class="tag">R now</span><b>${pdNum(r.current_r,2)}R</b><span class="tag">Stop dist</span><b>${pdNum(r.stop_distance_r,2)}R</b><span class="tag">to target</span><b>${pdNum(r.target_distance_r,2)}R</b></div>
+              <div class="denseMeta"><span class="tag">${pdEsc(r.side||'')}</span><b style="font-size:16px;">${pdEsc(r.symbol||'')}</b><span class="tag">urgency ${pdEsc(r.urgency)}</span><span class="tag">${pdEsc(r.time_bucket||'')}</span><span class="tag">mode ${pdEsc(r.management_mode||'neutral')}</span></div>
+              <div class="metricRow"><span class="tag">Live</span><b>${pdMoney(r.live_price)}</b><span class="tag">PnL</span><b>${pdMoney(r.pnl_open)}</b><span class="tag">R now</span><b>${pdNum(r.current_r,2)}R</b><span class="tag">Stop dist</span><b>${pdNum(r.stop_distance_r,2)}R</b><span class="tag">to target</span><b>${pdNum(r.target_distance_r,2)}R</b><span class="tag">confidence</span><b>${pdNum((Number(r.confidence)||0)*100,0)}%</b></div>
               <div class="metricRow"><span class="tag">Entry</span>${pdMoney(r.entry)}<span class="tag">Stop</span>${pdMoney(r.stop)}<span class="tag">1R</span>${pdMoney(r.r1)}<span class="tag">2R</span>${pdMoney(r.r2)}<span class="tag">3R</span>${pdMoney(r.r3)}<span class="tag">VWAP</span>${pdMoney(r.vwap_last)}<span class="tag">Trend</span>${pdEsc(r.trend_state||'—')}</div>
             </div>
             <div style="text-align:right; min-width:220px;">
@@ -2851,6 +2851,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
             </div>
           </div>
           <div class="metricRow"><span class="tag">Spread</span>${pdNum(r.spread_pct,2)}%<span class="tag">Δ VWAP</span>${pdNum(r.vwap_delta_pct,2)}%<span class="tag">SPY</span>${pdEsc(r.market_context?.spy_trend_state||'—')}<span class="tag">QQQ</span>${pdEsc(r.market_context?.qqq_trend_state||'—')}<span class="tag">Risk-on</span>${pdNum(r.market_context?.risk_on_score,2)}<span class="tag">Breadth</span>${pdNum(r.market_context?.breadth_score,2)}</div>
+          <div class="metricRow"><span class="tag">Dummies version</span><span>trim near <b>${pdMoney(r.trim_price)}</b> • move stop toward <b>${pdMoney(r.lock_price)}</b> • hard get-out at <b>${pdMoney(r.hard_exit_price)}</b> • winner trail near <b>${pdMoney(r.soft_trail)}</b></span></div>
           <ul class="planList">${(r.rationale||[]).map(x=>`<li>${pdEsc(x)}</li>`).join('') || '<li>No rationale returned.</li>'}</ul>
           <div class="metricRow"><span class="tag">Plan</span><span>${(r.exit_plan||[]).map(pdEsc).join(' • ') || 'No explicit exit plan.'}</span></div>
           <div class="metricRow"><span class="tag">Overnight reasons</span><span>${(r.overnight_reasons||[]).map(pdEsc).join(' • ') || '—'}</span></div>
