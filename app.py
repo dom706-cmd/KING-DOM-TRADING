@@ -2424,7 +2424,6 @@ def api_scan_start():
     data.setdefault("min_grade_enabled", "1")
     data.setdefault("min_grade", "B")
     data.setdefault("min_combined_enabled", "1")
-    data.setdefault("min_combined_score", "0.40")
     data.setdefault("no_chop_enabled", "1")
     data.setdefault("min_vwap_enabled", "1")
     data.setdefault("min_pct_over_vwap", "1.0")
@@ -2445,6 +2444,8 @@ def api_scan_start():
         data.setdefault("orb_breakout_now_min_ml_score", "0.50")
         data.setdefault("orb_retest_min_ml_score", "0.45")
         data.setdefault("orb_min_minutes_after_open", "12")
+    else:
+        data.setdefault("min_combined_score", "0.40")
 
     thresholds_used = {
         "strategy": strategy,
