@@ -1,0 +1,3834 @@
+{% from "_macros.html" import fmt_num, fmt_currency, fmt_pct, color_posneg %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KingDom Trading</title>
+  <style>
+
+:root{
+  /* Palette derived from the header image (cash + bands + dog) */
+  --bg: #0f0e0b;         /* deep charcoal */
+  --panel: #171511;      /* warm dark */
+  --panel-2: #1d1a15;    /* warm dark (alt) */
+  --border: rgba(245, 242, 234, 0.14);
+  --text: rgba(245, 242, 234, 0.92);
+  --muted: rgba(199, 192, 178, 0.82);
+  --muted2: rgba(199, 192, 178, 0.62);
+
+  --accent: #4f6b3a;     /* muted money-olive */
+  --accent2: #c8b08a;    /* banded-tan */
+  --danger: #ef4444;
+
+  --header-size: 28px;
+  --thead-height: 34px; /* keep sticky offsets consistent */
+}
+*{ box-sizing:border-box; }
+body {
+  font-family: -apple-system, system-ui, sans-serif;
+  margin: 20px;
+  background: radial-gradient(1200px 800px at 15% -10%, rgba(79,107,58,0.35), transparent 60%),
+              radial-gradient(1100px 700px at 90% 0%, rgba(200,176,138,0.20), transparent 55%),
+              radial-gradient(900px 600px at 40% 110%, rgba(122,112,92,0.14), transparent 55%),
+              var(--bg);
+  color: var(--text);
+}
+a { color: rgba(200,176,138,0.95); }
+a:hover{ color: rgba(226,206,176,1); }
+
+.hero{
+  height: 118px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background-image: url('/static/header.png');
+  background-size: cover;
+  background-position: 70% 45%;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.35);
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.heroTitle{
+  position:absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 2;
+}
+.heroTitle .bubble{
+  display:inline-flex;
+  flex-direction:column;
+  gap:4px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: rgba(15,14,11,0.46);
+  border: 1px solid rgba(245,242,234,0.18);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.30);
+}
+.heroTitle .title{
+  font-size: var(--header-size);
+  font-weight: 900;
+  letter-spacing: 0.2px;
+  line-height: 1.05;
+}
+.heroTitle .sub{
+  font-size: 13px;
+  color: var(--muted);
+}
+.hero:after{
+  content:'';
+  position:absolute;
+  inset:0;
+  background: linear-gradient(90deg, rgba(15,14,11,0.70), rgba(15,14,11,0.25) 45%, rgba(15,14,11,0.05));
+}
+
+.header{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom: 14px;
+}
+.app-title{
+  font-size: var(--header-size);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.app-subtitle{
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+.rr-only[hidden]{ display:none !important; }
+
+.card {
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:14px;
+  margin-top:14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+  box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+
+input, select, button {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  outline: none;
+}
+input::placeholder{ color: rgba(255,255,255,0.45); }
+input:focus, select:focus{
+  border-color: rgba(79,107,58,0.85);
+  box-shadow: 0 0 0 3px rgba(79,107,58,0.18);
+}
+
+button, .btn{
+  display:inline-block;
+  padding:8px 12px;
+  border-radius:10px;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,0.07);
+  cursor:pointer;
+  font-weight:700;
+}
+button:hover, .btn:hover { background: rgba(255,255,255,0.10); }
+.btn-danger { border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.12); }
+.btn-danger:hover { background: rgba(239,68,68,0.18); }
+
+table { width:100%; border-collapse:collapse; margin-top:12px; }
+th, td {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 8px;
+  text-align:left;
+  font-size:13px;
+  vertical-align:top;
+}
+th { 
+  color: rgba(255,255,255,0.78);
+  font-weight:700;
+  white-space: nowrap; /* prevent header from wrapping off-screen */
+}
+
+.tag { display:inline-block; padding:2px 8px; border-radius:999px; background: rgba(255,255,255,0.08); font-size:12px; color: var(--muted); border:1px solid rgba(255,255,255,0.10); }
+.text-green-700{color:rgba(183,220,155,0.95)}
+.text-red-700{color:#fb7185}
+.text-gray-600{color: var(--muted)}
+
+.tableWrap { max-height: 70vh; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: rgba(0,0,0,0.12); }
+.tableWrap table { margin-top: 0; border-collapse: collapse; }
+.tableWrap thead th {
+  position: sticky;
+  top: 0;
+  background: rgba(23,21,17,0.98);
+  z-index: 4;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(8px);
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.15;
+}
+/* Freeze the #1 candidate row as you scroll ("top row frozen") */
+#candidatesWrap tbody tr:first-child td {
+  position: sticky;
+  top: var(--thead-height);
+  background: rgba(23,21,17,0.96);
+  z-index: 3;
+  padding-top: 6px;   /* keep frozen row compact */
+  padding-bottom: 6px;
+  line-height: 1.15;
+  white-space: nowrap; /* prevent the frozen row from becoming 3-4 rows tall */
+}
+#candidatesWrap tbody tr:first-child td { box-shadow: 0 1px 0 var(--border); backdrop-filter: blur(8px); }
+
+/* Notes cell in frozen row: keep it to one line so the frozen row doesn't balloon */
+#candidatesWrap tbody tr:first-child td:last-child{
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#candidatesWrap tbody tr:first-child td:last-child{
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Analyzer results table header should stay visible if it overflows */
+#analyzeResult .tableWrap { max-height: 52vh; }
+
+.badge { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; border:1px solid transparent; white-space:nowrap; }
+.badge-green { background: rgba(79,107,58,0.22); color: rgba(231,244,220,0.95); border-color: rgba(79,107,58,0.45); }
+.badge-red { background: rgba(239,68,68,0.18); color: rgba(254,202,202,0.95); border-color: rgba(239,68,68,0.35); }
+.badge-amber { background: rgba(200,176,138,0.18); color: rgba(245,235,217,0.95); border-color: rgba(200,176,138,0.38); }
+.badge-gray { background: rgba(255,255,255,0.10); color: rgba(229,231,235,0.95); border-color: rgba(255,255,255,0.15); }
+
+.notes { max-width: 420px; color: var(--muted); }
+.muted { color: var(--muted); font-size: 13px; }
+
+.statusGrid{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  align-items:stretch;
+  margin-top: 14px;
+}
+.statusGrid .card{
+  margin-top:0;
+  flex: 1 1 360px;
+  min-width: 320px;
+}
+.squareCard{
+  aspect-ratio: 1 / 1;
+  max-height: 320px;
+  overflow:auto;
+}
+
+
+/* --- Layout (10.56.1 UI refresh) --------------------------------------- */
+.filtersGrid{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.field label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 700; letter-spacing: 0.2px; }
+.field input, .field select{ width: 100%; }
+
+.dashboardGrid{
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 12px;
+  align-items: start;
+  margin-top: 14px;
+}
+.colStack{ display:flex; flex-direction:column; gap:12px; }
+.mainRow{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+
+@media (max-width: 980px){
+  .dashboardGrid{ grid-template-columns: 1fr; }
+}
+
+/* Heat panel */
+.heatList{display:flex; flex-direction:column; gap:8px; margin-top: 12px; max-height:420px; overflow:auto; padding-right:6px; }
+.heatItem{
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.18);
+  display:flex;
+  justify-content:space-between;
+  gap: 12px;
+  align-items: center;
+}
+.heatTop{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.heatSym{ font-weight: 900; letter-spacing: 0.3px; font-size: 15px; }
+.heatMeta{ color: var(--muted); font-size: 12px; margin-top: 4px; }
+.heatRight{ display:flex; gap:10px; align-items:center; }
+.heatScore{ font-weight: 900; font-size: 16px; min-width: 52px; text-align:right; color: rgba(245,242,234,0.92); }
+
+.levels{
+  display:flex;
+  gap:10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.level{
+  display:flex;
+  gap:6px;
+  align-items:baseline;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.05);
+  font-size: 12px;
+}
+.level b{ font-weight: 900; }
+.level.entry{ border-color: rgba(200,176,138,0.35); }
+.level.stop{ border-color: rgba(239,68,68,0.30); }
+.level.tgt{ border-color: rgba(79,107,58,0.35); }
+
+
+/* Beast monitor UI */
+.monitorGrid { display:grid; grid-template-columns: 1fr; gap:12px; }
+.monitorControls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.monitorControls input, .monitorControls select { min-height:34px; }
+.kpiRow { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:10px; margin-top:10px; }
+.kpiCard { border:1px solid rgba(245,242,234,0.14); border-radius:12px; padding:10px; background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)); }
+.kpiCard .k { font-size:12px; color: rgba(199,192,178,0.92); font-weight:700; letter-spacing:0.2px; }
+.kpiCard .v { font-size:18px; font-weight:900; margin-top:2px; color: rgba(245,242,234,0.98); line-height:1.15; text-shadow: 0 1px 0 rgba(0,0,0,0.22); }
+.kpiCard .v.goText { color:#86efac; }
+.kpiCard .v.waitText { color:#fde68a; }
+.kpiCard .v.passText { color:#fca5a5; }
+.kpiCard .v.goodText { color:#93c5fd; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.monitorTableWrap { margin-top:12px; max-height:420px; overflow:auto; border:1px solid rgba(245,242,234,0.14); border-radius:12px; background: rgba(0,0,0,0.12); }
+.monitorTableWrap { overflow-x:auto; }
+
+.monitorTable { width:100%; min-width: 1650px; border-collapse:collapse; font-size:12px; }
+
+.monitorTable th, .monitorTable td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,0.07); text-align:left; vertical-align:top; }
+
+.monitorTable thead th { position:sticky; top:0; background: rgba(29,26,21,0.96); z-index:1; }
+/* Compact trigger column to reduce row height */
+.monitorTable th:nth-child(7), .monitorTable td:nth-child(7) { min-width: 560px; }
+.monitorTable th:nth-child(1), .monitorTable td:nth-child(1) { min-width: 120px; }
+.monitorTable th:nth-child(2), .monitorTable td:nth-child(2) { min-width: 90px; }
+.monitorTable th:nth-child(10), .monitorTable td:nth-child(10) { min-width: 240px; }
+
+.col-trigger .triggerTop { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.col-trigger .btnInline { display:flex; gap:6px; flex-wrap:wrap; }
+.col-trigger .triggerGrid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:4px; }
+.col-trigger .planLine, .col-trigger .deltaLine { white-space: nowrap; }
+.col-trigger .deltaLine { margin-top:4px; }
+@media (max-width: 1100px){
+  .monitorTable { min-width: 1200px; }
+  .col-trigger .triggerGrid { grid-template-columns: 1fr; }
+  .col-trigger .planLine, .col-trigger .deltaLine { white-space: normal; }
+}
+
+.gradePill { display:inline-block; min-width:34px; text-align:center; padding:2px 8px; border-radius:999px; font-weight:800; }
+.grade-Aplus,.grade-A { background:#dcfce7; color:#166534; }
+.grade-B { background:#dbeafe; color:#1d4ed8; }
+.grade-C { background:#fef3c7; color:#92400e; }
+.grade-D { background:#fee2e2; color:#b91c1c; }
+.grade-F { background:#e5e7eb; color:#374151; }
+.statePill { display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700; }
+.state-triggered { background:#dcfce7; color:#166534; }
+.state-ready { background:#dbeafe; color:#1d4ed8; }
+.state-watch { background:#f3f4f6; color:#374151; }
+.state-invalid, .state-session_inactive { background:#fee2e2; color:#991b1b; }
+.tapeLiveYes { color:#166534; font-weight:700; }
+.tapeLiveNo { color:#991b1b; font-weight:700; }
+.smallTags { display:flex; flex-wrap:wrap; gap:4px; }
+.smallTags .tag { font-size:11px; padding:2px 6px; }
+.inlineStat { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.actionPill{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-weight:900; letter-spacing:0.2px; }
+.action-go{ background: rgba(34,197,94,0.16); color:#86efac; border:1px solid rgba(34,197,94,0.35); }
+.action-wait{ background: rgba(245,158,11,0.14); color:#fde68a; border:1px solid rgba(245,158,11,0.35); }
+.action-pass{ background: rgba(239,68,68,0.14); color:#fca5a5; border:1px solid rgba(239,68,68,0.35); }
+.monitorRow-go td{ background: rgba(34,197,94,0.035); }
+.monitorRow-wait td{ background: rgba(245,158,11,0.03); }
+.monitorRow-pass td{ background: rgba(239,68,68,0.03); }
+.legendRow{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.legendRow .tag{ background: rgba(255,255,255,0.05); }
+
+.preflightGrid { display:grid; grid-template-columns: 1.2fr 1.8fr; gap:12px; margin-top:12px; }
+@media (max-width: 980px){ .preflightGrid { grid-template-columns: 1fr; } }
+.rulePanel, .checkPanel { border:1px solid rgba(245,242,234,0.14); border-radius:12px; padding:10px; background: rgba(255,255,255,0.03); }
+.rulePanel h4, .checkPanel h4 { margin:0 0 8px 0; }
+.ruleGrid { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap:10px; }
+.ruleGrid label { font-size:12px; color: rgba(245,242,234,0.88); font-weight:700; }
+.ruleGrid input, .ruleGrid select { width:100%; min-height:34px; }
+.ruleInline { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.ruleInline .cb { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); }
+.ruleInline input[type='checkbox']{ transform: translateY(1px); }
+.checkList { display:flex; flex-direction:column; gap:8px; max-height:260px; overflow:auto; }
+.checkItem { border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:8px 10px; background: rgba(0,0,0,0.12); }
+.checkHead { display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.checkName { font-weight:800; }
+.checkOk { color:#86efac; }
+.checkWarn { color:#fde68a; }
+.checkFail { color:#fca5a5; }
+.checkDetail { margin-top:4px; color: rgba(236,230,218,0.84); font-size:12px; white-space: pre-wrap; word-break: break-word; }
+.preflightSummary { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.flagBig { font-weight:900; padding:6px 10px; border-radius:999px; display:inline-flex; align-items:center; gap:6px; }
+.flagBig.go { background: rgba(34,197,94,0.16); color:#86efac; border:1px solid rgba(34,197,94,0.35); }
+.flagBig.wait { background: rgba(245,158,11,0.14); color:#fde68a; border:1px solid rgba(245,158,11,0.35); }
+.flagBig.pass { background: rgba(239,68,68,0.14); color:#fca5a5; border:1px solid rgba(239,68,68,0.35); }
+
+
+/* Hide redundant Heat panel (Realm’s Hottest) */
+.heatCard{display:none !important;}
+</style>
+</head>
+<body data-candidate-count="{{ count }}" data-scan-mode="{{ mode }}" data-end-offset="{{ end_offset }}" data-offset="{{ offset }}" data-max-symbols="{{ max_symbols }}" data-universe-size="{{ universe_size }}">
+  <div class="hero">
+    <div class="heroTitle">
+  <div style="margin-bottom:8px;"><a href="/crypto" style="display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:rgba(0,0,0,0.35); color:rgba(245,242,234,0.92); text-decoration:none;">Open Crypto Realm →</a></div>
+      <div class="bubble">
+        <div class="title">KingDom Trading</div>
+        <div class="sub">5‑Minute ORB Scanner • Provider: {{ (provider or "alpaca")|e }}</div>
+      </div>
+    </div>
+  </div>
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">Ticker Analyzer (any price)</h3>
+  <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+    <div>
+      <label>Symbol</label><br/>
+      <input id="analyzeSymbol" placeholder="TSLA" style="width:140px;" />
+    </div>
+    <button type="button" id="analyzeBtn">Analyze</button>
+    <div id="analyzeStatus" class="muted"></div>
+  </div>
+  <div id="analyzeResult" style="margin-top:12px;"></div>
+
+  <hr style="margin:14px 0;">
+
+  <div>
+    <h4 style="margin:0 0 6px 0;">Entry‑Now Planner (current price)</h4>
+    <div class="muted" style="margin-top:-2px;">Computes stop + targets if entering <b>right now</b>, plus VWAP/trend + ML context (real data).</div>
+    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:10px;">
+      <div>
+        <label>Side</label><br/>
+        <select id="entryNowSide" style="width:140px;">
+          <option value="auto" selected>Auto</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+      </div>
+      <button type="button" id="entryNowBtn">Plan Entry Now</button>
+      <div id="entryNowStatus" class="muted"></div>
+    </div>
+    <div id="entryNowResult" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:12px;">
+  <h3 style="margin-top:0;">Watchlist (saved in your browser)</h3>
+  <div class="muted">Add candidates below. This list persists across refreshes (localStorage).</div>
+  <div style="margin-top:8px; display:flex; gap:14px; flex-wrap:wrap; align-items:center;">
+    <label style="display:flex; gap:8px; align-items:center;">
+      <input type="checkbox" id="autoAddPassed" checked />
+      Auto-add “passed” candidates after each scan
+    </label>
+    <button type="button" id="watchExport">Export CSV</button>
+    <button type="button" id="watchClear">Clear</button>
+<button class="btn" id="watchlistRefreshBtn" type="button">Refresh Prices</button>
+
+  </div>
+  
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <span class="tag">Sort watchlist</span>
+    <select id="watchSortKey">
+      <option value="score">Score</option>
+      <option value="ml">ML</option>
+      <option value="sent">Sent</option>
+    </select>
+    <select id="watchSortDir">
+      <option value="desc">High → Low</option>
+      <option value="asc">Low → High</option>
+    </select>
+  </div>
+<div id="watchlist" style="margin-top:10px;"></div>
+</div>
+  <p>Trade plans are built only from real market data. If a symbol fails, you’ll see the real error.</p>
+
+  <form method="get" action="/" class="card" id="scanForm">
+    <div class="filtersGrid">
+      <div class="field">
+        <label>Universe</label>
+        <select name="universe">
+          <option value="nasdaq" {% if universe == "nasdaq" %}selected{% endif %}>NASDAQ Trader (broad US listings)</option>
+          <option value="file" {% if universe == "file" %}selected{% endif %}>From file (symbols.txt)</option>
+        </select>
+      </div>
+      
+      <div class="field">
+        <label>Strategy</label>
+        <select name="strategy" id="scanStrategy">
+          <option value="orb">ORB Breakout</option>
+          <option value="rr">Range Reversion</option>
+        </select>
+        <div class="hint">Single app: routes scan pipeline (ORB vs RR).</div>
+      </div>
+<div class="field">
+        <label>Max symbols to attempt</label>
+        <input name="max_symbols" value="{{ max_symbols }}" />
+      </div>
+      <div class="field">
+        <label>Offset (page through universe)</label>
+        <input name="offset" value="{{ offset }}" />
+      </div>
+      <div class="field">
+        <label>Return top N candidates</label>
+        <input name="limit" value="{{ limit }}" />
+      </div>
+      <div class="field">
+        <label>Min RVOL</label>
+        <input name="min_rvol" value="{{ min_rvol }}" />
+      </div>
+      <div class="field">
+        <label>Min Today $Vol</label>
+        <input name="min_today_dollar_vol" value="{{ min_today_dollar_vol }}" />
+      </div>
+      <div class="field">
+        <label>Min Avg20 $Vol</label>
+        <input name="min_avg20_dollar_vol" value="{{ min_avg20_dollar_vol }}" />
+      </div>
+      <div class="field">
+        <label>Min OR %</label>
+        <input name="min_or_range_pct" value="{{ request.args.get('min_or_range_pct', min_or_range_pct if min_or_range_pct is defined and min_or_range_pct is not none else 0.6) }}" />
+      </div>
+      <div class="field">
+        <label>Max OR %</label>
+        <input name="max_or_range_pct" value="{{ request.args.get('max_or_range_pct', max_or_range_pct if max_or_range_pct is defined and max_or_range_pct is not none else 6.0) }}" />
+      </div>
+      <div class="field">
+        <label>Min Price</label>
+        <input name="min_price" value="{{ min_price }}" />
+      </div>
+      <div class="field">
+        <label>Max Price</label>
+        <input name="max_price" value="{{ request.args.get('max_price', max_price if max_price is defined else 30) }}" />
+      </div>
+      <div class="field">
+        <label>Execution</label>
+        <select name="exec_style" id="execStyle">
+          <option value="retest" {% if request.args.get('exec_style', request.args.get('execution', 'retest')) == 'retest' %}selected{% endif %}>Retest (trigger level)</option>
+          <option value="breakout_now" {% if request.args.get('exec_style', request.args.get('execution', 'retest')) == 'breakout_now' %}selected{% endif %}>Breakout now (if triggered)</option>
+        </select>
+      </div>
+      <div class="field rr-only" id="rrTouchLookbackField">
+        <label>RR Touch Lookback (min)</label>
+        <input name="rr_touch_lookback_min" id="rrTouchLookback" inputmode="numeric" value="{{ request.args.get('rr_touch_lookback_min', '45') }}" />
+        <div class="muted" style="margin-top:6px;">How far back to look for a valid touch into the RR band.</div>
+      </div>
+      <div class="field rr-only" id="rrRangeWindowField">
+        <label>RR Range Window (min)</label>
+        <input name="range_window_min" id="rrRangeWindow" inputmode="numeric" value="{{ request.args.get('range_window_min', '60') }}" />
+        <div class="muted" style="margin-top:6px;">Minutes of regular-session data used to build the reversion range.</div>
+      </div>
+      <div class="field rr-only" id="rrBandKField">
+        <label>RR Range Band K</label>
+        <input name="range_band_k" id="rrBandK" inputmode="decimal" value="{{ request.args.get('range_band_k', '2.0') }}" />
+        <div class="muted" style="margin-top:6px;">Band width multiplier around the RR reference range.</div>
+      </div>
+      <div class="field rr-only" id="rrStopSigmaField">
+        <label>RR Stop Sigma Mult</label>
+        <input name="rr_stop_sigma_mult" id="rrStopSigmaMult" inputmode="decimal" value="{{ request.args.get('rr_stop_sigma_mult', '0.75') }}" />
+        <div class="muted" style="margin-top:6px;">Stop distance multiplier used when building RR plans.</div>
+      </div>
+      <div class="field">
+        <label>Sent α (weight)</label>
+        <input name="sentiment_alpha" id="sentAlpha" inputmode="decimal" style="width:110px;" value="{{ request.args.get('sentiment_alpha', '0.15') }}" />
+        <div class="muted" style="margin-top:6px;">Higher = sentiment has more weight in Score (if enabled).</div>
+      </div>
+      <input type="hidden" name="mode" value="until"/>
+</div>
+
+    <div class="dashboardGrid">
+      <div class="colStack leftCol">
+        <div class="card toolPalette" style="margin-top:0;">
+          <div class="toolRow" style="justify-content:space-between;">
+            <div>
+              <div class="toolSectionTitle">Tool Palette</div>
+              <div class="muted" style="margin-top:-2px;">Fast toggles for scanning + ranking.</div>
+            </div>
+            <!-- pills removed -->
+          </div>
+          </div>
+          <div class="toolDivider"></div>
+
+          <div class="toolRow">
+            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+              <input type="checkbox" name="use_ml" value="1" id="useMlBox" {% if request.args.get('use_ml','1') == '1' %}checked{% endif %} />
+              <span>Use ML ranking</span>
+            </label>
+            <span class="hint">prefers <code>models/model_a_liquid.pkl</code> + <code>models/model_b_outlier.pkl</code> (fallback: <code>models/orb_ranker*.pkl</code>)</span>
+          </div>
+
+          <div class="toolRow" style="margin-top:10px;">
+            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+              <input type="checkbox" name="use_sentiment" value="1" id="useSentBox" {% if request.args.get('use_sentiment','0') == '1' %}checked{% endif %} />
+              <span>Use sentiment</span>
+            </label>
+            <span class="hint">slower / rate-limits</span>
+          </div>
+
+          <div class="toolRow" style="margin-top:10px;">
+            <label style="display:flex; gap:8px; align-items:center; user-select:none;">
+              <input type="checkbox" name="use_catalyst" value="1" id="useCatalystBox" {% if request.args.get('use_catalyst','0') == '1' %}checked{% endif %} />
+              <span>Use news/catalyst scoring</span>
+            </label>
+            <span class="hint">ranks names with fresh catalysts</span>
+          </div>
+
+          <div class="toolRow" style="margin-top:10px; gap:12px; flex-wrap:wrap;">
+            <label style="display:flex; gap:6px; align-items:center;">
+              <span class="muted" style="font-size:12px;">Cat α</span>
+              <input name="catalyst_alpha" id="catalystAlpha" inputmode="decimal" style="width:90px;" value="{{ request.args.get('catalyst_alpha', '0.08') }}" />
+            </label>
+            <label style="display:flex; gap:6px; align-items:center;">
+              <span class="muted" style="font-size:12px;">Lookback h</span>
+              <input name="catalyst_lookback_hours" id="catalystLookback" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_lookback_hours', '72') }}" />
+            </label>
+            <label style="display:flex; gap:6px; align-items:center;">
+              <span class="muted" style="font-size:12px;">TopN/news</span>
+              <input name="catalyst_topn" id="catalystTopN" inputmode="numeric" style="width:90px;" value="{{ request.args.get('catalyst_topn', '6') }}" />
+            </label>
+          </div>
+
+          <div style="margin-top:10px;">
+            <label class="text-gray-600" style="font-size:13px;">Regime profile (ranking/confidence weights)</label><br/>
+            <select name="regime_profile" id="regimeProfile" style="width:100%;">
+              {% set _rp = request.args.get('regime_profile','auto') %}
+              <option value="auto" {% if _rp == 'auto' %}selected{% endif %}>Auto (phase aware)</option>
+              <option value="extended" {% if _rp == 'extended' %}selected{% endif %}>Extended (pre/after hours)</option>
+              <option value="open_drive" {% if _rp == 'open_drive' %}selected{% endif %}>Open Drive</option>
+              <option value="midday" {% if _rp == 'midday' %}selected{% endif %}>Midday</option>
+              <option value="powerhour" {% if _rp == 'powerhour' %}selected{% endif %}>Power Hour</option>
+            </select>
+          </div>
+
+          <div class="toolDivider"></div>
+
+          <div class="toolRow">
+            <label style="display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" id="autoScan" />
+              Auto-scan every 60s
+            </label>
+          </div>
+          <div style="margin-top:8px;">
+            <label class="text-gray-600" style="font-size:13px;">Auto-scan mode</label><br/>
+            <select id="autoScanMode" style="width:100%;">
+              <option value="until">Until candidates appear (stop when found)</option>
+              <option value="continuous">Continuous (keep scanning)</option>
+            </select>
+            <div id="autoScanNextInfo" class="text-gray-600" style="margin-top:8px; font-size:13px;"></div>
+          </div>
+
+          <div class="toolDivider"></div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button type="button" id="runScanBtn" style="width:100%; padding: 12px 14px; border-radius: 14px;" >Run Scan</button>
+          </div>
+
+          <div class="toolDivider"></div>
+          <div class="toolRow" style="justify-content:flex-start; gap:10px;">
+            <a class="btn" href="/?mode=page&universe={{ universe }}&max_symbols={{ max_symbols }}&limit={{ limit }}&offset={{ offset + max_symbols }}{% if request.args.get("use_ml", "1") == "1" %}&use_ml=1{% endif %}{% if request.args.get("use_sentiment") == "1" %}&use_sentiment=1{% endif %}{% if request.args.get("sentiment_provider") %}&sentiment_provider={{ request.args.get("sentiment_provider") }}{% endif %}{% if request.args.get("sentiment_alpha") %}&sentiment_alpha={{ request.args.get("sentiment_alpha") }}{% endif %}">Next page →</a>
+          </div>
+        </div>
+</div>
+
+      <div class="mainRow">
+        <div class="card statusCard" style="margin-top:0;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+    <div style="min-width:0;">
+      <div><span class="tag">Provider</span> {{ provider }}</div>
+      <div style="margin-top:6px;">
+        <span class="tag">Scan mode</span> {{ mode }} &nbsp;
+        <span class="tag">Scanned</span> {{ scanned }} symbols in {{ chunks }} chunk(s)
+        {% if mode == "until" %}<span class="tag">Stopped at offset</span> {{ end_offset }}{% endif %}
+      </div>
+      <div style="margin-top:6px;">
+        <span class="tag">Daily prefilter passed</span> {{ daily_ok }}
+      </div>
+    </div>
+    <div style="min-width:220px; text-align:right;">
+      <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px;">
+        <span class="tag">Scanning</span>
+        <span class="muted" style="font-size:12px;">live scan status</span>
+      </div>
+      <div id="scanStatus" style="margin-top:10px; display:none;"></div>
+      <div id="scanStatusEmpty" class="muted" style="margin-top:10px;">Not scanning.</div>
+    </div>
+  </div>
+
+  <hr/>
+  <div id="lastRunDynamic" class="muted" style="margin:8px 0 10px 0;"></div>
+
+  <div><b>Prefilter</b>: skipped (normalize): <span id="pf_norm">{{ skipped_normalize }}</span>, daily empty: <span id="pf_empty">{{ daily_empty }}</span>, filtered price: <span id="pf_price">{{ filtered_price }}</span>, filtered avg$vol: <span id="pf_avg">{{ filtered_avg_dvol }}</span>, daily ok: <span id="pf_ok">{{ daily_ok }}</span></div>
+  <div style="margin-top:6px;"><b>ORB rejects</b>: OR range: <span id="r_or">{{ rej_or_range }}</span>, today $vol: <span id="r_today">{{ rej_today_dvol }}</span>, RVOL: <span id="r_rvol">{{ rej_rvol }}</span>, risk/share: <span id="r_risk">{{ rej_risk_per_share }}</span>, shares: <span id="r_shares">{{ rej_shares }}</span>, notional: <span id="r_notional">{{ rej_notional }}</span></div>
+  <div style="margin-top:6px;"><b>Data failures</b>: intraday empty: <span id="f_intra_empty">{{ fail_intraday_empty }}</span>, OR window missing: <span id="f_or_missing">{{ fail_or_window_missing }}</span>, other: <span id="f_other">{{ fail_other }}</span></div>
+
+  <div style="margin-top:12px; display:flex; align-items:center; gap:10px;">
+    <span class="tag">Final candidates</span> <b id="finalCandidates" style="font-size:16px;">{{ count }}</b>
+    <button type="button" class="btn btn-danger" id="clearCandidatesBtn" title="Clear persisted candidates from this browser">Clear candidates</button>
+  </div>
+</div>
+        <div class="card heatCard" style="margin-top:0;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <div>
+              <div class="toolSectionTitle">Current Heat</div>
+              <div style="font-size:16px; font-weight:900;">The Realm’s Hottest</div>
+              <div class="muted" style="margin-top:4px;">Top picks refresh after each scan completes.</div>
+      </div>
+          </div>
+
+          <div class="heatControls" style="margin-top:12px;">
+            <span class="tag">Side</span>
+            <select id="heatSide">
+              <option value="all">All</option>
+              <option value="long">Long</option>
+              <option value="short">Short</option>
+            </select>
+
+            <span class="tag">State</span>
+            <select id="heatState">
+              <option value="all">All</option>
+              <option value="triggered">Triggered</option>
+              <option value="near">Near</option>
+              <option value="not">Not triggered</option>
+            </select>
+          
+
+            <span class="tag">Count</span>
+            <select id="heatCount">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="15">15</option>
+              <option value="25">25</option>
+            </select>
+          
+          </div>
+
+          <div class="heatList" id="heatList"></div>
+        
+</div>
+      </div>
+    </div>
+
+    <div class="card" id="beastDeskCard" style="margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;">Beast Desk</h3>
+          <div class="muted" style="margin-top:4px;">Live top-candidate monitoring + tape-aware confidence + catalyst visibility.</div>
+        </div>
+        <div class="inlineStat">
+          <span class="tag">Stream</span>
+          <span id="streamConnBadge" class="badge badge-gray">Checking…</span>
+          <span class="tag">Feed</span>
+          <span id="streamFeedLabel" class="mono">—</span>
+          <span class="muted" id="streamInfoMini"></span>
+        </div>
+      </div>
+
+      <div class="monitorControls" style="margin-top:12px;">
+        <label style="display:flex; gap:6px; align-items:center;">
+          <span class="muted" style="font-size:12px;">Monitor Top N</span>
+          <input id="liveMonitorTopN" inputmode="numeric" value="10" style="width:80px;" />
+        </label>
+        <label style="display:flex; gap:6px; align-items:center;">
+          <span class="muted" style="font-size:12px;">Source</span>
+          <select id="liveMonitorSource" style="min-width:170px;">
+            <option value="candidates" selected>Candidates (filtered)</option>
+            <option value="scan">Top Candidates (latest scan)</option>
+            <option value="pinned">Pinned (saved)</option>
+          </select>
+        </label>
+        <input id="liveMonitorSymbols" placeholder="Optional manual symbols (comma-separated)" style="flex:1; min-width:260px;" />
+        <button type="button" id="monitorStartBtn" >Start Monitor</button>
+        <button type="button" id="monitorRefreshBtn" >Refresh</button>
+        <button type="button" class="btn btn-danger" id="monitorStopBtn" >Stop</button>
+      </div>
+
+      <div class="muted" style="margin-top:8px;">
+        By default, monitor pulls the <b>visible order from the filtered Candidates table</b> below (so your Side filter + sorting carry over). Enter manual symbols to override, or switch Source to latest scan candidates.
+      </div>
+      <div class="legendRow">
+        <span class="tag">Decision</span>
+        <span class="actionPill action-go">🟢 GO</span>
+        <span class="actionPill action-wait">🟡 WAIT</span>
+        <span class="actionPill action-pass">🔴 PASS</span>
+        <span class="muted" style="font-size:12px;">GO = trigger + live tape + decent grade + measurable expansion. WAIT = setup not confirmed yet or has not expanded enough. PASS = invalid / stopped / ugly tape / wide spread / weak confidence.</span>
+      </div>
+
+
+      <div class="panelSub" style="margin-top:10px; padding:10px; border:1px solid var(--border); border-radius:12px; background: rgba(255,255,255,0.03);">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Min grade for GO</div>
+            <select id="liveMonitorMinGrade" style="min-width:90px;">
+              <option value="A">A</option>
+              <option value="B" selected>B</option>
+              <option value="C">C</option>
+            </select>
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Max spread %</div>
+            <input id="liveMonitorMaxSpreadPct" inputmode="decimal" value="0.50" style="width:90px;" />
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Max quote age (ms)</div>
+            <input id="liveMonitorMaxQuoteAgeMs" inputmode="numeric" value="2500" style="width:110px;" />
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Max trade age (ms)</div>
+            <input id="liveMonitorMaxTradeAgeMs" inputmode="numeric" value="2500" style="width:110px;" />
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Risk $/trade</div>
+            <input id="liveMonitorRiskDollars" inputmode="decimal" value="50" style="width:90px;" />
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Near-trigger %</div>
+            <input id="liveMonitorNearTriggerPct" inputmode="decimal" value="0.25" style="width:90px;" />
+          </label>
+          <label class="miniField">
+            <div class="muted" style="font-size:12px;">Min expansion (R)</div>
+            <input id="liveMonitorMinExpansionR" inputmode="decimal" value="0.20" style="width:90px;" />
+          </label>
+
+          <label style="display:flex; gap:8px; align-items:center; margin-left:6px;">
+            <input type="checkbox" id="liveMonitorLongOnly" checked />
+            <span class="muted" style="font-size:12px;">Long-only (cash)</span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="liveMonitorHideShortRows" checked />
+            <span class="muted" style="font-size:12px;">Hide shorts</span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="liveMonitorRequireTapeLive" />
+            <span class="muted" style="font-size:12px;">Require tape live</span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="liveMonitorRequireTrigger" />
+            <span class="muted" style="font-size:12px;">Require trigger</span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="liveMonitorRequireVwapAlign" />
+            <span class="muted" style="font-size:12px;">Require VWAP align</span>
+          </label>
+
+          <label style="display:flex; gap:8px; align-items:center; margin-left:auto;">
+            <input type="checkbox" id="liveMonitorEnableSound" />
+            <span class="muted" style="font-size:12px;">Sound</span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:center;">
+            <input type="checkbox" id="liveMonitorEnableNotify" />
+            <span class="muted" style="font-size:12px;">Desktop notify</span>
+          </label>
+        </div>
+        <div class="muted" style="margin-top:8px; font-size:12px;">
+          Risk sizing uses <b>risk_per_share</b> from the scan plan when available: Shares ≈ Risk$/risk_per_share.
+          Near-trigger alerts fire when a symbol is within Near-trigger % of its OR trigger.
+        </div>
+      </div>
+
+      <div id="monitorStatusLine" style="margin-top:10px;"></div>
+      <div class="kpiRow" id="monitorKpiRow">
+        <div class="kpiCard"><div class="k">Status</div><div class="v" id="kpiMonitorStatus">Idle</div></div>
+        <div class="kpiCard"><div class="k">Ready / Triggered</div><div class="v" id="kpiReadyTriggered">0 / 0</div></div>
+        <div class="kpiCard"><div class="k">Top Live Symbol</div><div class="v" id="kpiTopLive">—</div></div>
+        <div class="kpiCard"><div class="k">Tape Live</div><div class="v" id="kpiTapeLive">0</div></div>
+        <div class="kpiCard"><div class="k">Grades</div><div class="v" id="kpiGrades">—</div></div>
+        <div class="kpiCard"><div class="k">Refresh Count</div><div class="v" id="kpiRefreshCount">0</div></div>
+      </div>
+
+      <div id="monitorSummaryDetails" class="muted" style="margin-top:10px;"></div>
+
+      <div class="monitorTableWrap">
+        <table class="monitorTable">
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>Symbol</th>
+              <th>Live Conf</th>
+              <th>State</th>
+              <th>Tape</th>
+              <th>Price / Spread</th>
+              <th>Trigger</th>
+              <th>Catalyst</th>
+              <th>Scan Rank</th>
+              <th>Reasons / Flags</th>
+            </tr>
+          </thead>
+          <tbody id="monitorTableBody">
+            <tr><td colspan="10" class="muted">Start the monitor to see live updates.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="contextCard" style="margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;">Market Context</h3>
+          <div class="muted" style="margin-top:4px;">Live SPY / QQQ direction, sector leadership, volatility regime, and cohort tape quality.</div>
+        </div>
+        <div class="inlineStat">
+          <span class="tag">Mode</span><span>Monitor-first</span>
+          <span class="tag">Replay</span><span id="contextReplayHint">available</span>
+        </div>
+      </div>
+      <div id="contextSummary" class="muted" style="margin-top:10px;">Loading context…</div>
+      <div id="contextTags" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+    </div>
+
+    <div class="card" id="alertTapeCard" style="margin-top:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;">Alert Tape</h3>
+          <div class="muted" style="margin-top:4px;">Only state transitions appear here. Static presence does not fire alerts.</div>
+        </div>
+        <div class="inlineStat">
+          <span class="tag">Source</span><span>SQLite + SSE</span>
+          <span class="tag">Recent</span><span id="alertTapeCount">0</span>
+        </div>
+      </div>
+      <div id="alertTapeBody" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+        <div class="muted">No alerts yet.</div>
+      </div>
+    </div>
+  </form>
+
+
+
+  {% if (candidates|length) == 0 %}
+{% endif %}
+
+  
+</div>
+
+<div class="card" id="passedCard">
+    <h2>Passed this scan</h2>
+<div class="muted">These are the symbols that passed the filters in the most recent scan results shown below.</div>
+<div id="passedThisRun" style="margin:10px 0 18px 0;"></div>
+<h2>Top Candidates</h2>
+    <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <span class="tag">Filter</span>
+      <select id="candSideFilter">
+        <option value="all">All sides</option>
+        <option value="long" selected>Long</option>
+        <option value="short">Short</option>
+      </select>
+      <input id="candSearchFilter" placeholder="Search symbol/notes…" style="min-width:220px; flex:1;" />
+      <span class="tag">Show</span>
+      <select id="candShowLimit">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="all">All</option>
+      </select>
+      <span id="candVisibleCount" class="muted" style="font-size:12px;"></span>
+    </div>
+
+    
+    <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <span class="tag">Sort candidates</span>
+      <select id="candSortKey">
+        <option value="score">Score</option>
+        <option value="ml">ML</option>
+        <option value="sent">Sent</option>
+      </select>
+      <select id="candSortDir">
+        <option value="desc">High → Low</option>
+        <option value="asc">Low → High</option>
+      </select>
+    </div>
+<div class="tableWrap" id="candidatesWrap"><table>
+      <thead>
+        <tr>
+          <th>Add</th>
+          <th>Symbol</th>
+          <th>Price</th>
+          <th>% (vs first bar)</th>
+          <th>RVOL</th>
+          <th>$Vol Today</th>
+          <th>OR %</th>
+          <th>Best</th>
+          <th>L Trigger</th>
+          <th>L Trig?</th>
+          <th>L Δ</th>
+          <th>L Stop</th>
+          <th>L 2R</th>
+          <th>L Shares</th>
+          <th>L Notional</th>
+          <th>S Trigger</th>
+          <th>S Trig?</th>
+          <th>S Δ</th>
+          <th>S Stop</th>
+          <th>S 2R</th>
+          <th>S Shares</th>
+          <th>S Notional</th>
+          <th>ML</th>
+          <th>Sent</th>
+          <th>Score</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="candidatesBody">
+        {% for c in candidates %}
+        <tr>
+          <td>
+            <button type="button" class="addBtn"
+              data-add-symbol="{{ c.symbol }}"
+              data-best-side="{{ c.best_side }}"
+              data-last-price="{{ c.last_price }}"
+              data-long-trigger="{{ c.long_entry }}"
+              data-long-stop="{{ c.long_stop }}"
+              data-short-trigger="{{ c.short_entry }}"
+              data-short-stop="{{ c.short_stop }}"
+              data-add-price="{{ c.last_price }}"
+              data-add-date="{{ c.data_date }}"
+              data-ml-score="{{ (c.ml_score if c.ml_score is not none else (c.get('ml', none) if c.get('ml', none) is not none else '')) }}"
+              data-combined-score="{{ (c.combined_score if c.combined_score is not none else (c.get('score', none) if c.get('score', none) is not none else '')) }}"
+              data-sent-score="{{ (c.sentiment_score if c.sentiment_score is not none else (c.get('sentiment_score', none) if c.get('sentiment_score', none) is not none else (c.get('sent', none) if c.get('sent', none) is not none else (c.get('sent_score', none) if c.get('sent_score', none) is not none else '')))) }}">Add</button>
+          </td>
+          <td><b>{{ c.symbol }}</b></td>
+          <td>{{ fmt_currency(c.last_price, 2) }}</td>
+          <td class="{{ color_posneg(c.pct_change) }}">{{ fmt_pct(c.pct_change, 1) }}</td>
+          <td>{{ fmt_num(c.rvol, 2) }}</td>
+          <td>{{ fmt_num((c.today_dollar_vol/1000000.0) if c.today_dollar_vol is not none else none, 1, "M") }}</td>
+          <td>{{ fmt_num(c.or_range_pct, 2, "%") }}</td>
+          <td>{% if c.best_side == "long" %}<span class="badge badge-green">LONG</span>{% elif c.best_side == "short" %}<span class="badge badge-red">SHORT</span>{% else %}<span class="badge badge-gray">{{ c.best_side }}</span>{% endif %}</td>
+          <td>{{ fmt_currency(c.long_entry, 2) }}</td>
+          <td>{% if c.long_triggered %}<span class="badge badge-green">TRIG</span>{% else %}<span class="badge badge-gray">—</span>{% endif %}</td>
+          <td>{{ fmt_currency(c.long_trigger_delta, 2) }}</td>
+          <td>{{ fmt_currency(c.long_stop, 2) }}</td>
+          <td>{{ fmt_currency(c.long_2r, 2) }}</td>
+          <td>{{ c.long_shares if c.long_shares is not none else "—" }}</td>
+          <td>{{ fmt_currency(c.long_notional, 0) }}</td>
+          <td>{{ fmt_currency(c.short_entry, 2) }}</td>
+          <td>{% if c.short_triggered %}<span class="badge badge-red">TRIG</span>{% else %}<span class="badge badge-gray">—</span>{% endif %}</td>
+          <td>{{ fmt_currency(c.short_trigger_delta, 2) }}</td>
+          <td>{{ fmt_currency(c.short_stop, 2) }}</td>
+          <td>{{ fmt_currency(c.short_2r, 2) }}</td>
+          <td>{{ c.short_shares if c.short_shares is not none else "—" }}</td>
+          <td>{{ fmt_currency(c.short_notional, 0) }}</td>
+	          {# Back-compat: older cached results might not include these keys #}
+	          <td>{{ fmt_num(c.ml_score, 3) if c.ml_score is not none else (fmt_num(c.get('ml', none), 3) if c.get('ml', none) is not none else 'N/A') }}</td>
+	          <td>{{ fmt_num(c.sentiment_score, 3) if c.sentiment_score is not none else 'N/A' }}</td>
+	          <td>{{ fmt_num(c.combined_score, 3) if c.combined_score is not none else (fmt_num(c.score, 3) if c.score is not none else '0.000') }}</td>
+	          <td style="max-width:420px;">{{ c.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+
+  {% if data_failures %}
+  <div class="card">
+    <h2>Data failures (provider issues only)</h2>
+    <table>
+      <thead><tr><th>Add</th>
+          <th>Symbol</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for e in data_failures[:50] %}
+        <tr><td>{{ e.symbol }}</td><td>{{ e.error }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+<script>
+// Prevent early boot failure before the later scan-status script defines the real function.
+window.refreshVisibleQuotes = window.refreshVisibleQuotes || function refreshVisibleQuotesStub(){};
+</script>
+<script>
+(function(){
+  const KEY = "orb_watchlist";
+  const PASSED_KEY = "orb_passed";
+  const AUTO_SCAN_KEY = "orb_autoscan";
+  const EXEC_STYLE_KEY = "orb_exec_style";
+  const AUTO_SCAN_MODE_KEY = "orb_autoscan_mode";
+
+  const CAND_KEY = "orb_candidates_cache_v1";
+
+
+  // Sorting preferences (candidates + watchlist)
+  const CAND_SORT_PREF_KEY = "orb_cand_sort_key";
+  const CAND_SORT_PREF_DIR = "orb_cand_sort_dir";
+  const WATCH_SORT_PREF_KEY = "orb_watch_sort_key";
+  const WATCH_SORT_PREF_DIR = "orb_watch_sort_dir";
+
+  // Candidates filter preferences
+  const CAND_FILTER_SIDE_KEY = "orb_cand_filter_side";
+  const CAND_FILTER_QUERY_KEY = "orb_cand_filter_query";
+  const CAND_FILTER_LIMIT_KEY = "orb_cand_filter_limit";
+
+  function toFiniteNumber(v){
+    const n = (v === null || v === undefined) ? NaN : Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function getCandidateSortValue(c, key){
+    if (!c) return null;
+    if (key === "ml"){
+      return toFiniteNumber((c.ml_score !== undefined && c.ml_score !== null) ? c.ml_score : (c.ml ?? c.model_score));
+    }
+    if (key === "sent"){
+      return toFiniteNumber(c.sentiment_score ?? c.sent ?? c.sent_score);
+    }
+    // score
+    return toFiniteNumber((c.combined_score !== undefined && c.combined_score !== null) ? c.combined_score : (c.score ?? c.total_score));
+  }
+
+  function sortByKey(items, key, dir){
+    const mul = (dir === "asc") ? 1 : -1;
+    return items.slice().sort((a,b) => {
+      const av = getCandidateSortValue(a, key);
+      const bv = getCandidateSortValue(b, key);
+      // nulls last
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av === bv) return 0;
+      return (av < bv ? -1 : 1) * mul;
+    });
+  }
+
+  function getCandSortPref(){
+    const key = localStorage.getItem(CAND_SORT_PREF_KEY) || "score";
+    const dir = localStorage.getItem(CAND_SORT_PREF_DIR) || "desc";
+    return {key, dir};
+  }
+
+
+  function readCandFilters(){
+    const sideEl = document.getElementById("candSideFilter");
+    const qEl = document.getElementById("candSearchFilter");
+    const limEl = document.getElementById("candShowLimit");
+
+    const side = String((sideEl && sideEl.value) || localStorage.getItem(CAND_FILTER_SIDE_KEY) || "all").toLowerCase();
+    const query = String((qEl && qEl.value) || localStorage.getItem(CAND_FILTER_QUERY_KEY) || "").trim().toLowerCase();
+    const limitRaw = String((limEl && limEl.value) || localStorage.getItem(CAND_FILTER_LIMIT_KEY) || "10").toLowerCase();
+    const limit = (limitRaw === "all") ? "all" : (String(parseInt(limitRaw,10) || 10));
+    return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit };
+  }
+
+  function applySavedCandFiltersToUI(){
+    const sideEl = document.getElementById("candSideFilter");
+    const qEl = document.getElementById("candSearchFilter");
+    const limEl = document.getElementById("candShowLimit");
+    try{
+      const side = localStorage.getItem(CAND_FILTER_SIDE_KEY);
+      const q = localStorage.getItem(CAND_FILTER_QUERY_KEY);
+      const lim = localStorage.getItem(CAND_FILTER_LIMIT_KEY);
+      if (sideEl && side) sideEl.value = side;
+      if (qEl && q !== null && q !== undefined) qEl.value = q;
+      if (limEl && lim) limEl.value = lim;
+    }catch(e){}
+  }
+
+  function persistCandFiltersFromUI(){
+    const f = readCandFilters();
+    try{
+      localStorage.setItem(CAND_FILTER_SIDE_KEY, f.side);
+      localStorage.setItem(CAND_FILTER_QUERY_KEY, (document.getElementById("candSearchFilter")?.value || ""));
+      localStorage.setItem(CAND_FILTER_LIMIT_KEY, f.limit);
+    }catch(e){}
+    return f;
+  }
+
+  function getWatchSortPref(){
+    const key = localStorage.getItem(WATCH_SORT_PREF_KEY) || "score";
+    const dir = localStorage.getItem(WATCH_SORT_PREF_DIR) || "desc";
+    return {key, dir};
+  }
+
+  function loadCandidatesCache(){
+    return loadJSON(CAND_KEY, []);
+  }
+  function saveCandidatesCache(items){
+    // keep newest first, cap size
+    const cap = 500;
+    const trimmed = items.slice(0, cap);
+    saveJSON(CAND_KEY, trimmed);
+  }
+  function mergeCandidatesIntoCache(newItems){
+    if (!Array.isArray(newItems) || !newItems.length) return;
+    const cache = loadCandidatesCache();
+    const byKey = new Map();
+    for (const c of cache){
+      const k = (c.symbol || "") + "|" + (c.data_date || "");
+      byKey.set(k, c);
+    }
+    for (const c of newItems){
+      const k = (c.symbol || "") + "|" + (c.data_date || "");
+      byKey.set(k, c);
+    }
+    // newest first by data_date then symbol
+    const merged = Array.from(byKey.values()).sort((a,b) => {
+      const da = (a.data_date || "");
+      const db = (b.data_date || "");
+      if (da !== db) return db.localeCompare(da);
+      return (a.symbol||"").localeCompare(b.symbol||"");
+    });
+    saveCandidatesCache(merged);
+  }
+
+  function num(x, digits=2){
+    if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
+    const n = Number(x);
+    return n.toFixed(digits);
+  }
+  function money(x, digits=2){
+    if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
+    const n = Number(x);
+    const d = (Math.abs(n) >= 100) ? 0 : digits;
+    return "$" + n.toFixed(d);
+  }
+  function pct(x, digits=1){
+    if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
+    return Number(x).toFixed(digits) + "%";
+  }
+
+function computeChaseAndAdjusted(side, entry0, stop0, last){
+  entry0 = Number(entry0);
+  stop0 = Number(stop0);
+  last = Number(last);
+  const R = Math.abs(entry0 - stop0);
+  if (!isFinite(R) || R <= 0 || !isFinite(last)) {
+    return { R: R, chaseR: null, mode: "na" };
+  }
+  const isLong = (String(side || "").toLowerCase() === "long");
+  const chaseR = isLong ? (last - entry0) / R : (entry0 - last) / R;
+  if (!isFinite(chaseR)) return { R, chaseR: null, mode: "na" };
+
+  let mode = "base";
+  let entryAdj = entry0;
+  let stopAdj = stop0;
+
+  if (chaseR <= 0.5) {
+    mode = "base";
+  } else if (chaseR <= 2.0) {
+    mode = "step";
+    const k = Math.max(0, Math.floor(chaseR));
+    entryAdj = isLong ? (entry0 + k * R) : (entry0 - k * R);
+    stopAdj  = isLong ? (entryAdj - R) : (entryAdj + R);
+  } else {
+    mode = "wait_pullback";
+  }
+
+  const t1 = (mode === "wait_pullback") ? null : (isLong ? (entryAdj + 1*R) : (entryAdj - 1*R));
+  const t2 = (mode === "wait_pullback") ? null : (isLong ? (entryAdj + 2*R) : (entryAdj - 2*R));
+
+  const pbLo = isLong ? (entry0 + 1*R) : (entry0 - 2*R);
+  const pbHi = isLong ? (entry0 + 2*R) : (entry0 - 1*R);
+
+  return { R, chaseR, mode, entryAdj, stopAdj, t1, t2, pbLo, pbHi };
+}
+
+function fmtR(x){
+  if (x === null || x === undefined || !isFinite(Number(x))) return "—";
+  return Number(x).toFixed(2) + "R";
+}
+
+
+  function vwapTrendLine(c){
+    const vwap = Number(c.vwap_last ?? NaN);
+    const delta = Number(c.vwap_delta_pct ?? NaN);
+    const stateRaw = (c.trend_state ?? "");
+    const slope = Number(c.trend_slope_pct ?? NaN);
+    const parts = [];
+    if (Number.isFinite(vwap)) {
+      let s = `VWAP ${money(vwap)}`;
+      if (Number.isFinite(delta)) s += ` (${num(delta,2)}%)`;
+      parts.push(s);
+    }
+    if (stateRaw) {
+      let st = String(stateRaw).replaceAll("_"," ");
+      let s = `Trend ${escapeHtml(st)}`;
+      if (Number.isFinite(slope)) s += ` (${num(slope,2)}%/15m)`;
+      parts.push(s);
+    }
+    if (!parts.length) return "";
+    return `<div class="muted" style="margin-top:4px;">${parts.join(" • ")}</div>`;
+  }
+
+  function renderCandidatesTable(items){
+    const body = document.getElementById("candidatesBody");
+    if (!body) return;
+    if (!Array.isArray(items) || !items.length){
+      // don't wipe existing table; caller decides
+      return;
+    }
+    const pref = getCandSortPref();
+    const sorted = sortByKey(items, pref.key, pref.dir);
+    // Apply side/search/limit filters from UI
+    const f = (typeof readCandFilters === 'function') ? readCandFilters() : {side:'all', query:'', limit:'10'};
+    let filtered = sorted;
+    if (f.side && f.side !== 'all'){
+      filtered = filtered.filter(c => String((c.best_side||'')).toLowerCase() === f.side);
+    }
+    if (f.query){
+      filtered = filtered.filter(c => {
+        const sym = String(c.symbol||'').toLowerCase();
+        const notes = String(c.notes||c.note||c.reason||'').toLowerCase();
+        return sym.includes(f.query) || notes.includes(f.query);
+      });
+    }
+    if (f.limit !== 'all'){
+      const n = Math.max(1, Math.min(500, parseInt(f.limit,10) || 10));
+      filtered = filtered.slice(0, n);
+    }
+    const visEl = document.getElementById('candVisibleCount');
+    if (visEl){
+      visEl.textContent = `Showing ${filtered.length} / ${sorted.length}`;
+    }
+
+    if (!filtered.length){
+      body.innerHTML = `<tr><td colspan="26" class="muted">No candidates match filters.</td></tr>`;
+      try { bindCandidateAddButtons(); } catch(e){}
+      return;
+    }
+
+    const rows = filtered.map(c => {
+      const sym = (c.symbol || "").toUpperCase();
+      const best = (c.best_side || "").toLowerCase();
+
+      const bestBadge = (best === "long")
+        ? '<span class="badge badge-green">LONG</span>'
+        : (best === "short")
+          ? '<span class="badge badge-red">SHORT</span>'
+          : '<span class="badge badge-gray">' + (best || "—") + '</span>';
+
+      // "Near trigger" if within 0.25% of last price (and not already triggered)
+      const shownPx = Number((c.live_price ?? c.last_price) ?? NaN);
+      const lastPx = shownPx;
+      const nearPct = 0.0025;
+
+      const lIsTrig = !!c.long_triggered;
+      const lEntry = Number(c.long_entry ?? NaN);
+      const lNear = (!lIsTrig && Number.isFinite(lastPx) && Number.isFinite(lEntry) && lastPx > 0 && ((lEntry - lastPx)/lastPx) <= nearPct && (lEntry - lastPx) > 0);
+      const lTrigged = lIsTrig ? '<span class="badge badge-green">TRIG</span>' : (lNear ? '<span class="badge badge-amber">NEAR</span>' : '<span class="badge badge-gray">—</span>');
+
+      const sIsTrig = !!c.short_triggered;
+      const sEntry = Number(c.short_entry ?? NaN);
+      const sNear = (!sIsTrig && Number.isFinite(lastPx) && Number.isFinite(sEntry) && lastPx > 0 && ((lastPx - sEntry)/lastPx) <= nearPct && (lastPx - sEntry) > 0);
+      const sTrigged = sIsTrig ? '<span class="badge badge-red">TRIG</span>' : (sNear ? '<span class="badge badge-amber">NEAR</span>' : '<span class="badge badge-gray">—</span>');
+
+      const addBtn = `<button type="button" class="addBtn"
+        data-add-symbol="${sym}"
+        data-add-price="${(c.live_price ?? c.last_price) ?? ""}"
+        data-last-price="${(c.live_price ?? c.last_price) ?? ""}"
+        data-best-side="${best}"
+        data-long-trigger="${c.long_trigger_delta !== undefined ? c.long_entry : c.long_entry}"
+        data-long-trigger-delta="${c.long_trigger_delta ?? ""}"
+        data-long-triggered="${c.long_triggered ? "1":"0"}"
+        data-long-stop="${c.long_stop ?? ""}"
+        data-short-trigger="${c.short_entry ?? ""}"
+        data-short-trigger-delta="${c.short_trigger_delta ?? ""}"
+        data-short-triggered="${c.short_triggered ? "1":"0"}"
+        data-short-stop="${c.short_stop ?? ""}"
+        data-add-date="${c.data_date ?? ""}"
+      data-ml-score="${(c.ml_score ?? c.ml ?? c.model_score ?? "")}"
+        data-combined-score="${(c.combined_score ?? c.score ?? c.total_score ?? "")}"
+      data-sent-score="${(c.sentiment_score ?? c.sent ?? c.sent_score ?? "")}"
+      >Add</button>`;
+
+      const lTrig = money(c.long_entry);
+      // lTrigged computed above
+
+      const lDelta = money(((c.live_price ?? c.last_price) ?? 0) - (c.long_entry ?? 0));
+      const lStop = money(c.long_stop);
+      const l2r = money(c.long_2r);
+      const lShares = (c.long_shares ?? "—");
+      const lNot = money(c.long_notional);
+
+      const sTrig = money(c.short_entry);
+      // sTrigged computed above
+
+      const sDelta = money((c.short_entry ?? 0) - (((c.live_price ?? c.last_price) ?? 0)));
+      const sStop = money(c.short_stop);
+      const s2r = money(c.short_2r);
+      const sShares = (c.short_shares ?? "—");
+      const sNot = money(c.short_notional);
+
+      // Back-compat: tolerate older/alternate key names from cached results
+      // ML score can appear under a few keys depending on backend/version.
+      // Prefer ml_score, then combined_score (when ML-only), then legacy keys.
+            // ML column should always display ml_score (or legacy ml/model_score), not combined_score.
+      const mlRaw = (c.ml_score !== undefined && c.ml_score !== null) ? c.ml_score
+        : (c.ml !== undefined && c.ml !== null) ? c.ml
+        : (c.model_score !== undefined && c.model_score !== null) ? c.model_score
+        : null;
+      // Score column should prefer combined_score, fall back to score/total_score.
+      const scoreRaw = (c.combined_score !== undefined && c.combined_score !== null) ? c.combined_score
+        : (c.score !== undefined && c.score !== null) ? c.score
+        : (c.total_score !== undefined && c.total_score !== null) ? c.total_score
+        : null;
+      const ml = (mlRaw === null || mlRaw === undefined || Number.isNaN(Number(mlRaw))) ? "N/A" : num(mlRaw, 3);
+      const sent = (c.sentiment_score === null || c.sentiment_score === undefined || Number.isNaN(Number(c.sentiment_score))) ? "N/A" : num(c.sentiment_score, 3);
+      const score = (scoreRaw === null || scoreRaw === undefined || Number.isNaN(Number(scoreRaw))) ? "N/A" : num(scoreRaw, 3);
+      const notes = (c.notes || "");
+
+const bestSide = (best === "short") ? "short" : "long";
+const entry0 = (bestSide === "long") ? (c.long_entry ?? null) : (c.short_entry ?? null);
+const stop0  = (bestSide === "long") ? (c.long_stop ?? null)  : (c.short_stop ?? null);
+const adj = computeChaseAndAdjusted(bestSide, entry0, stop0, ((c.live_price ?? c.last_price) ?? null));
+
+let chaseTxt = "";
+if (adj && adj.mode === "wait_pullback"){
+  chaseTxt = `EXT ${fmtR(adj.chaseR)} • WAIT PULLBACK ${money(adj.pbLo)}–${money(adj.pbHi)}`;
+} else if (adj && (adj.mode === "base" || adj.mode === "step")){
+  chaseTxt = `Chase ${fmtR(adj.chaseR)} • Adj ${money(adj.entryAdj)} / ${money(adj.stopAdj)} / ${money(adj.t2)}`;
+}
+
+const mlNum = (mlRaw === null || mlRaw === undefined || Number.isNaN(Number(mlRaw))) ? null : Number(mlRaw);
+const scoreNum = (scoreRaw === null || scoreRaw === undefined || Number.isNaN(Number(scoreRaw))) ? null : Number(scoreRaw);
+const confNum = (c.confidence_score === null || c.confidence_score === undefined || Number.isNaN(Number(c.confidence_score))) ? null : Number(c.confidence_score);
+const confGrade = String(c.confidence_grade || '').toUpperCase();
+const gradePill = confGrade ? `<span class="gradePill ${gradeClass(confGrade)}">${escapeHtml(confGrade)}${(confNum !== null && Number.isFinite(confNum)) ? ` ${Math.round(confNum)}` : ''}</span>` : '';
+let mlChase = "";
+if (adj && adj.chaseR !== null){
+  if (adj.chaseR > 2.0) mlChase = "ML Chase: NO (too extended)";
+  else if (mlNum !== null && mlNum >= 0.12) mlChase = "ML Chase: OK";
+  else if (mlNum !== null) mlChase = "ML Chase: NO";
+}
+const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons.slice(0,3) : [];
+const seedReasons = Array.isArray(c.monitor_seed_reasons) ? c.monitor_seed_reasons.slice(0,3) : [];
+const qualityParts = [];
+if (gradePill) qualityParts.push(gradePill);
+if (mlNum !== null) qualityParts.push(`<span class="tag">ML <b>${num(mlNum,3)}</b></span>`);
+if (scoreNum !== null) qualityParts.push(`<span class="tag">Combo <b>${num(scoreNum,3)}</b></span>`);
+if (adj && adj.chaseR !== null) qualityParts.push(`<span class="tag">Chase <b>${fmtR(adj.chaseR)}</b></span>`);
+if (gateReasons.length) qualityParts.push(`<span class="tag">Fail: <b>${escapeHtml(gateReasons.join(', '))}</b></span>`);
+else if (seedReasons.length) qualityParts.push(`<span class="tag">Seed: <b>${escapeHtml(seedReasons.join(', '))}</b></span>`);
+const qualityLine = qualityParts.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${qualityParts.join('')}</div>` : '';
+
+const notesParts = [];
+if (notes) notesParts.push(notes);
+if (chaseTxt) notesParts.push(chaseTxt);
+if (mlChase) notesParts.push(mlChase);
+const liveStampLabel = String(c.live_source || '').toLowerCase() === 'snapshot' ? 'Snapshot' : 'Live';
+if (c.live_price_ts) notesParts.push(`${liveStampLabel} @ ${escapeHtml(String(c.live_price_ts))}`);
+if (c.prior_session_touch) notesParts.push("PRIOR SESSION TOUCH");
+if (c.live_state_error) notesParts.push(`DATA: ${escapeHtml(String(c.live_state_error))}`);
+else if (c.stale_reason) notesParts.push(`DATA: ${escapeHtml(String(c.stale_reason))}`);
+const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${qualityLine ? '6px' : '0'};">${notesParts.join(" • ")}</div>` : ''}`;
+
+      return `<tr>
+        <td>${addBtn}</td>
+        <td><strong>${sym}</strong>${vwapTrendLine(c)}</td>
+        <td>${money((c.live_price ?? c.last_price))}</td>
+        <td>${pct(c.pct_change)}</td>
+        <td>${num(c.rvol, 2)}</td>
+        <td>${money(c.today_dollar_vol,0)}</td>
+        <td>${pct(c.or_range_pct,2)}</td>
+        <td>${bestBadge}</td>
+        <td>${lTrig}</td><td>${lTrigged}</td><td>${lDelta}</td><td>${lStop}</td><td>${l2r}</td><td>${lShares}</td><td>${lNot}</td>
+        <td>${sTrig}</td><td>${sTrigged}</td><td>${sDelta}</td><td>${sStop}</td><td>${s2r}</td><td>${sShares}</td><td>${sNot}</td>
+        <td>${ml}</td><td>${sent}</td><td>${score}</td>
+        <td class="notes">${notesOut}</td>
+      </tr>`;
+    }).join("");
+    body.innerHTML = rows;
+    bindCandidateAddButtons();
+    maybeAutoAddPassed();
+    // Keep the "Current Heat" panel fresh.
+    try { if (window.renderHeatPanel) window.renderHeatPanel(); } catch(e){}
+  }
+
+  function isNearTrigger(c, side){
+    const shownPx = Number((c.live_price ?? c.last_price) ?? NaN);
+      const lastPx = shownPx;
+    if (!Number.isFinite(lastPx) || lastPx <= 0) return false;
+    const nearPct = 0.0025; // 0.25%
+    if (side === "long"){
+      if (c.long_triggered) return false;
+      const entry = Number(c.long_entry ?? NaN);
+      if (!Number.isFinite(entry)) return false;
+      const diff = (entry - lastPx);
+      return diff > 0 && (diff/lastPx) <= nearPct;
+    }
+    if (side === "short"){
+      if (c.short_triggered) return false;
+      const entry = Number(c.short_entry ?? NaN);
+      if (!Number.isFinite(entry)) return false;
+      const diff = (lastPx - entry);
+      return diff > 0 && (diff/lastPx) <= nearPct;
+    }
+    return false;
+  }
+
+  function renderHeatPanel(){
+    const list = document.getElementById("heatList");
+    if (!list) return;
+    const sideSel = document.getElementById("heatSide");
+    const stateSel = document.getElementById("heatState");
+    const wantSide = (sideSel && sideSel.value) ? sideSel.value : "all";
+    const wantState = (stateSel && stateSel.value) ? stateSel.value : "all";
+
+    const countSel = document.getElementById("heatCount");
+    const heatMax = Math.max(1, Math.min(50, parseInt((countSel && countSel.value) ? countSel.value : "10", 10) || 10));
+
+
+    const pref = getCandSortPref(); // reuse the main sort preference
+    const cached = loadCandidatesCache();
+    if (!cached.length){
+      list.innerHTML = `<div class="muted">Run a scan to populate the heat panel.</div>`;
+      return;
+    }
+
+    const sorted = sortByKey(cached, pref.key, pref.dir);
+    const filtered = [];
+    for (const c of sorted){
+      const best = ((c.best_side || "").toLowerCase() === "short") ? "short" : "long";
+      if (wantSide !== "all" && best !== wantSide) continue;
+
+      const trig = (best === "long") ? !!c.long_triggered : !!c.short_triggered;
+      const near = isNearTrigger(c, best);
+      if (wantState === "triggered" && !trig) continue;
+      if (wantState === "near" && !near) continue;
+      if (wantState === "not" && (trig || near)) continue;
+
+      filtered.push(c);
+      if (filtered.length >= heatMax) break;
+    }
+
+    if (!filtered.length){
+      list.innerHTML = `<div class="muted">No candidates match your heat filters.</div>`;
+      return;
+    }
+
+    const html = filtered.map(c => {
+      const sym = (c.symbol || "").toUpperCase();
+      const best = ((c.best_side || "").toLowerCase() === "short") ? "short" : "long";
+      const badge = (best === "long")
+        ? '<span class="badge badge-green">LONG</span>'
+        : '<span class="badge badge-red">SHORT</span>';
+
+      const bucket = String(c.model_bucket || "").toLowerCase();
+      const bucketBadge = bucket ? `<span class="badge badge-gray">${bucket === "under20" ? "B20" : "A"}</span>` : "";
+
+      const trig = (best === "long") ? !!c.long_triggered : !!c.short_triggered;
+      const near = isNearTrigger(c, best);
+      const state = trig ? '<span class="badge badge-green">TRIG</span>' : (near ? '<span class="badge badge-amber">NEAR</span>' : '<span class="badge badge-gray">—</span>');
+
+      const scoreRaw = (c.combined_score ?? c.score ?? c.total_score ?? null);
+      const scoreTxt = (scoreRaw === null || scoreRaw === undefined || Number.isNaN(Number(scoreRaw))) ? "N/A" : num(scoreRaw, 3);
+
+
+
+      const grade = String(c.confidence_grade || "").toUpperCase();
+      const confScore = (c.confidence_score === null || c.confidence_score === undefined) ? null : Number(c.confidence_score);
+      const gradeBadge = grade ? `<span class="badge badge-gray">G ${grade}${(confScore!==null && Number.isFinite(confScore)) ? ' '+Math.round(confScore) : ''}</span>` : '';
+      const mlv = (c.ml_score ?? c.ml ?? c.model_score ?? null);
+      const mlBadge = (mlv === null || mlv === undefined || Number.isNaN(Number(mlv))) ? '' : `<span class="badge badge-gray">ML ${num(mlv,3)}</span>`;
+      const sentv = (c.sentiment_score ?? c.sent_score ?? c.sent ?? null);
+      const sentBadge = (sentv === null || sentv === undefined || Number.isNaN(Number(sentv))) ? '' : `<span class="badge ${(Number(sentv)>=0) ? 'badge-green' : 'badge-red'}">S ${num(sentv,2)}</span>`;
+      const catv = (c.catalyst_score ?? null);
+      const catBadge = (catv === null || catv === undefined || Number.isNaN(Number(catv))) ? '' : `<span class="badge badge-amber">CAT ${num(catv,2)}</span>`;
+      const catTags = Array.isArray(c.catalyst_tags) ? c.catalyst_tags.slice(0,3).join(', ') : '';
+      const entry = (best === "long") ? (c.long_entry ?? null) : (c.short_entry ?? null);
+      const stop  = (best === "long") ? (c.long_stop ?? null)  : (c.short_stop ?? null);
+      const tgt2  = (best === "long") ? (c.long_2r ?? null)    : (c.short_2r ?? null);
+      const levelsHtml = `
+        <div class="levels">
+          <span class="level entry">Entry <b>${money(entry)}</b></span>
+          <span class="level stop">Stop <b>${money(stop)}</b></span>
+          <span class="level tgt">2R <b>${money(tgt2)}</b></span><span class="level tgt">3R <b>${money((best === "long") ? (c.long_3r ?? null) : (c.short_3r ?? null))}</b></span>
+        </div>`;
+
+      const addBtn = `<button type="button" class="addBtn"
+        data-add-symbol="${sym}"
+        data-add-price="${(c.live_price ?? c.last_price) ?? ""}"
+        data-last-price="${(c.live_price ?? c.last_price) ?? ""}"
+        data-best-side="${best}"
+        data-long-trigger="${c.long_entry ?? ""}"
+        data-long-stop="${c.long_stop ?? ""}"
+        data-short-trigger="${c.short_entry ?? ""}"
+        data-short-stop="${c.short_stop ?? ""}"
+        data-add-date="${c.data_date ?? ""}"
+        data-ml-score="${(c.ml_score ?? c.ml ?? c.model_score ?? "") }"
+        data-combined-score="${(c.combined_score ?? c.score ?? c.total_score ?? "") }"
+        data-sent-score="${(c.sentiment_score ?? c.sent ?? c.sent_score ?? "") }"
+      >Add</button>`;
+
+      return `
+        <div class="heatItem" data-heat-symbol="${sym}" data-best-side="${best}">
+          <div class="heatLeft">
+            <div class="heatTop">
+              <span class="heatSym">${sym}</span>
+              ${badge}
+              ${bucketBadge}
+              ${state}
+              ${gradeBadge}${mlBadge}${sentBadge}${catBadge}
+            </div>
+            <div class="heatMeta">Last ${money(c.last_price)} • RVOL ${num(c.rvol,2)}${catTags ? ` • ${esc(catTags)}` : ``}</div>${vwapTrendLine(c)}${(()=>{ const entry0=(best==="long")?(c.long_entry??null):(c.short_entry??null); const stop0=(best==="long")?(c.long_stop??null):(c.short_stop??null); const adj=computeChaseAndAdjusted(best, entry0, stop0, (c.last_price??null)); if (!adj||adj.chaseR===null) return ""; if (adj.mode==="wait_pullback") return '<div class="muted" style="margin-top:4px;">EXT '+fmtR(adj.chaseR)+' • WAIT '+money(adj.pbLo)+'–'+money(adj.pbHi)+'</div>'; return '<div class="muted" style="margin-top:4px;">Chase '+fmtR(adj.chaseR)+' • Adj '+money(adj.entryAdj)+' / '+money(adj.stopAdj)+' / '+money(adj.t2)+'</div>'; })()}${levelsHtml}
+          </div>
+          <div class="heatRight">
+            <div class="heatScore">${scoreTxt}</div>
+            ${addBtn}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    list.innerHTML = html;
+    bindCandidateAddButtons();
+  }
+
+  function syncCandidatesCacheFromDOM(){
+    const body = document.getElementById("candidatesBody");
+    if (!body) return;
+    const rows = Array.from(body.querySelectorAll("tr"));
+    if (!rows.length) return;
+    // if server rendered, we already have addBtn data attributes we can use for symbol/date
+    const items = rows.map(r => {
+      const btn = r.querySelector(".addBtn");
+      if (!btn) return null;
+      return {
+        symbol: btn.getAttribute("data-add-symbol"),
+        data_date: btn.getAttribute("data-add-date") || null
+      };
+    }).filter(Boolean);
+    // don't overwrite full objects; just ensure cache has at least these symbols
+    if (items.length){
+      const cache = loadCandidatesCache();
+      const have = new Set(cache.map(c => (c.symbol||"") + "|" + (c.data_date||"")));
+      const add = [];
+      for (const it of items){
+        const k = (it.symbol||"") + "|" + (it.data_date||"");
+        if (!have.has(k)) add.push(it);
+      }
+      if (add.length) mergeCandidatesIntoCache(add);
+    }
+  }
+
+  function loadJSON(key, fallback){
+    try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+    catch(e){ return fallback; }
+  }
+  function saveJSON(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+
+  function fmt(n, d=2){
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return "—";
+    return Number(n).toFixed(d);
+  }
+  function escapeHtml(s){
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  
+  function collectCandidatesFromTable(){
+    return Array.from(document.querySelectorAll(".addBtn")).map(btn => ({
+      symbol: btn.getAttribute("data-add-symbol"),
+      best_side: (btn.getAttribute("data-best-side") || "").toLowerCase(),
+      last_price: Number(btn.getAttribute("data-last-price")),
+      long_trigger: Number(btn.getAttribute("data-long-trigger")),
+      long_stop: Number(btn.getAttribute("data-long-stop")),
+      short_trigger: Number(btn.getAttribute("data-short-trigger")),
+      short_stop: Number(btn.getAttribute("data-short-stop")),
+      price: Number(btn.getAttribute("data-add-price")),
+      data_date: btn.getAttribute("data-add-date") || null,
+      ml_score: (() => { const v = btn.getAttribute("data-ml-score"); return (v===null || v===undefined || v==="") ? null : Number(v); })(),
+      sentiment_score: (() => { const v = btn.getAttribute("data-sent-score"); return (v===null || v===undefined || v==="") ? null : Number(v); })(),
+      combined_score: (() => { const v = btn.getAttribute("data-combined-score"); return (v===null || v===undefined || v==="") ? null : Number(v); })(),
+    })).filter(x => x.symbol);
+  }
+
+
+  
+  function renderWatch(){
+    const el = document.getElementById("watchlist");
+    if (!el) return;
+
+    const items = loadJSON(KEY, []);
+    if (!items.length){
+      el.innerHTML = '<div class="text-gray-600">No items yet. Click “Add” on a candidate.</div>';
+      return;
+    }
+
+    const wpref = getWatchSortPref();
+    const wkey = wpref.key;
+    const wdir = wpref.dir;
+    const wmul = (wdir === "asc") ? 1 : -1;
+
+    const sortedItems = items.slice().sort((a,b) => {
+      const av = toFiniteNumber(wkey==="ml" ? a.ml_score : wkey==="sent" ? a.sentiment_score : a.combined_score);
+      const bv = toFiniteNumber(wkey==="ml" ? b.ml_score : wkey==="sent" ? b.sentiment_score : b.combined_score);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      if (av === bv) return 0;
+      return (av < bv ? -1 : 1) * wmul;
+    });
+
+    const rows = sortedItems.map(it => `
+      <tr>
+        <td><button type="button" class="rmBtn" data-rm="${escapeHtml(it.symbol)}">✕</button></td>
+        <td><b>${escapeHtml(it.symbol)}</b></td>
+        <td>${escapeHtml(it.side || "")}</td>
+        <td class="text-gray-600">${escapeHtml(it.exec_style || "")}</td>
+        <td>$${fmt(it.price,2)}</td>
+        <td>${escapeHtml(it.data_date || "")}</td>
+        <td>${(it.ml_score === null || it.ml_score === undefined || Number.isNaN(Number(it.ml_score))) ? "N/A" : fmt(it.ml_score, 3)}</td>
+        <td>${(it.sentiment_score === null || it.sentiment_score === undefined || Number.isNaN(Number(it.sentiment_score))) ? "N/A" : fmt(it.sentiment_score, 3)}</td>
+        <td>${(it.combined_score === null || it.combined_score === undefined || Number.isNaN(Number(it.combined_score))) ? "N/A" : fmt(it.combined_score, 3)}</td>
+        <td>$${fmt(it.entry,2)}</td>
+        <td>$${fmt(it.stop,2)}</td>
+        <td>$${fmt(it.target_2r,2)}</td>
+        <td>$${fmt(it.target_3r,2)}</td>
+        <td class="text-gray-600">${escapeHtml(it.added_at || "")}</td>
+      </tr>
+    `).join("");
+
+    el.innerHTML = `
+      <table>
+        <thead><tr>
+          <th></th><th>Symbol</th><th>Side</th><th>Exec</th><th>Price</th><th>Date</th><th>ML</th><th>Sent</th><th>Score</th><th>Trigger</th><th>Stop</th><th>2R</th><th>3R</th><th>Saved</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    el.querySelectorAll(".rmBtn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const sym = btn.getAttribute("data-rm");
+        saveJSON(KEY, items.filter(x => x.symbol !== sym));
+        renderWatch();
+      });
+    });
+  }
+
+
+  function maybeAutoAddPassed(){
+    const auto = document.getElementById("autoAddPassed");
+    if (!auto || !auto.checked) return;
+
+    const passedSymbols = new Set(loadJSON(PASSED_KEY, []));
+    const cands = collectCandidatesFromTable();
+    const watch = loadJSON(KEY, []);
+    const existing = new Set(watch.map(x => x.symbol));
+    const now = new Date().toISOString();
+    let changed = false;
+
+    for (const c of cands){
+      if (!passedSymbols.has(c.symbol)) continue;
+      if (existing.has(c.symbol)) continue;
+      watch.push({...c, added_at: now});
+      existing.add(c.symbol);
+      changed = true;
+    }
+    if (changed) saveJSON(KEY, watch);
+  }
+
+  function bindCandidateAddButtons(){
+    document.querySelectorAll(".addBtn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const sym = (btn.getAttribute("data-add-symbol") || "").toUpperCase();
+        const best = (btn.getAttribute("data-best-side") || "long").toLowerCase();
+        const last = Number(btn.getAttribute("data-last-price"));
+        const longTrig = Number(btn.getAttribute("data-long-trigger"));
+        const longStop = Number(btn.getAttribute("data-long-stop"));
+        const shortTrig = Number(btn.getAttribute("data-short-trigger"));
+        const shortStop = Number(btn.getAttribute("data-short-stop"));
+                const date = btn.getAttribute("data-add-date") || null;
+        const mlScore = btn.getAttribute("data-ml-score");
+        const sentScore = btn.getAttribute("data-sent-score");
+        const combinedScore = btn.getAttribute("data-combined-score");
+
+        const execSel = document.getElementById("execStyle");
+        const execStyle = (execSel && execSel.value) ? execSel.value : (localStorage.getItem("orb_exec_style") || "retest");
+        if (execSel) localStorage.setItem("orb_exec_style", execStyle);
+
+        const side = (best === "short") ? "short" : "long";
+        const trigger = (side === "short") ? shortTrig : longTrig;
+        const stop = (side === "short") ? shortStop : longStop;
+
+        const triggered = (side === "long") ? (last >= trigger) : (last <= trigger);
+        const entry = (execStyle === "breakout_now" && triggered) ? last : trigger;
+
+        const risk = Math.abs(entry - stop);
+        const target2 = (side === "long") ? (entry + 2*risk) : (entry - 2*risk);
+        const target3 = (side === "long") ? (entry + 3*risk) : (entry - 3*risk);
+
+        const watch = loadJSON(KEY, []);
+        if (watch.some(x => x.symbol === sym)) return;
+                watch.push({symbol: sym, side, exec_style: execStyle, entry, stop, target_2r: target2, target_3r: target3, price: last, data_date: date, ml_score: (mlScore === null || mlScore === undefined || mlScore === "" ? null : Number(mlScore)), sentiment_score: (sentScore === null || sentScore === undefined || sentScore === "" ? null : Number(sentScore)), combined_score: (combinedScore === null || combinedScore === undefined || combinedScore === "" ? null : Number(combinedScore)), added_at: new Date().toISOString()});
+        saveJSON(KEY, watch);
+        renderWatch();
+      });
+    });
+  }
+
+  // Export / Clear
+  const exportBtn = document.getElementById("watchExport");
+  if (exportBtn){
+    exportBtn.addEventListener("click", () => {
+      const items = loadJSON(KEY, []);
+            const header = ["symbol","price","data_date","ml_score","sentiment_score","combined_score","entry","stop","target_2r","target_3r","added_at"];
+      const lines = [header.join(",")].concat(items.map(it => header.map(k => {
+        const v = it[k];
+        if (v === null || v === undefined) return "";
+        const s = String(v).replace(/"/g,'""');
+        return `"${s}"`;
+      }).join(",")));
+      const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "orb_watchlist.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  const clearBtn = document.getElementById("watchClear");
+  if (clearBtn){
+    clearBtn.addEventListener("click", () => {
+      if (!confirm("Clear watchlist?")) return;
+      saveJSON(KEY, []);
+      renderWatch();
+    });
+  }
+
+
+  const clearCandidatesBtn = document.getElementById("clearCandidatesBtn");
+  if (clearCandidatesBtn){
+    clearCandidatesBtn.addEventListener("click", () => {
+      if (!confirm("Clear persisted candidates on this browser?")) return;
+      try { localStorage.removeItem(CAND_KEY); } catch(e) {}
+      const body = document.getElementById("candidatesBody");
+      if (body) body.innerHTML = "";
+      const fc = document.getElementById("finalCandidates");
+      if (fc) fc.textContent = "0";
+      const passed = document.getElementById("passedThisRun");
+      if (passed) passed.innerHTML = "";
+      const noCard = document.getElementById("noCandidatesCard");
+      if (noCard) if (noCard) noCard.style.display = "block";
+    });
+  }
+
+  // Analyzer
+  async function analyze(){
+    const symEl = document.getElementById("analyzeSymbol");
+    const statusEl = document.getElementById("analyzeStatus");
+    const outEl = document.getElementById("analyzeResult");
+    const symbol = (symEl?.value || "").trim().toUpperCase();
+    if (!symbol){
+      if (statusEl) statusEl.textContent = "Enter a symbol.";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "Loading…";
+    if (outEl) outEl.innerHTML = "";
+    try{
+      const res = await fetch(`/api/analyze?symbol=${encodeURIComponent(symbol)}`);
+      const data = await res.json();
+      if (!data.ok){
+        if (statusEl) statusEl.textContent = `Error: ${data.error || "Unknown"}`;
+        if (outEl) outEl.innerHTML = `<div class="text-red-700">Error: ${escapeHtml(data.error || "Unknown")}</div>`;
+        return;
+      }
+      if (statusEl) statusEl.textContent = "OK";
+
+
+      // Execution-style: if triggered, show "enter now" levels derived from current price
+      const execSel = document.getElementById("execStyle");
+      const execStyle = (execSel && execSel.value) ? execSel.value : (localStorage.getItem("orb_exec_style") || "retest");
+      const enterNow = (side, trigger, stop, triggered) => {
+        if (execStyle !== "breakout_now" || !triggered) return "";
+        const entryNow = Number(data.last_price);
+        const risk = Math.abs(entryNow - Number(stop));
+        const t2 = (side === "long") ? (entryNow + 2*risk) : (entryNow - 2*risk);
+        return `<div class="text-gray-600" style="margin-top:4px;">If entering now (${side}) @ $${fmt(entryNow,2)}: stop $${fmt(stop,2)} • 2R $${fmt(t2,2)}</div>`;
+      };
+      const enterNowLong = enterNow("long", data.long_entry, data.long_stop, !!data.long_triggered);
+      const enterNowShort = enterNow("short", data.short_entry, data.short_stop, !!data.short_triggered);
+      const hasOR = (data.or_high !== null && data.or_high !== undefined);
+      const orBlock = hasOR
+        ? `
+          <div style="margin-top:8px;">
+            <b>ORB Plans (5m opening range):</b>
+            <div class="text-gray-600">OR High $${fmt(data.or_high,2)} | OR Low $${fmt(data.or_low,2)} | OR% ${fmt(data.or_range_pct,2)}% | Best: <span class="tag">${escapeHtml(data.best_side || "—")}</span></div>
+            <table style="margin-top:8px; width:auto; border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Side</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Trigger</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Trig?</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Δ</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Stop</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">2R</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Shares</th>
+                  <th style="padding:4px 8px; border-bottom:1px solid #eee;">Notional</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="padding:4px 8px;">Long</td>
+                  <td style="padding:4px 8px;">$${fmt(data.long_entry,2)}</td>
+                  <td style="padding:4px 8px;">${data.long_triggered ? "✓" : "—"}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.long_trigger_delta,2)}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.long_stop,2)}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.long_2r,2)}</td>
+                  <td style="padding:4px 8px;">${(data.long_shares!==null && data.long_shares!==undefined)? data.long_shares : "—"}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.long_notional,0)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 8px;">Short</td>
+                  <td style="padding:4px 8px;">$${fmt(data.short_entry,2)}</td>
+                  <td style="padding:4px 8px;">${data.short_triggered ? "✓" : "—"}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.short_trigger_delta,2)}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.short_stop,2)}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.short_2r,2)}</td>
+                  <td style="padding:4px 8px;">${(data.short_shares!==null && data.short_shares!==undefined)? data.short_shares : "—"}</td>
+                  <td style="padding:4px 8px;">$${fmt(data.short_notional,0)}</td>
+                </tr>
+              </tbody>
+            </table>
+            ${enterNowLong}${enterNowShort}
+          </div>
+        `
+        : `<div class="text-gray-600" style="margin-top:8px;">ORB not available: ${escapeHtml(data.or_note || "missing OR window")}</div>`;
+
+      const senti = (data.sentiment_score !== null && data.sentiment_score !== undefined)
+        ? `<div style="margin-top:8px;"><b>Sentiment:</b> ${fmt(data.sentiment_score,3)}</div>`
+        : (data.sentiment_error ? `<div class="text-gray-600" style="margin-top:8px;">Sentiment unavailable: ${escapeHtml(data.sentiment_error)}</div>` : "");
+
+      const headlines = (data.sentiment_headlines && data.sentiment_headlines.length)
+        ? `<div style="margin-top:10px;"><b>News (latest):</b>
+            <div style="margin-top:6px; display:flex; flex-direction:column; gap:8px;">
+              ${data.sentiment_headlines.slice(0,6).map(a => {
+                const title = a.title || a.headline || '';
+                const pub = (a.publisher && (a.publisher.name || a.publisher)) || a.source || '';
+                const when = a.published_utc || a.published || '';
+                const url = a.article_url || a.url || '';
+                const insight = (a.insights && Array.isArray(a.insights) && a.insights.length) ? a.insights[0] : null;
+                const sent = insight && insight.sentiment ? insight.sentiment : (a.sentiment || '');
+                const reason = insight && insight.sentiment_reasoning ? insight.sentiment_reasoning : (a.sentiment_reasoning || '');
+                return `<div style="padding:8px; border:1px solid #e5e7eb; border-radius:10px; background:#ffffff;">
+                          <div style="font-weight:600;">${escapeHtml(title)}</div>
+                          <div class="text-gray-600" style="font-size:13px; margin-top:2px;">
+                            ${escapeHtml(pub)}${when ? ` • ${escapeHtml(when)}` : ''}${sent ? ` • <b>${escapeHtml(sent)}</b>` : ''}
+                          </div>
+                          ${reason ? `<div style="margin-top:4px; font-size:13px;">${escapeHtml(reason)}</div>` : ''}
+                          ${url ? `<div style="margin-top:4px; font-size:13px;"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Open article</a></div>` : ''}
+                        </div>`;
+              }).join("")}
+            </div>
+          </div>`
+        : "";
+
+      if (outEl){
+        outEl.innerHTML = `
+          <div class="card" style="background:#f9fafb; border:1px solid #e5e7eb; color:#111827;">
+            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+              <div>
+                <div class="text-gray-600">Symbol</div>
+                <div style="font-size:20px;"><b>${escapeHtml(data.symbol)}</b></div>
+              </div>
+              <div>
+                <div class="text-gray-600">Last</div>
+                <div><b>$${fmt(data.last_price,2)}</b> <span class="${(data.pct_change||0)>=0?'text-green-700':'text-red-700'}">${fmt(data.pct_change,2)}%</span></div>
+              </div>
+              <div>
+                <div class="text-gray-600">Today $Vol</div>
+                <div><b>$${fmt(data.today_dollar_vol,0)}</b></div>
+              </div>
+              <div>
+                <div class="text-gray-600">RVOL</div>
+                <div><b>${fmt(data.rvol,2)}</b></div>
+              </div>
+            </div>
+            ${orBlock}
+            ${senti}
+            ${headlines}
+          </div>
+        `;
+      }
+    }catch(err){
+      if (statusEl) statusEl.textContent = `Error: ${String(err)}`;
+      if (document.getElementById("analyzeResult")){
+        document.getElementById("analyzeResult").innerHTML = `<div class="text-red-700">Error: ${escapeHtml(String(err))}</div>`;
+      }
+    }
+  }
+  const analyzeBtn = document.getElementById("analyzeBtn");
+  if (analyzeBtn) analyzeBtn.addEventListener("click", analyze);
+  const symInput = document.getElementById("analyzeSymbol");
+  if (symInput){
+    symInput.addEventListener("keydown", (e) => { if (e.key === "Enter") analyze(); });
+  }
+
+
+  // Entry-now planner (uses real /api/entry_now)
+  async function planEntryNow(){
+    const symEl = document.getElementById("analyzeSymbol");
+    const sideEl = document.getElementById("entryNowSide");
+    const statusEl = document.getElementById("entryNowStatus");
+    const outEl = document.getElementById("entryNowResult");
+    const symbol = (symEl?.value || "").trim().toUpperCase();
+    const side = (sideEl?.value || "auto").trim().toLowerCase();
+    if (!symbol){
+      if (statusEl) statusEl.textContent = "Enter a symbol above.";
+      return;
+    }
+    if (statusEl) statusEl.textContent = "Computing…";
+    if (outEl) outEl.innerHTML = "";
+
+    // tie sentiment toggle to main UI checkbox if present
+    const useSentBox = document.getElementById("useSentBox");
+    const wantSent = !!(useSentBox && useSentBox.checked);
+
+    try{
+      const res = await fetch(`/api/entry_now?symbol=${encodeURIComponent(symbol)}&side=${encodeURIComponent(side)}&use_sentiment=${wantSent?1:0}`);
+      const data = await res.json();
+      if (!data.ok){
+        if (statusEl) statusEl.textContent = `Error: ${data.error || "Unknown"}`;
+        if (outEl) outEl.innerHTML = `<div class="text-red-700">Error: ${escapeHtml(data.error || "Unknown")}</div>`;
+        return;
+      }
+      if (statusEl) statusEl.textContent = "OK";
+
+      const sideTag = `<span class="tag">${escapeHtml((data.side||'').toUpperCase())}</span>`;
+      const vwapLine = (data.vwap_last!==null && data.vwap_last!==undefined)
+        ? `VWAP $${fmt(data.vwap_last,2)} (${fmt(data.vwap_delta_pct,2)}%) • Trend <b>${escapeHtml(data.trend_state||'—')}</b> (${fmt(data.trend_slope_pct,2)}%)`
+        : `Trend <b>${escapeHtml(data.trend_state||'—')}</b>`;
+
+      // ML: primary number is P(2R/30m) from Entry-Now model when available; raw shown second.
+      const p2r = (data.p_2r_30m!==null && data.p_2r_30m!==undefined) ? data.p_2r_30m : null;
+      const raw = (data.ml_score!==null && data.ml_score!==undefined) ? data.ml_score : null;
+
+      const tags = []
+      if (data.entry_now_bucket) tags.push(String(data.entry_now_bucket));
+      if (data.model_bucket) tags.push(String(data.model_bucket));
+
+      const mlLine = (p2r!==null)
+        ? `P(2R/30m) <b>${fmt(p2r,3)}</b>`
+          + ((raw!==null) ? ` • Raw score <b>${fmt(raw,3)}</b>` : ``)
+          + (tags.length ? ` ` + tags.map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join(' ') : ``)
+        : `<span class="text-gray-600">ML unavailable (${escapeHtml(data.entry_now_error||'no model')})</span>`;
+
+      // Decision pill (GO / WAIT / PASS) + notes
+      const planState = String(data.plan_state || "").toUpperCase();
+      const planNotes = Array.isArray(data.plan_notes) ? data.plan_notes.join(" • ") : "";
+      const hintLine = (data.hint) ? `<div class="muted" style="margin-top:6px;">${escapeHtml(String(data.hint))}</div>` : ``;
+      const planColor = (planState === "GO") ? "#16a34a" : (planState === "PASS") ? "#dc2626" : "#d97706";
+      const planPill = planState
+        ? `<span class="tag" style="background:${planColor}; color:white; border:none;">${escapeHtml(planState)}</span>`
+        : "";
+      const planMeta = (data.risk_pct!==null && data.risk_pct!==undefined && data.twoR_pct!==null && data.twoR_pct!==undefined)
+        ? `<span class="muted">risk ${fmt(data.risk_pct,1)}% • 2R move ${fmt(data.twoR_pct,1)}%</span>`
+        : "";
+      const planNotesHtml = planNotes ? `<span class="muted">${escapeHtml(planNotes)}</span>` : ``;
+
+      const sentLine = (data.sentiment_score!==null && data.sentiment_score!==undefined)
+        ? `Sentiment <b>${fmt(data.sentiment_score,3)}</b>`
+        : (data.sentiment_error ? `Sentiment unavailable: ${escapeHtml(data.sentiment_error)}` : `Sentiment off`);
+
+      // Plan
+      const plan = `
+        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+          <span class="tag">Entry now</span> <b>$${fmt(data.entry_now,2)}</b>
+          <span class="tag">Stop</span> <b>$${fmt(data.stop,2)}</b>
+          <span class="tag">Risk</span> <b>$${fmt(data.risk_per_share,2)}</b>
+          <span class="tag">1R</span> <b>$${fmt(data.target_1r,2)}</b>
+          <span class="tag">2R</span> <b>$${fmt(data.target_2r,2)}</b>
+          <span class="tag">3R</span> <b>$${fmt(data.target_3r,2)}</b>
+        </div>
+      `;
+
+      outEl.innerHTML = `
+        <div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <b style="font-size:16px;">${escapeHtml(symbol)}</b>
+            ${sideTag}
+            ${planPill}
+            <span class="muted">Last $${fmt(data.last_price,2)}</span>
+          </div>
+          <div class="muted" style="margin-top:6px;">${vwapLine}</div>
+          <div class="muted" style="margin-top:6px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">${planMeta}${planNotesHtml}${hintLine}</div>
+          <div style="margin-top:10px;">${plan}</div>
+          <div class="muted" style="margin-top:10px;">${mlLine}</div>
+          <div class="muted" style="margin-top:6px;">${sentLine}</div>
+        </div>
+      `;
+    }catch(err){
+      if (statusEl) statusEl.textContent = `Error: ${String(err)}`;
+      if (outEl) outEl.innerHTML = `<div class="text-red-700">Error: ${escapeHtml(String(err))}</div>`;
+    }
+  }
+
+  const entryNowBtn = document.getElementById("entryNowBtn");
+  if (entryNowBtn) entryNowBtn.addEventListener("click", planEntryNow);
+
+  // Auto-scan: keep scanning forward (advance offset) until candidates appear.
+  const autoScanEl = document.getElementById("autoScan");
+  const infoEl = document.getElementById("autoScanNextInfo");
+  function getNumAttr(name, fallback=0){
+    const n = Number(document.body.getAttribute(name));
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function buildNextUrl(nextOffset){
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode","until");
+    url.searchParams.set("offset", String(nextOffset));
+    return url.toString();
+  }
+  if (autoScanEl){
+    autoScanEl.checked = (localStorage.getItem(AUTO_SCAN_KEY) === "1");
+    autoScanEl.addEventListener("change", () => {
+      localStorage.setItem(AUTO_SCAN_KEY, autoScanEl.checked ? "1":"0");
+    });
+
+    const candidateCount = Number(document.body.getAttribute("data-candidate-count") || "0");
+    const scanMode = document.body.getAttribute("data-scan-mode") || "";
+    const endOffset = getNumAttr("data-end-offset", 0);
+    const universeSize = getNumAttr("data-universe-size", 0);
+
+    if (autoScanEl.checked && scanMode === "until"){
+      if (candidateCount > 0){
+        if (infoEl) infoEl.textContent = "Auto-scan paused (candidates found).";
+      } else {
+        let nextOffset = endOffset;
+        if (universeSize > 0 && nextOffset >= universeSize) nextOffset = 0;
+        if (infoEl) infoEl.textContent = `Next auto-scan in 60s (offset → ${nextOffset}).`;
+        // async scan mode: auto-scan is handled after job completion via /api/scan_status
+        // setTimeout(() => { window.location.href = buildNextUrl(nextOffset); }, 60000);
+      }
+    } else {
+      if (infoEl) infoEl.textContent = "";
+    }
+  }
+
+  // Persist execution style + autoscan mode
+  const execSel = document.getElementById("execStyle");
+  if (execSel){
+    execSel.value = localStorage.getItem(EXEC_STYLE_KEY) || execSel.value || "retest";
+    execSel.addEventListener("change", ()=> localStorage.setItem(EXEC_STYLE_KEY, execSel.value));
+  }
+  const modeSel = document.getElementById("autoScanMode");
+  if (modeSel){
+    modeSel.value = localStorage.getItem(AUTO_SCAN_MODE_KEY) || modeSel.value || "until";
+    modeSel.addEventListener("change", ()=> localStorage.setItem(AUTO_SCAN_MODE_KEY, modeSel.value));
+  }
+
+  setInterval(refreshVisibleQuotes, 5000);
+
+  // init
+  // Hook up sort controls (persisted in localStorage)
+  const candSortKeyEl = document.getElementById("candSortKey");
+  const candSortDirEl = document.getElementById("candSortDir");
+  if (candSortKeyEl && candSortDirEl){
+    const pref = getCandSortPref();
+    candSortKeyEl.value = pref.key;
+    candSortDirEl.value = pref.dir;
+    const apply = () => {
+      localStorage.setItem(CAND_SORT_PREF_KEY, candSortKeyEl.value);
+      localStorage.setItem(CAND_SORT_PREF_DIR, candSortDirEl.value);
+      const cached = loadCandidatesCache();
+      if (cached.length) renderCandidatesTable(cached);
+    };
+    candSortKeyEl.addEventListener("change", apply);
+    candSortDirEl.addEventListener("change", apply);
+  }
+
+
+  // Candidate filters (side/search/limit)
+  try { applySavedCandFiltersToUI(); } catch(e){}
+  const candSideEl = document.getElementById("candSideFilter");
+  const candQueryEl = document.getElementById("candSearchFilter");
+  const candLimitEl = document.getElementById("candShowLimit");
+  const applyCandFilter = () => {
+    try { persistCandFiltersFromUI(); } catch(e){}
+    const cached = loadCandidatesCache();
+    if (cached.length) renderCandidatesTable(cached);
+  };
+  if (candSideEl) candSideEl.addEventListener("change", applyCandFilter);
+  if (candLimitEl) candLimitEl.addEventListener("change", applyCandFilter);
+  if (candQueryEl) candQueryEl.addEventListener("input", applyCandFilter);
+
+  const watchSortKeyEl = document.getElementById("watchSortKey");
+  const watchSortDirEl = document.getElementById("watchSortDir");
+  if (watchSortKeyEl && watchSortDirEl){
+    const pref = getWatchSortPref();
+    watchSortKeyEl.value = pref.key;
+    watchSortDirEl.value = pref.dir;
+    const apply = () => {
+      localStorage.setItem(WATCH_SORT_PREF_KEY, watchSortKeyEl.value);
+      localStorage.setItem(WATCH_SORT_PREF_DIR, watchSortDirEl.value);
+      renderWatch();
+    };
+    watchSortKeyEl.addEventListener("change", apply);
+    watchSortDirEl.addEventListener("change", apply);
+  }
+
+  renderWatch();
+  bindCandidateAddButtons();
+  maybeAutoAddPassed();
+  try { if (window.renderHeatPanel) window.renderHeatPanel(); } catch(e){}
+
+  // initial render from cache (if any)
+  try {
+    syncCandidatesCacheFromDOM();
+    const cached = loadCandidatesCache();
+    if (cached.length) renderCandidatesTable(cached);
+  } catch (e) { /* ignore */ }
+
+  // Heat filters
+  const heatSide = document.getElementById("heatSide");
+  const heatState = document.getElementById("heatState");
+  if (heatSide) heatSide.addEventListener("change", () => { try { renderHeatPanel(); } catch(e){} });
+  if (heatState) heatState.addEventListener("change", () => { try { renderHeatPanel(); } catch(e){} });
+
+  const heatCount = document.getElementById("heatCount");
+  if (heatCount){
+    try {
+      const saved = localStorage.getItem("orb_heat_count");
+      if (saved) heatCount.value = saved;
+    } catch(e){}
+    heatCount.addEventListener("change", () => {
+      try { localStorage.setItem("orb_heat_count", heatCount.value || "10"); } catch(e){}
+      try { renderHeatPanel(); } catch(e){}
+    });
+  }
+
+
+  // Expose candidate cache helpers to other scripts
+  window.loadCandidatesCache = loadCandidatesCache;
+  window.saveCandidatesCache = saveCandidatesCache;
+  window.mergeCandidatesIntoCache = mergeCandidatesIntoCache;
+  // Expose renderer so async scan can update the table without reloading
+  window.renderCandidatesTable = renderCandidatesTable;
+  window.renderHeatPanel = renderHeatPanel;
+  // NOTE: orbUI global removed; buttons are wired via addEventListener.
+  window.orbUI = window.orbUI || {};
+
+  window.candCacheKey = CAND_KEY;
+
+})();
+</script>
+
+
+
+<script id="orb_meta_json" type="application/json">{{ (out or {})|tojson }}</script>
+<script id="orb_candidates_json" type="application/json">{{ (candidates or [])|tojson }}</script>
+<script>
+(function(){
+  const form = document.querySelector('form');
+  const statusEl = document.getElementById('scanStatus');
+  const autoBox = document.getElementById('autoScan');
+
+  // Sentiment alpha (weight) — user-controlled
+  const sentBox = form ? form.querySelector('input[name="use_sentiment"]') : null;
+  const sentAlpha = document.getElementById('sentAlpha');
+  const SENT_ALPHA_KEY = "orb_sentiment_alpha";
+  const USE_SENT_KEY = "orb_use_sentiment";
+
+  function syncSentControls(){
+    if (!sentAlpha || !sentBox) return;
+    sentAlpha.disabled = !sentBox.checked;
+    sentAlpha.style.opacity = sentAlpha.disabled ? "0.55" : "1";
+  }
+
+  if (sentAlpha){
+    const saved = localStorage.getItem(SENT_ALPHA_KEY);
+    // Only overwrite if user hasn't explicitly set a query param value
+    if (saved && (!sentAlpha.value || sentAlpha.value === "0.15")) {
+      sentAlpha.value = saved;
+    }
+    sentAlpha.addEventListener('change', () => {
+      localStorage.setItem(SENT_ALPHA_KEY, String(sentAlpha.value || ""));
+    });
+  }
+  if (sentBox){
+    const savedUse = localStorage.getItem(USE_SENT_KEY);
+    // Don't fight server-rendered checked state; only apply on first visit when param isn't present
+    const urlHasUseSent = new URLSearchParams(window.location.search).has("use_sentiment");
+    if (!urlHasUseSent && savedUse !== null){
+      sentBox.checked = (savedUse === "1");
+    }
+    sentBox.addEventListener('change', () => {
+      localStorage.setItem(USE_SENT_KEY, sentBox.checked ? "1" : "0");
+      syncSentControls();
+    });
+  }
+  syncSentControls();
+
+
+  function setStatus(html) {
+    const emptyEl = document.getElementById('scanStatusEmpty');
+    if (emptyEl) emptyEl.style.display = 'none';
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = html;
+  }
+
+  function clearStatus() {
+    const emptyEl = document.getElementById('scanStatusEmpty');
+    if (emptyEl) emptyEl.style.display = 'block';
+    statusEl.style.display = 'none';
+    statusEl.innerHTML = '';
+  }
+
+  // initialize status box
+  clearStatus();
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = (value === null || value === undefined) ? '' : String(value);
+  }
+
+function renderLastRun(summary){
+    const el = document.getElementById('lastRunDynamic');
+    if (!el) return;
+    if (!summary || Object.keys(summary).length===0) { el.textContent = ''; return; }
+
+    const scanned = summary.scanned ?? 0;
+    const chunks = summary.chunks ?? 0;
+    const endOff = summary.end_offset ?? (summary.progress && summary.progress.end_offset) ?? 0;
+    const count = (typeof summary.candidates_total === 'number')
+      ? summary.candidates_total
+      : ((summary.count ?? (summary.candidates ? summary.candidates.length : 0)) ?? 0);
+
+    const pf = summary.prefilter_counts || {};
+    const rj = summary.reject_counts || {};
+    const th = summary.thresholds_used || {};
+    const esc = (typeof escapeHtml === "function")
+      ? escapeHtml
+      : (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    const rejectLabel = (k) => ({
+      filtered_price: "price",
+      filtered_avg20_dollar_vol: "avg20 $vol",
+      filtered_or_range: "OR range",
+      filtered_today_dollar_vol: "today $vol",
+      filtered_rvol: "RVOL",
+      filtered_risk_per_share: "risk/share",
+      filtered_shares: "shares",
+      filtered_notional: "notional",
+      intraday_empty: "intraday empty",
+      intraday_or_window: "OR window missing",
+      intraday_or_window_incomplete: "OR window incomplete",
+      other_data_failures: "other data failures",
+      avg20_below_threshold: "avg20 below threshold",
+      avg20_calc_missing: "avg20 calc missing",
+      ml_too_low: "ML too low",
+      confidence_too_low: "confidence too low",
+      combined_too_low: "combined too low",
+      chase_too_high: "chase too high",
+      trend_chop: "trend chop",
+      above_max_pct_under_vwap: "below VWAP",
+      orb_not_live_before_open: "not live session",
+      orb_retest_not_confirmed: "retest not confirmed",
+      orb_retest_not_near_entry: "not near entry",
+      orb_retest_too_extended: "too extended"
+    }[k] || k);
+
+    const topRejects = Object.entries(rj)
+      .filter(([k, v]) => Number(v) > 0 && k !== "daily_ok")
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 8)
+      .map(([k, v]) => `<span class="tag">${esc(rejectLabel(k))} <b>${Number(v)}</b></span>`);
+
+    const strictLive = !!(
+      th.min_grade_enabled || th.min_combined_enabled || th.no_chop_enabled || th.min_vwap_enabled
+    );
+
+    const rejected = Array.isArray(summary.rejected_candidates) ? summary.rejected_candidates : [];
+    const rejectedPreview = rejected.slice(0, 8).map((c) => {
+      const sym = esc(String(c.symbol || '—'));
+      const reasons = [];
+      const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons : [];
+      const seedReasons = Array.isArray(c.monitor_seed_reasons) ? c.monitor_seed_reasons : [];
+      for (const r of [...gateReasons, ...seedReasons]) {
+        if (r && !reasons.includes(r)) reasons.push(r);
+      }
+      const shown = reasons.slice(0, 3).map(rejectLabel).join(', ') || 'rejected';
+      return `<span class="tag"><b>${sym}</b> — ${esc(shown)}</span>`;
+    });
+
+    const thresholdParts = [
+      th.strategy != null ? `<span class="tag">strategy <b>${esc(String(th.strategy))}</b></span>` : "",
+      th.exec_style != null ? `<span class="tag">exec <b>${esc(String(th.exec_style))}</b></span>` : "",
+      th.min_price != null ? `<span class="tag">min $ <b>${Number(th.min_price).toLocaleString()}</b></span>` : "",
+      th.max_price != null ? `<span class="tag">max $ <b>${Number(th.max_price).toLocaleString()}</b></span>` : "",
+      th.min_avg20_dollar_vol != null ? `<span class="tag">min avg20 $vol <b>${Number(th.min_avg20_dollar_vol).toLocaleString()}</b></span>` : "",
+      th.min_today_dollar_vol != null ? `<span class="tag">min today $vol <b>${Number(th.min_today_dollar_vol).toLocaleString()}</b></span>` : "",
+      th.min_rvol != null ? `<span class="tag">min RVOL <b>${Number(th.min_rvol).toLocaleString()}</b></span>` : "",
+      th.min_or_range_pct != null ? `<span class="tag">min OR % <b>${Number(th.min_or_range_pct).toLocaleString()}</b></span>` : "",
+      th.max_or_range_pct != null ? `<span class="tag">max OR % <b>${Number(th.max_or_range_pct).toLocaleString()}</b></span>` : "",
+      th.limit != null ? `<span class="tag">limit <b>${Number(th.limit).toLocaleString()}</b></span>` : "",
+      th.max_symbols != null ? `<span class="tag">max symbols <b>${Number(th.max_symbols).toLocaleString()}</b></span>` : "",
+      th.use_ml != null ? `<span class="tag">ML <b>${th.use_ml ? "on" : "off"}</b></span>` : "",
+      th.use_sentiment != null ? `<span class="tag">sentiment <b>${th.use_sentiment ? "on" : "off"}</b></span>` : "",
+      th.use_catalyst != null ? `<span class="tag">catalyst <b>${th.use_catalyst ? "on" : "off"}</b></span>` : ""
+    ].filter(Boolean);
+
+    el.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <span class="tag">Mode</span>
+          <span class="badge ${strictLive ? 'badge-green' : 'badge-gray'}">${strictLive ? 'STRICT LIVE' : 'LOOSE / DISCOVERY'}</span>
+          <span class="tag">Provider <b>${esc(String(summary.provider || '—'))}</b></span>
+          <span class="tag">Trade-ready <b>${Number(summary.tradable_now_total ?? count)}</b></span>
+          <span class="tag">Rejected <b>${Number(summary.rejected_total ?? rejected.length ?? 0)}</b></span>
+          <span class="tag">Seed pool <b>${Number(summary.seed_candidates_total ?? 0)}</b></span>
+        </div>
+        <div>
+          Last run: <b>${scanned}</b> scanned • <b>${chunks}</b> chunk(s) • end offset <b>${endOff}</b> • candidates <b>${count}</b>
+        </div>
+        <div>
+          Prefilter ok: <b>${pf.daily_ok ?? 0}</b> • price filtered: <b>${pf.filtered_price ?? 0}</b> • avg$vol filtered: <b>${pf.filtered_avg20_dollar_vol ?? 0}</b>
+        </div>
+        <div>
+          Rejects — OR%: <b>${rj.filtered_or_range ?? 0}</b> • today $vol: <b>${rj.filtered_today_dollar_vol ?? 0}</b> • RVOL: <b>${rj.filtered_rvol ?? 0}</b> • data fails: <b>${(rj.intraday_empty ?? 0) + (rj.intraday_or_window ?? 0) + (rj.other_data_failures ?? 0)}</b>
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <b>Active thresholds:</b>
+          ${thresholdParts.length ? thresholdParts.join(' ') : '<span class="muted">No thresholds returned.</span>'}
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <b>Top rejects:</b>
+          ${topRejects.length ? topRejects.join(' ') : '<span class="muted">No reject counts returned.</span>'}
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <b>Rejected symbols:</b>
+          ${rejectedPreview.length ? rejectedPreview.join(' ') : '<span class="muted">No rejected symbol preview returned.</span>'}
+        </div>
+      </div>`;
+  }
+
+  function normalizeScanCandidate(raw){
+    const c = Object.assign({}, raw || {});
+    c.symbol = String(c.symbol || c.ticker || c.Symbol || "").toUpperCase();
+    if (!c.best_side) {
+      if (c.long_entry != null || c.entry != null || c.long_triggered) c.best_side = "long";
+      else if (c.short_entry != null || c.short_triggered) c.best_side = "short";
+      else c.best_side = "long";
+    }
+    if (c.entry == null && c.long_entry != null) c.entry = c.long_entry;
+    if (c.stop == null && c.long_stop != null) c.stop = c.long_stop;
+    if (c.target == null) {
+      if (c.long_target != null) c.target = c.long_target;
+      else if (c.long_2r != null) c.target = c.long_2r;
+      else if (c.target_2r != null) c.target = c.target_2r;
+      else if (c.take_profit != null) c.target = c.take_profit;
+    }
+    if (c.long_entry == null && c.entry != null) c.long_entry = c.entry;
+    if (c.long_stop == null && c.stop != null) c.long_stop = c.stop;
+    if (c.long_2r == null && c.target != null) c.long_2r = c.target;
+    if (c.long_shares == null && c.shares != null) c.long_shares = c.shares;
+    if (c.long_notional == null && c.notional != null) c.long_notional = c.notional;
+    if ((c.rr == null || c.rr === "") && c.entry != null && c.stop != null && c.target != null) {
+      const e = Number(c.entry), s = Number(c.stop), t = Number(c.target);
+      if (Number.isFinite(e) && Number.isFinite(s) && Number.isFinite(t) && e > s) {
+        const risk = e - s, reward = t - e;
+        if (risk > 0) c.rr = reward / risk;
+      }
+    }
+    if (!c.last_price && c.live_price != null) c.last_price = c.live_price;
+    if (!c.price && c.live_price != null) c.price = c.live_price;
+    return c;
+  }
+
+  async function fetchCandidatesForJob(jobId){
+    if (!jobId) return [];
+    try {
+      const r = await fetch(`/api/debug_last_scan?job_id=${encodeURIComponent(jobId)}`, {cache:'no-store'});
+      if (!r.ok) return [];
+      const j = await r.json();
+      const arr = j.candidates || j.results || (j.result && (j.result.candidates || j.result.results)) || [];
+      return Array.isArray(arr) ? arr.map(normalizeScanCandidate).filter(c => c.symbol) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+async function startScan() {
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.use_ml = form.querySelector('input[name="use_ml"]')?.checked ? "1" : "0";
+    payload.use_sentiment = form.querySelector('input[name="use_sentiment"]')?.checked ? "1" : "0";
+    payload.use_catalyst = form.querySelector('input[name="use_catalyst"]')?.checked ? "1" : "0";
+    if (payload.disable_auto_monitor == null || payload.disable_auto_monitor === '') payload.disable_auto_monitor = "1";
+    const res = await fetch('/api/scan_start', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(`scan_start failed (${res.status}): ${t.slice(0,200)}`); }
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || 'scan_start_failed');
+    if (j.thresholds_used) {
+      const th = j.thresholds_used || {};
+      setStatus(`Starting scan… strategy <b>${String(th.strategy || '')}</b> • RVOL <b>${String(th.min_rvol ?? '')}</b> • today $vol <b>${String(th.min_today_dollar_vol ?? '')}</b> • avg20 $vol <b>${String(th.min_avg20_dollar_vol ?? '')}</b> • OR % <b>${String(th.min_or_range_pct ?? '')}</b> → <b>${String(th.max_or_range_pct ?? '')}</b> • ML <b>${String(th.use_ml ?? '')}</b> • Sent <b>${String(th.use_sentiment ?? '')}</b> • Cat <b>${String(th.use_catalyst ?? '')}</b>`);
+    }
+    localStorage.setItem('orb_job_id', j.job_id);
+    localStorage.setItem('orb_last_scan_payload', JSON.stringify(payload));
+    return j.job_id;
+  }
+
+
+  async function refreshVisibleQuotes(){
+    try {
+      const cached = loadCandidatesCache();
+      if (!Array.isArray(cached) || !cached.length) return;
+      const symbols = Array.from(new Set(cached.slice(0, 50).map(c => String(c.symbol||'').toUpperCase()).filter(Boolean)));
+      if (!symbols.length) return;
+      const r = await fetch(`/api/live_quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+      const j = await r.json();
+      if (!j.ok || !j.quotes) return;
+      const bySym = j.quotes || {};
+      const merged = cached.map(c => {
+        const q = bySym[String(c.symbol||'').toUpperCase()];
+        if (!q) return c;
+        const copy = Object.assign({}, c);
+        if (q.last_trade_price !== undefined && q.last_trade_price !== null){
+          copy.live_price = q.last_trade_price;
+          copy.last_price = q.last_trade_price;
+          copy.price = q.last_trade_price;
+        }
+        copy.live_price_ts = q.last_trade_ts || copy.live_price_ts;
+        copy.live_bid = q.bid;
+        copy.live_ask = q.ask;
+        copy.live_mid = q.mid;
+        copy.live_feed = q.feed;
+        copy.live_source = q.source || copy.live_source;
+        if (q.error) copy.live_state_error = q.error;
+        if (q.stale_reason) copy.stale_reason = q.stale_reason;
+        else if ('stale_reason' in copy) delete copy.stale_reason;
+        return copy;
+      });
+      saveCandidatesCache(merged);
+      renderCandidatesTable(merged);
+    } catch (e) {}
+  }
+
+async function poll(jobId) {
+    const r = await fetch(`/api/scan_status?job_id=${encodeURIComponent(jobId)}`);
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'scan_status_failed');
+    const p = j.progress || {};
+    if (j.status === 'running') {
+      const totalChunks = Number(p.chunks_total || 0);
+      const currentChunk = (p.current_chunk !== undefined && p.current_chunk !== null)
+        ? (Number(p.current_chunk) + 1)
+        : Number(p.chunks_done || 0);
+      const shownChunk = totalChunks > 0 ? Math.min(totalChunks, Math.max(1, currentChunk || 1)) : (currentChunk || '?');
+      setStatus(`Scanning… <b>${p.scanned||0}</b> symbols • chunk <b>${shownChunk}</b> / <b>${p.chunks_total||'?'}</b> • offset <b>${p.offset||0}</b> → <b>${p.end_offset||0}</b>`);
+      return false;
+    }
+    if (j.status === 'error') {
+      setStatus(`<b>Scan failed:</b> ${j.error || 'unknown error'}`);
+      return true;
+    }
+    // done
+    const resSummary = j.result || {};
+    renderLastRun(resSummary);
+    if (resSummary.monitor_id){
+      setCurrentMonitorId(resSummary.monitor_id);
+      ensurePolling();
+      refreshMonitor().catch(()=>{});
+    }
+
+    // "count" has historically meant different things in different code paths.
+    const foundCount = (
+      (typeof resSummary.candidates_total === 'number') ? resSummary.candidates_total :
+      (Array.isArray(resSummary.candidates) ? resSummary.candidates.length :
+        (typeof resSummary.count === 'number' ? resSummary.count : 0))
+    );
+    const found = foundCount > 0;
+
+    // Hydrate real candidate rows for the exact finished job.
+    let runCandidates = [];
+    if (Array.isArray(resSummary.candidates) && resSummary.candidates.length){
+      runCandidates = resSummary.candidates.map(normalizeScanCandidate).filter(c => c.symbol);
+    } else if (foundCount > 0) {
+      runCandidates = await fetchCandidatesForJob(jobId);
+    }
+    if (runCandidates.length){
+      (window.mergeCandidatesIntoCache || (()=>{}))(runCandidates);
+      if (window.renderCandidatesTable) window.renderCandidatesTable(runCandidates);
+    } else {
+      const cached = (window.loadCandidatesCache || (()=>[]))();
+      if (cached.length && window.renderCandidatesTable){
+        window.renderCandidatesTable(cached);
+      }
+    }
+
+    // Fill in the detailed count breakdowns from the async result.
+    const pc = resSummary.prefilter_counts || {};
+    setText('pf_norm', pc.normalized_skipped ?? 0);
+    setText('pf_empty', pc.daily_empty ?? 0);
+    setText('pf_price', pc.filtered_price ?? 0);
+    setText('pf_avg', pc.filtered_avg20_dollar_vol ?? 0);
+    setText('pf_ok', pc.daily_ok ?? 0);
+
+    const rc = resSummary.reject_counts || {};
+    setText('r_or', rc.filtered_or_range ?? 0);
+    setText('r_today', rc.filtered_today_dollar_vol ?? 0);
+    setText('r_rvol', rc.filtered_rvol ?? 0);
+    setText('r_risk', rc.filtered_risk_per_share ?? 0);
+    setText('r_shares', rc.filtered_shares ?? 0);
+    setText('r_notional', rc.filtered_notional ?? 0);
+    setText('f_intra_empty', rc.intraday_empty ?? 0);
+    setText('f_or_missing', rc.intraday_or_window ?? 0);
+    setText('f_other', rc.other_data_failures ?? 0);
+
+    // Hide the server-rendered "no candidates" advice card when we actually found candidates.
+    const noCard = document.getElementById('noCandidatesCard');
+    if (noCard) if (noCard) noCard.style.display = found ? 'none' : 'block';
+
+    // Ensure the candidates table area exists/visible even on first load when server had none.
+    const passedCard = document.getElementById('passedCard');
+    if (passedCard) passedCard.style.display = 'block';
+
+    // Update visible count from hydrated run candidates first, then server count, then cache.
+    const finalEl = document.getElementById('finalCandidates');
+    if (finalEl) {
+      const cachedNow = (window.loadCandidatesCache || (()=>[]))();
+      const visibleCount = runCandidates.length || foundCount || cachedNow.length || 0;
+      finalEl.textContent = String(visibleCount);
+    }
+    const nextOff = (typeof j.next_offset === 'number') ? j.next_offset : (p.end_offset || 0);
+
+    const modeSel = document.getElementById("autoScanMode");
+    const autoMode = (modeSel && modeSel.value) ? modeSel.value : (localStorage.getItem("orb_autoscan_mode") || "until");
+
+    if (autoBox && autoBox.checked && (autoMode === "continuous" || !found)) {
+      // Keep scanning without forcing a page reload (dashboard stays visible).
+      const info = document.getElementById('autoScanNextInfo');
+      if (info) info.textContent = `Next auto-scan in 60s (offset → ${nextOff}).`;
+      if (found) {
+        const cachedNow = (window.loadCandidatesCache || (()=>[]))();
+        setStatus(`Done. Found ${foundCount} candidate(s) in this run (saved total: ${cachedNow.length}). Will continue at offset ${nextOff}…`);
+      } else {
+        setStatus(`Done. No candidates found. Will continue at offset ${nextOff}…`);
+      }
+      setTimeout(() => {
+        // Update offset field and start a new job.
+        const offInput = form.querySelector('input[name="offset"]');
+        if (offInput) offInput.value = String(nextOff);
+        runOnce();
+      }, 60000);
+      return true;
+    }
+
+    setStatus(`Done.`);
+    return true;
+  }
+
+  
+async function runOnce(){
+  const btn = document.getElementById('runScanBtn');
+  if (window._orbScanStarting || window._orbScanTimer) return;
+
+  window._orbScanStarting = true;
+  try{
+    if (btn) btn.disabled = true;
+    setStatus('Starting scan…');
+    const jid = await startScan();
+
+    // clear any existing poller
+    if (window._orbScanTimer) { try { clearInterval(window._orbScanTimer); } catch(e){} window._orbScanTimer = null; }
+
+    // poll until done/error
+    const t = window._orbScanTimer = setInterval(async ()=>{
+      try{
+        const finished = await poll(jid);
+        if (finished){
+          clearInterval(t);
+          window._orbScanTimer = null;
+          if (btn) btn.disabled = false;
+        }
+      }catch(err){
+        clearInterval(t);
+        window._orbScanTimer = null;
+        if (btn) btn.disabled = false;
+        setStatus(`<b>Error:</b> ${err.message}`);
+      }
+    }, 2000);
+  }catch(err){
+    window._orbScanTimer = null;
+    if (btn) btn.disabled = false;
+    setStatus(`<b>Error:</b> ${err.message}`);
+  }finally{
+    window._orbScanStarting = false;
+  }
+}
+
+// Prevent full-page refresh if user presses Enter inside inputs.
+form.addEventListener('submit', (e)=>{ e.preventDefault(); runOnce(); });
+
+// Primary click handler (Run Scan never submits the form).
+document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preventDefault(); runOnce(); });
+
+
+  // Restore autoScan toggle (doesn't auto-run scans; it enables re-run after done if no candidates)
+  const saved = localStorage.getItem('orb_autoscan') === '1';
+  autoBox.checked = saved;
+  autoBox.addEventListener('change', ()=> localStorage.setItem('orb_autoscan', autoBox.checked ? '1':'0'));
+
+  // If we just rendered a job with 0 candidates and autoscan enabled, start again after 60s with advanced offset
+  const meta = JSON.parse(document.getElementById('orb_meta_json')?.textContent || '{}');
+  const candidates = JSON.parse(document.getElementById('orb_candidates_json')?.textContent || '[]');
+  if (false && autoBox.checked && candidates.length === 0 && meta && meta.progress) {
+    const nextOffset = meta.progress.end_offset || 0;
+    setStatus(`No candidates. Auto-scan in 60s… next offset ${nextOffset}`);
+    setTimeout(()=>{
+      const url = new URL(window.location.href);
+      url.searchParams.delete('job_id');
+      url.searchParams.set('offset', String(nextOffset));
+      window.location.href = url.toString();
+    }, 60000);
+  }
+})();
+</script>
+
+
+<script>
+(function(){
+  const LS_MONITOR_ID = "orb_live_monitor_id";
+  const LS_MONITOR_TOPN = "orb_live_monitor_topn";
+  const LS_MONITOR_SOURCE = "orb_live_monitor_source";
+  const LS_MONITOR_RULES = "orb_live_monitor_rules_v2";
+  const LS_PREFLIGHT_CANARY = "orb_preflight_canary";
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => {
+    const s = (v === null || v === undefined) ? "" : String(v);
+    return s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+  };
+  const fmt = (n, d=2) => {
+    const x = Number(n);
+    return Number.isFinite(x) ? x.toFixed(d) : "—";
+  };
+  const fmtPct = (n, d=2) => {
+    const x = Number(n);
+    return Number.isFinite(x) ? `${x.toFixed(d)}%` : "—";
+  };
+  const fmtMsAge = (ms) => {
+    const x = Number(ms);
+    if (!Number.isFinite(x)) return "—";
+    if (x < 1000) return `${Math.round(x)}ms`;
+    const s = x/1000;
+    if (s < 60) return `${s.toFixed(1)}s`;
+    return `${(s/60).toFixed(1)}m`;
+  };
+  const fmtTsAgo = (ts) => {
+    const x = Number(ts);
+    if (!Number.isFinite(x)) return "—";
+    const d = Math.max(0, (Date.now()/1000) - x);
+    if (d < 1) return "just now";
+    if (d < 60) return `${Math.round(d)}s ago`;
+    if (d < 3600) return `${Math.round(d/60)}m ago`;
+    return `${Math.round(d/3600)}h ago`;
+  };
+
+  // --- Beast desk helpers: pinning, ticketing, and trigger alerts ---
+  const LS_PINNED = "orb_pinned_symbols_v1";
+  function loadPins(){
+    try { const j = JSON.parse(localStorage.getItem(LS_PINNED)||"[]"); return Array.isArray(j)? j.map(x=>String(x).toUpperCase()).filter(Boolean): []; } catch(e){ return []; }
+  }
+  function savePins(pins){
+    try { localStorage.setItem(LS_PINNED, JSON.stringify(Array.from(new Set(pins)).slice(0,50))); } catch(e){}
+  }
+  function isPinned(sym){
+    const s = String(sym||"").toUpperCase();
+    if (!s) return false;
+    return loadPins().includes(s);
+  }
+  function togglePin(sym){
+    const s = String(sym||"").toUpperCase();
+    if (!s) return;
+    const pins = loadPins();
+    const i = pins.indexOf(s);
+    if (i>=0) pins.splice(i,1);
+    else pins.unshift(s);
+    savePins(pins);
+  }
+
+  function pickTriggerPrice(s){
+    const best = String(s?.best_side||"").toLowerCase();
+    if (best === "long") return Number(s?.or_high);
+    if (best === "short") return Number(s?.or_low);
+    return NaN;
+  }
+  function formatDistToTrigger(s){
+    const px = Number(s?.price);
+    const trig = pickTriggerPrice(s);
+    if (!Number.isFinite(px) || !Number.isFinite(trig) || px<=0) return "—";
+    const best = String(s?.best_side||"").toLowerCase();
+    const d = (best === "short") ? (px - trig) : (trig - px);
+    const pct = (d/px)*100;
+    const sign = (pct <= 0) ? "past" : "to";
+    return `${fmt(d,2)} (${fmt(pct,2)}% ${sign})`;
+  }
+  function formatDistToStop(s){
+    const px = Number(s?.price);
+    const stop = Number(s?.stop_loss);
+    if (!Number.isFinite(px) || !Number.isFinite(stop) || px<=0) return "—";
+    const best = String(s?.best_side||"").toLowerCase();
+    const d = (best === "short") ? (stop - px) : (px - stop);
+    const pct = (d/px)*100;
+    return `${fmt(d,2)} (${fmt(pct,2)}%)`;
+  }
+  function formatRNow(s){
+    const px = Number(s?.price);
+    const entry = Number(s?.entry);
+    const rps = Number(s?.risk_per_share);
+    if (!Number.isFinite(px) || !Number.isFinite(entry) || !Number.isFinite(rps) || rps<=0) return "—";
+    const best = String(s?.best_side||"").toLowerCase();
+    const pnl = (best === "short") ? (entry - px) : (px - entry);
+    const r = pnl / rps;
+    const sign = r>=0?"+":"";
+    return `${sign}${fmt(r,2)}R`;
+  }
+  function computeSharesForRisk(s, riskDollars){
+    const rps = Number(s?.risk_per_share);
+    if (!Number.isFinite(rps) || rps<=0) return null;
+    const rd = Number(riskDollars);
+    if (!Number.isFinite(rd) || rd<=0) return null;
+    const sh = Math.floor(rd / rps);
+    return (sh>0)?sh:null;
+  }
+  function buildTicketText(s, riskDollars){
+    const sym = String(s?.symbol||"").toUpperCase();
+    const best = String(s?.best_side||"").toLowerCase();
+    const entry = Number(s?.entry);
+    const stop = Number(s?.stop_loss);
+    const t2 = Number(s?.target_2r);
+    const t3 = Number(s?.target_3r);
+    const rps = Number(s?.risk_per_share);
+    const sh = computeSharesForRisk(s, riskDollars);
+    const lines = [];
+    lines.push(`SYMBOL: ${sym}`);
+    lines.push(`Side: ${best || "—"}`);
+    if (Number.isFinite(entry)) lines.push(`Entry: ${entry.toFixed(4)}`);
+    if (Number.isFinite(stop)) lines.push(`Stop: ${stop.toFixed(4)}`);
+    if (Number.isFinite(t2)) lines.push(`Target 2R: ${t2.toFixed(4)}`);
+    if (Number.isFinite(t3)) lines.push(`Target 3R: ${t3.toFixed(4)}`);
+    if (Number.isFinite(rps)) lines.push(`Risk/share: ${rps.toFixed(4)}`);
+    if (sh) lines.push(`Shares @ $${Number(riskDollars||0).toFixed(0)} risk: ${sh}`);
+    return lines.join("\n");
+  }
+
+  let _lastAlertMap = {};
+  function maybeAlertForMonitor(payload){
+    const rules = readMonitorRules();
+    const enableSound = !!rules.enableSound;
+    const enableNotify = !!rules.enableNotify;
+    const nearPct = Number(rules.nearTriggerPct);
+    const riskDollars = Number(rules.riskDollars);
+
+    const rows = Array.isArray(payload?.symbols) ? payload.symbols : [];
+    const now = Date.now();
+    const newMap = {};
+
+    for (const s of rows){
+      const sym = String(s?.symbol||"").toUpperCase();
+      if (!sym) continue;
+
+      const best = String(s?.best_side||"").toLowerCase();
+      const trig = (best==="long") ? !!s?.long_triggered : (best==="short") ? !!s?.short_triggered : false;
+      const trigPx = pickTriggerPrice(s);
+      const px = Number(s?.price);
+      let distPct = null;
+      if (Number.isFinite(trigPx) && Number.isFinite(px) && px>0){
+        const d = (best==="short") ? (px - trigPx) : (trigPx - px);
+        distPct = (d/px)*100;
+      }
+
+      const prev = _lastAlertMap[sym] || {};
+      newMap[sym] = { trig, distPct, t: now };
+
+      // Triggered alert
+      if (trig && prev.trig === false){
+        fireAlert(`TRIGGERED: ${sym}`, `Triggered (${best}) • Entry ${s?.entry ?? "—"} • Stop ${s?.stop_loss ?? "—"}`, enableSound, enableNotify);
+      }
+
+      // Near-trigger alert (only if not triggered and distPct within threshold)
+      if (!trig && distPct !== null && Number.isFinite(distPct) && distPct > 0 && Number.isFinite(nearPct) && distPct <= nearPct){
+        // only once per symbol per ~60s
+        const lastNear = prev.lastNear || 0;
+        if ((now - lastNear) > 60000){
+          newMap[sym].lastNear = now;
+          fireAlert(`NEAR TRIGGER: ${sym}`, `Within ${distPct.toFixed(2)}% of trigger • Entry ${s?.entry ?? "—"} • Risk $${Number(riskDollars||0).toFixed(0)}`, enableSound, enableNotify);
+        } else {
+          newMap[sym].lastNear = lastNear;
+        }
+      } else if (prev.lastNear){
+        newMap[sym].lastNear = prev.lastNear;
+      }
+    }
+    _lastAlertMap = newMap;
+  }
+
+  function fireAlert(title, body, enableSound, enableNotify){
+    try{
+      if (enableSound) beep();
+    }catch(e){}
+    try{
+      if (enableNotify && ("Notification" in window)){
+        if (Notification.permission === "granted"){
+          new Notification(title, { body });
+        } else if (Notification.permission !== "denied"){
+          Notification.requestPermission().then(p => { if (p==="granted") new Notification(title, { body }); });
+        }
+      }
+    }catch(e){}
+  }
+
+  function beep(){
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    o.connect(g); g.connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.2);
+    setTimeout(()=>{ try{ ctx.close(); }catch(e){} }, 400);
+  }
+
+  function gradeClass(g){
+    const x = String(g || "").toUpperCase();
+    if (x === "A+") return "grade-Aplus";
+    if (x === "A") return "grade-A";
+    if (x === "B") return "grade-B";
+    if (x === "C") return "grade-C";
+    if (x === "D") return "grade-D";
+    return "grade-F";
+  }
+  function stateClass(s){
+    const x = String(s || "watch").toLowerCase();
+    return `state-${x.replace(/[^a-z0-9_]+/g,'_')}`;
+  }
+  function setBadge(el, text, kind){
+    if (!el) return;
+    el.textContent = text;
+    el.className = `badge ${kind || 'badge-gray'}`;
+  }
+  async function getJSON(url, opts){
+    const res = await fetch(url, opts);
+    let j = null;
+    try { j = await res.json(); } catch(e){}
+    if (!res.ok || !j || j.ok === false) {
+      const err = (j && (j.error || j.message)) || `${res.status} ${res.statusText}`;
+      throw new Error(String(err));
+    }
+    return j;
+  }
+
+  let pollTimer = null;
+  let _streamStatusInFlight = false;
+  async function refreshStreamStatus(){
+    if (_streamStatusInFlight) return;
+    _streamStatusInFlight = true;
+    try {
+      const j = await getJSON('/api/stream_status');
+      const connected = !!j.connected;
+      setBadge($('streamConnBadge'), connected ? 'Connected' : 'Disconnected', connected ? 'badge-green' : 'badge-red');
+      $('streamFeedLabel').textContent = String(j.feed || j.feed_used || j.feed_requested || '—');
+      const symbols = Array.isArray(j.symbols) ? j.symbols.length : 0;
+      const lastEvt = j.last_event_at ? fmtTsAgo(j.last_event_at) : 'none';
+      $('streamInfoMini').textContent = `subs ${symbols} • last ${lastEvt}`;
+    } catch (e) {
+      setBadge($('streamConnBadge'), 'Unavailable', 'badge-red');
+      $('streamFeedLabel').textContent = '—';
+      $('streamInfoMini').textContent = String(e.message || e);
+    } finally {
+      _streamStatusInFlight = false;
+    }
+  }
+
+  function currentMonitorId(){
+    const txt = $('monitorStatusLine')?.getAttribute('data-monitor-id');
+    if (txt) return txt;
+    const saved = localStorage.getItem(LS_MONITOR_ID);
+    return saved || '';
+  }
+  function setCurrentMonitorId(mid){
+    if ($('monitorStatusLine')) $('monitorStatusLine').setAttribute('data-monitor-id', mid || '');
+    if (mid) localStorage.setItem(LS_MONITOR_ID, mid);
+    else localStorage.removeItem(LS_MONITOR_ID);
+  }
+  function setMonitorStatus(html){
+    const el = $('monitorStatusLine');
+    if (el) el.innerHTML = html || '';
+  }
+
+  function formatTopLiveSymbol(v){
+    if (!v) return "—";
+    if (typeof v === "string") return v;
+    if (typeof v === "object") {
+      const sym = String(v.symbol || "—");
+      const g = String(v.live_confidence_grade || "").toUpperCase();
+      const sc = Number.isFinite(Number(v.live_confidence_score)) ? ` ${Math.round(Number(v.live_confidence_score))}` : "";
+      const st = v.monitor_state ? ` • ${String(v.monitor_state)}` : "";
+      return `${sym}${g ? ` (${g}${sc})` : ""}${st}`;
+    }
+    return String(v);
+  }
+
+  function setElTextClass(elId, cls){
+    const el = $(elId);
+    if (!el) return;
+    el.classList.remove('goText','waitText','passText','goodText');
+    if (cls) el.classList.add(cls);
+  }
+
+  function gradeBucket(gRaw){
+    const g = String(gRaw || '').toUpperCase();
+    if (g === 'A+' || g === 'A') return 'A';
+    if (g === 'B') return 'B';
+    if (g === 'C') return 'C';
+    if (g === 'D') return 'D';
+    if (g === 'F') return 'F';
+    return 'D';
+  }
+
+  function gradeRank(gRaw){ const g = String(gRaw || '').toUpperCase(); if (g === 'A+' || g === 'A') return 5; if (g === 'B') return 4; if (g === 'C') return 3; if (g === 'D') return 2; if (g === 'F') return 1; return 0; }
+
+  function readMonitorRules(){
+    const minGrade = String($('liveMonitorMinGrade')?.value || 'B').toUpperCase();
+    const maxSpreadPct = Number($('liveMonitorMaxSpreadPct')?.value ?? 0.50);
+    const maxQuoteAgeMs = Number($('liveMonitorMaxQuoteAgeMs')?.value ?? 2500);
+    const maxTradeAgeMs = Number($('liveMonitorMaxTradeAgeMs')?.value ?? 2500);
+    const riskDollars = Number($('liveMonitorRiskDollars')?.value ?? 50);
+    const nearTriggerPct = Number($('liveMonitorNearTriggerPct')?.value ?? 0.25);
+    const minExpansionR = Number($('liveMonitorMinExpansionR')?.value ?? 0.20);
+    return {
+      minGradeForGo: (minGrade==='A'||minGrade==='B'||minGrade==='C')?minGrade:'B',
+      maxSpreadPct:Number.isFinite(maxSpreadPct)?maxSpreadPct:0.50,
+      maxQuoteAgeMs:Number.isFinite(maxQuoteAgeMs)?maxQuoteAgeMs:2500,
+      maxTradeAgeMs:Number.isFinite(maxTradeAgeMs)?maxTradeAgeMs:2500,
+      riskDollars:Number.isFinite(riskDollars)?riskDollars:50,
+      nearTriggerPct:Number.isFinite(nearTriggerPct)?nearTriggerPct:0.25,
+      minExpansionR:Number.isFinite(minExpansionR)?minExpansionR:0.20,
+      longOnly:!!$('liveMonitorLongOnly')?.checked,
+      hideShortRows:!!$('liveMonitorHideShortRows')?.checked,
+      requireTapeLive:!!$('liveMonitorRequireTapeLive')?.checked,
+      requireTrigger:!!$('liveMonitorRequireTrigger')?.checked,
+      requireVwapAlign:!!$('liveMonitorRequireVwapAlign')?.checked,
+      enableSound:!!$('liveMonitorEnableSound')?.checked,
+      enableNotify:!!$('liveMonitorEnableNotify')?.checked,
+    };
+}
+  function saveMonitorRules(){ try { localStorage.setItem(LS_MONITOR_RULES, JSON.stringify(readMonitorRules())); } catch(e){} }
+  function applySavedMonitorRules(){ let rules=null; try { rules=JSON.parse(localStorage.getItem(LS_MONITOR_RULES)||'null'); } catch(e){} if(!rules||typeof rules!=='object') return; if($('liveMonitorMinGrade')&&rules.minGradeForGo) $('liveMonitorMinGrade').value=String(rules.minGradeForGo); if($('liveMonitorMaxSpreadPct')&&rules.maxSpreadPct!=null) $('liveMonitorMaxSpreadPct').value=String(rules.maxSpreadPct); if($('liveMonitorMaxQuoteAgeMs')&&rules.maxQuoteAgeMs!=null) $('liveMonitorMaxQuoteAgeMs').value=String(rules.maxQuoteAgeMs); if($('liveMonitorMaxTradeAgeMs')&&rules.maxTradeAgeMs!=null) $('liveMonitorMaxTradeAgeMs').value=String(rules.maxTradeAgeMs); if($('liveMonitorRiskDollars')&&rules.riskDollars!=null) $('liveMonitorRiskDollars').value=String(rules.riskDollars);
+    if($('liveMonitorNearTriggerPct')&&rules.nearTriggerPct!=null) $('liveMonitorNearTriggerPct').value=String(rules.nearTriggerPct);
+    if($('liveMonitorMinExpansionR')&&rules.minExpansionR!=null) $('liveMonitorMinExpansionR').value=String(rules.minExpansionR);
+    if($('liveMonitorEnableSound')) $('liveMonitorEnableSound').checked=!!rules.enableSound;
+    if($('liveMonitorEnableNotify')) $('liveMonitorEnableNotify').checked=!!rules.enableNotify;
+    if($('liveMonitorLongOnly')) $('liveMonitorLongOnly').checked=!!rules.longOnly; if($('liveMonitorHideShortRows')) $('liveMonitorHideShortRows').checked=('hideShortRows' in rules)?!!rules.hideShortRows:true; if($('liveMonitorRequireTapeLive')) $('liveMonitorRequireTapeLive').checked=('requireTapeLive' in rules)?!!rules.requireTapeLive:true; if($('liveMonitorRequireTrigger')) $('liveMonitorRequireTrigger').checked=('requireTrigger' in rules)?!!rules.requireTrigger:true; if($('liveMonitorRequireVwapAlign')) $('liveMonitorRequireVwapAlign').checked=!!rules.requireVwapAlign; }
+
+  function renderPreflight(payload){ const sumEl=$('preflightSummary'); const listEl=$('preflightChecks'); const mini=$('preflightMiniStatus'); if(!sumEl||!listEl) return; if(!payload||payload.ok===false){ const msg=esc((payload&&(payload.error||payload.message))||'preflight_failed'); sumEl.innerHTML=`<span class="flagBig pass">🔴 PRECHECK FAIL</span><span class="muted">${msg}</span>`; listEl.innerHTML=`<div class="checkItem"><div class="checkHead"><div class="checkName">Preflight call failed</div><div class="checkFail">FAIL</div></div><div class="checkDetail">${msg}</div></div>`; if(mini) mini.textContent='Preflight failed'; return; } const summary=payload.summary||{}; const fail=Number(summary.fail_count||0); const warn=Number(summary.warn_count||0); let flagCls='go', flagTxt='🟢 READY'; if(fail>0){flagCls='pass';flagTxt='🔴 NOT READY';} else if(warn>0){flagCls='wait';flagTxt='🟡 READY WITH WARNINGS';} sumEl.innerHTML=`<span class="flagBig ${flagCls}">${flagTxt}</span><span class="tag">Feed</span><span>${esc(summary.feed_requested||'—')}</span><span class="tag">Fails</span><span class="${fail?'checkFail':''}">${fail}</span><span class="tag">Warnings</span><span class="${warn?'checkWarn':''}">${warn}</span><span class="tag">Canary</span><span>${esc(payload.canary||'AAPL')}</span><span class="muted">ET ${esc(payload.time_et||'')}</span>`; const checks=Array.isArray(payload.checks)?payload.checks:[]; listEl.innerHTML=checks.map(c=>{ const sev=String(c.severity||'fail'); const cls=c.ok?'checkOk':(sev==='warn'?'checkWarn':'checkFail'); const label=c.ok?'OK':(sev==='warn'?'WARN':'FAIL'); const detail=(typeof c.detail==='string')?c.detail:JSON.stringify(c.detail||{},null,2); return `<div class="checkItem"><div class="checkHead"><div class="checkName">${esc(c.label||c.key||'check')}</div><div class="${cls}">${label}</div></div>${detail&&detail!=='{}'?`<div class="checkDetail">${esc(detail)}</div>`:''}</div>`; }).join('')||'<div class="muted">No checks returned.</div>'; if(mini) mini.textContent=(fail>0)?`Not ready (${fail} fail)`:(warn>0?`Ready w/ ${warn} warning(s)`:'Ready'); }
+  async function runPreflight(){ const canary=String($('preflightCanarySymbol')?.value||'AAPL').trim().toUpperCase()||'AAPL'; if($('preflightCanarySymbol')) $('preflightCanarySymbol').value=canary; try{ localStorage.setItem(LS_PREFLIGHT_CANARY, canary);}catch(e){} if($('preflightMiniStatus')) $('preflightMiniStatus').textContent='Running…'; const j=await getJSON(`/api/preflight?symbol=${encodeURIComponent(canary)}`); renderPreflight(j); return j; }
+
+  function computeActionForMonitorRow(s){
+    const rules = readMonitorRules();
+    const state = String(s?.monitor_state || 'watch');
+    const tapeLive = !!s?.tape_live;
+    const tapeReason = String(s?.tape_live_reason || '');
+    const best = String(s?.best_side || '').toLowerCase();
+    const trig = best === 'long' ? !!s?.long_triggered : (best === 'short' ? !!s?.short_triggered : false);
+    const grade = gradeBucket(s?.live_confidence_grade);
+    const gradeOk = gradeRank(grade) >= gradeRank(rules.minGradeForGo);
+    const spreadPct = Number(s?.spread_pct);
+    const spreadOk = Number.isFinite(spreadPct) ? (spreadPct <= Number(rules.maxSpreadPct)) : true;
+    const quoteAge = Number(s?.quote_age_ms);
+    const tradeAge = Number(s?.trade_age_ms);
+    const quoteFresh = Number.isFinite(quoteAge) ? (quoteAge <= Number(rules.maxQuoteAgeMs)) : true;
+    const tradeFresh = Number.isFinite(tradeAge) ? (tradeAge <= Number(rules.maxTradeAgeMs)) : true;
+    const flags = new Set((Array.isArray(s?.risk_flags) ? s.risk_flags : []).map(x => String(x).toLowerCase()));
+    const wideSpread = flags.has('wide_spread') || flags.has('very_wide_spread') || !spreadOk;
+    const vwapAlign = (best === 'long') ? (s?.above_vwap !== false) : (best === 'short' ? (s?.above_vwap !== true) : true);
+    const terminalLock = !!s?.terminal_lock;
+    const terminalReason = String(s?.terminal_reason || '');
+    const liveChaseR = Number(s?.live_chase_r);
+    const expansionOk = Number.isFinite(liveChaseR) ? (liveChaseR >= Number(rules.minExpansionR)) : false;
+
+    if (rules.longOnly && best === 'short') return { label:'PASS', emoji:'🔴', cls:'pass', why:'cash mode long-only' };
+    if (terminalLock) return { label:'PASS', emoji:'🔴', cls:'pass', why: terminalReason || 'stopped out' };
+    if (state === 'failed') return { label:'PASS', emoji:'🔴', cls:'pass', why: terminalReason || 'setup failed' };
+    if (state === 'invalid') return { label:'PASS', emoji:'🔴', cls:'pass', why:'invalid setup' };
+    if (state === 'extended') return { label:'PASS', emoji:'🔴', cls:'pass', why:'already extended' };
+    if (state === 'cooldown') return { label:'WAIT', emoji:'🟡', cls:'wait', why:'cooldown active' };
+    if (wideSpread && tapeLive) return { label:'PASS', emoji:'🔴', cls:'pass', why:`spread > ${rules.maxSpreadPct}%` };
+    if (!quoteFresh || !tradeFresh) return { label:'WAIT', emoji:'🟡', cls:'wait', why:'stale tape age' };
+    if (rules.requireTapeLive && !tapeLive && tapeReason !== 'session_closed' && state !== 'session_inactive') return { label:'PASS', emoji:'🔴', cls:'pass', why:tapeReason || 'tape not live' };
+    if (rules.requireVwapAlign && !vwapAlign) return { label:'WAIT', emoji:'🟡', cls:'wait', why:'VWAP misalignment' };
+    if (rules.requireTrigger && !trig) {
+      const px = Number(s?.price);
+      const trigPx = pickTriggerPrice(s);
+      const best2 = String(s?.best_side||'').toLowerCase();
+      let distPct = null;
+      if (Number.isFinite(px) && Number.isFinite(trigPx) && px>0){
+        const d = (best2==='short') ? (px - trigPx) : (trigPx - px);
+        distPct = (d/px)*100;
+      }
+      if (Number.isFinite(distPct) && distPct > 0 && distPct <= Number(rules.nearTriggerPct||0.25)){
+        return { label:'WAIT', emoji:'🟡', cls:'wait', why:`near trigger (${distPct.toFixed(2)}%)` };
+      }
+      if (grade === 'D' || grade === 'F') return { label:'PASS', emoji:'🔴', cls:'pass', why:'low confidence' };
+      return { label:'WAIT', emoji:'🟡', cls:'wait', why:'await trigger' };
+    }
+    if (trig && (!rules.requireTapeLive || tapeLive) && gradeOk && spreadOk && quoteFresh && tradeFresh) {
+      if (!expansionOk) {
+        const chaseTxt = Number.isFinite(liveChaseR) ? `${liveChaseR.toFixed(2)}R` : 'n/a';
+        return { label:'WAIT', emoji:'🟡', cls:'wait', why:`needs expansion (${chaseTxt} < ${Number(rules.minExpansionR).toFixed(2)}R)` };
+      }
+      return { label:'GO', emoji:'🟢', cls:'go', why:`trigger + live tape + ${rules.minGradeForGo}+ grade + ${Number(rules.minExpansionR).toFixed(2)}R expansion` };
+    }
+    if (state === 'session_inactive' || tapeReason === 'session_closed') return { label:'WAIT', emoji:'🟡', cls:'wait', why:'session inactive' };
+    if (grade === 'D' || grade === 'F') return { label:'PASS', emoji:'🔴', cls:'pass', why:'low confidence' };
+    return { label:'WAIT', emoji:'🟡', cls:'wait', why: trig ? 'needs cleaner tape' : 'await trigger' };
+  }
+
+  function collectHeatSymbolsFromDOM(limit, opts){
+    opts = opts || {};
+    const out = [];
+    const seen = new Set();
+    const rows = Array.from(document.querySelectorAll('#heatList .heatItem'));
+    for (const r of rows){
+      const symAttr = r.getAttribute('data-heat-symbol') || '';
+      const symText = r.querySelector('.heatSym')?.textContent || '';
+      const sym = String(symAttr || symText).trim().toUpperCase();
+      const side = String(r.querySelector('.addBtn')?.getAttribute('data-best-side') || '').toLowerCase();
+      if (opts.longOnly && side === 'short') continue;
+      if (!sym || seen.has(sym)) continue;
+      seen.add(sym);
+      out.push(sym);
+      if (limit && out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function renderMonitor(payload){
+    if (!payload || payload.ok === false) return;
+    const sum = payload.summary || {};
+    const allSyms = Array.isArray(payload.symbols) ? payload.symbols : [];
+    const rulesView = readMonitorRules();
+    const syms = allSyms.filter(s => !(rulesView.hideShortRows && String((s||{}).best_side||'').toLowerCase() === 'short'));
+
+    const running = !!payload.running;
+    const streamTxt = payload.stream_enabled
+      ? (`stream ${payload.stream_connected ? 'live' : 'not live'}${payload.stream_error ? ` (${payload.stream_error})` : ''}`)
+      : 'stream disabled';
+    setMonitorStatus(
+      `<div class="inlineStat">
+        <span class="tag">Monitor</span><span class="mono">${esc(payload.monitor_id || '—')}</span>
+        <span class="tag">Source</span><span>${esc(payload.source || '—')}</span>
+        <span class="tag">Feed</span><span>${esc(payload.feed_used || payload.feed_requested || '—')}</span>
+        <span class="tag">Session</span><span>${running ? 'running' : 'stopped'}</span>
+        <span class="muted">${esc(streamTxt)}</span>
+      </div>`
+    );
+
+    const counts = sum.counts || {};
+    const stateCounts = sum.state_counts || counts.monitor_state || {};
+    const gc = sum.grade_counts || counts.live_confidence_grade || {};
+    const sessionCounts = sum.session_counts || counts.market_session_state || {};
+    const tapeRaw = sum.tape || counts.tape_live || {};
+    const tapeLiveCount = (tapeRaw.live ?? tapeRaw.true ?? 0);
+    const tapeClosedCount = (tapeRaw.session_closed ?? 0);
+    const tapeStaleCount = (tapeRaw.stale_or_missing ?? tapeRaw.false ?? 0);
+    const topLiveRaw = sum.top_live_symbol;
+
+    $('kpiMonitorStatus').textContent = running ? 'Running' : 'Stopped';
+    $('kpiReadyTriggered').textContent = `${(sum.ready_count ?? stateCounts.ready ?? 0)} / ${(sum.live_triggered_count ?? 0)}`;
+    const topLiveTxt = formatTopLiveSymbol(topLiveRaw);
+    $('kpiTopLive').textContent = topLiveTxt;
+    setElTextClass('kpiTopLive', topLiveTxt === '—' ? '' : 'goodText');
+    $('kpiTapeLive').textContent = String(tapeLiveCount || 0);
+    const gradesTxt = `A:${(gc['A']||0)+(gc['A+']||0)} B:${gc['B']||0} C:${gc['C']||0} D:${gc['D']||0}`;
+    $('kpiGrades').textContent = gradesTxt;
+    if (((gc['A']||0)+(gc['A+']||0)+(gc['B']||0)) > 0) setElTextClass('kpiGrades','goodText');
+    else if ((gc['C']||0)>0) setElTextClass('kpiGrades','waitText');
+    else if ((gc['D']||0)+(gc['F']||0)>0) setElTextClass('kpiGrades','passText');
+    else setElTextClass('kpiGrades','');
+    $('kpiRefreshCount').textContent = String(payload.refresh_count ?? 0);
+
+    const readySyms = Array.isArray(sum.ready_symbols) ? sum.ready_symbols.slice(0, 8) : [];
+    const headline = sum.headline || '';
+    $('monitorSummaryDetails').innerHTML = `
+      <div class="inlineStat">
+        <span class="tag">Headline</span><span>${esc(headline || '—')}</span>
+        <span class="tag">Symbols</span><span>${syms.length}${(allSyms.length !== syms.length) ? ` / ${allSyms.length} shown` : ""}</span>
+        <span class="tag">States</span><span>ready ${stateCounts.ready||0} • triggered ${stateCounts.triggered||0} • watch ${stateCounts.watch||0} • invalid ${sum.invalid_count||0}</span>
+        <span class="tag">Tape</span><span>live ${tapeLiveCount||0} • closed ${tapeClosedCount||0} • stale/missing ${tapeStaleCount||0}</span>
+        <span class="tag">Session</span><span>${Object.entries(sessionCounts).map(([k,v])=>`${k}:${v}`).join(' • ') || '—'}</span>
+      </div>
+      <div class="inlineStat" style="margin-top:6px;">
+        <span class="tag">Ready queue</span>
+        ${readySyms.length ? readySyms.map(s=>`<span class="tag">${esc(s)}</span>`).join('') : '<span class="muted">none yet</span>'}
+      </div>
+    `;
+
+    const body = $('monitorTableBody');
+    if (!body) return;
+    if (!syms.length){
+      body.innerHTML = `<tr><td colspan="10" class="muted">No symbols in monitor.</td></tr>`;
+      return;
+    }
+
+    body.innerHTML = syms.map((s) => {
+      const liveGrade = String(s.live_confidence_grade || 'D').toUpperCase();
+      const liveScore = Number.isFinite(Number(s.live_confidence_score)) ? `${Math.round(Number(s.live_confidence_score))}` : '—';
+      const confScan = (s.confidence_score !== null && s.confidence_score !== undefined)
+        ? `${Math.round(Number(s.confidence_score))} ${esc(String(s.confidence_grade || ''))}` : '—';
+      const tapeLive = !!s.tape_live;
+      const tapeReason = s.tape_live_reason ? ` <span class="muted">(${esc(s.tape_live_reason)})</span>` : '';
+      const trig = (String(s.best_side||'').toLowerCase() === 'long')
+        ? ((s.long_triggered===true) ? '<span class="badge badge-green">LONG TRIG</span>' : '<span class="badge badge-gray">LONG wait</span>')
+        : (String(s.best_side||'').toLowerCase() === 'short')
+          ? ((s.short_triggered===true) ? '<span class="badge badge-red">SHORT TRIG</span>' : '<span class="badge badge-gray">SHORT wait</span>')
+          : '<span class="badge badge-gray">—</span>';
+      const catConf = (s.catalyst_confidence!==null && s.catalyst_confidence!==undefined) ? String(s.catalyst_confidence) : '';
+      const catalyst = (s.catalyst_score !== null && s.catalyst_score !== undefined)
+        ? `<div><b>${fmt(s.catalyst_score,2)}</b> ${catConf?`<span class="muted">conf ${esc(catConf)}</span>`:''}</div>
+           <div class="muted">${Number(s.catalyst_article_count||0)} article(s)</div>
+           <div class="smallTags">${(Array.isArray(s.catalyst_tags)?s.catalyst_tags.slice(0,4):[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>`
+        : `<span class="muted">off / n.a.</span>`;
+      const rankTxt = (s.scan_rank!==null && s.scan_rank!==undefined) ? `#${esc(s.scan_rank)}` : '—';
+      const scanRank = `<div><b>${rankTxt}</b> • Combo <b>${fmt(s.combined_score,3)}</b></div>
+                        <div class="muted">ML ${fmt(s.ml_score,3)} • Scan conf ${confScan}</div>
+                        <div class="muted">${esc(s.model_bucket || '')} ${s.regime_profile?`• ${esc(s.regime_profile)}`:''}</div>`;
+      const reasonBits = [
+        ...(Array.isArray(s.live_confidence_reasons) ? s.live_confidence_reasons.slice(0,3) : []),
+      ];
+      const flagBits = Array.isArray(s.risk_flags) ? s.risk_flags.slice(0,3) : [];
+      const decision = computeActionForMonitorRow(s);
+      return `<tr class="monitorRow-${decision.cls}">
+        <td>
+          <div class="actionPill action-${decision.cls}">${decision.emoji} ${decision.label}</div>
+          <div class="muted" style="margin-top:4px;">${esc(decision.why)}</div>
+        </td>
+        <td>
+          <div><b>${esc(s.symbol || '—')}</b></div>
+          <div class="muted">${esc(String(s.best_side||'').toUpperCase())}</div>
+        </td>
+        <td>
+          <div class="gradePill ${gradeClass(liveGrade)}">${esc(liveGrade)} ${esc(liveScore)}</div>
+          <div class="muted" style="margin-top:4px;">${s.last_refresh_at ? `upd ${fmtTsAgo(s.last_refresh_at)}` : ''}</div>
+        </td>
+        <td><span class="statePill ${stateClass(s.monitor_state)}">${esc(s.monitor_state || 'watch')}</span></td>
+        <td>
+          <div class="${tapeLive ? 'tapeLiveYes' : 'tapeLiveNo'}">${tapeLive ? 'LIVE' : 'NOT LIVE'}</div>
+          <div class="muted">q ${fmtMsAge(s.quote_age_ms)} • t ${fmtMsAge(s.trade_age_ms)}</div>
+          <div class="muted">${esc(s.market_session_state || 'unknown')}${tapeReason}</div>
+        </td>
+        <td>
+          <div><b>$${fmt(s.price,2)}</b> <span class="muted">scan $${fmt(s.scan_price,2)}</span></div>
+          <div class="muted">bid $${fmt(s.bid,2)} / ask $${fmt(s.ask,2)}</div>
+          <div class="muted">spread ${fmtPct(s.spread_pct,2)}</div>
+        </td>
+        <td class="col-trigger">
+          <div class="triggerTop">
+            <div>${trig}</div>
+            <div class="btnInline">
+              <button class="btnTiny" data-ticket="1" data-sym="${esc(s.symbol||'')}">Copy</button>
+              <button class="btnTiny" data-pin="1" data-sym="${esc(s.symbol||'')}">${isPinned(s.symbol)?'★':'☆'}</button>
+            </div>
+          </div>
+          <div class="triggerGrid">
+            <div class="muted planLine">OR ${fmt(s.or_low,2)}–${fmt(s.or_high,2)} • VWAP ${fmt(s.vwap_last,2)} • ${(s.above_vwap===true)?'above':(s.above_vwap===false?'below':'—')}</div>
+            <div class="muted planLine"><b>Plan</b> Entry $${fmt(s.entry,2)} • Stop $${fmt(s.stop_loss,2)} • 2R $${fmt(s.target_2r,2)} • 3R $${fmt(s.target_3r,2)}</div>
+          </div>
+          <div class="muted deltaLine">
+            <span class="tag">ΔTrig</span> ${formatDistToTrigger(s)} &nbsp;
+            <span class="tag">ΔStop</span> ${formatDistToStop(s)} &nbsp;
+            <span class="tag">R</span> ${formatRNow(s)}
+          </div>
+        </td></td>
+        <td>${catalyst}</td>
+        <td>${scanRank}</td>
+        <td>
+          <div class="smallTags">${reasonBits.map(r=>`<span class="tag">${esc(r)}</span>`).join('')}</div>
+          <div class="smallTags" style="margin-top:4px;">${flagBits.map(r=>`<span class="tag" style="background:#fee2e2; color:#991b1b;">${esc(r)}</span>`).join('')}</div>
+          ${s.last_error ? `<div class="muted" style="margin-top:6px; color:#fca5a5;">${esc(s.last_error)}</div>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function refreshMonitor(){
+    const mid = currentMonitorId();
+    if (!mid){
+      return;
+    }
+    try{
+      const j = await getJSON(`/api/monitor_status?monitor_id=${encodeURIComponent(mid)}&no_refresh=1`);
+      try{ maybeAlertForMonitor(j); }catch(e){}
+      renderMonitor(j);
+      renderContextStatus(j.context || {});
+      renderAlertTape(j.alerts_recent || []);
+      setCurrentMonitorId(j.monitor_id || mid);
+      try {
+        const rc = j.refresh_count ?? '—';
+        const ua = j.updated_at ? new Date((Number(j.updated_at) || 0) * 1000).toLocaleTimeString() : '—';
+        setMonitorStatus(`Monitor live • refresh #${rc} • updated ${ua}`);
+      } catch(e) {}
+
+      const updatedAt = Number(j.updated_at || 0);
+      const staleMs = updatedAt > 0 ? Math.max(0, (Date.now() / 1000 - updatedAt) * 1000) : 999999;
+      if (staleMs > 4000){
+        getJSON(`/api/monitor_status?monitor_id=${encodeURIComponent(mid)}`)
+          .then(fresh => {
+            try{ maybeAlertForMonitor(fresh); }catch(e){}
+            renderMonitor(fresh);
+            renderContextStatus(fresh.context || {});
+            renderAlertTape(fresh.alerts_recent || []);
+            setCurrentMonitorId(fresh.monitor_id || mid);
+          })
+          .catch(()=>{});
+      }
+    }catch(e){
+      const msg = String(e.message || e);
+      if (msg.includes('unknown_monitor_id')){
+        setCurrentMonitorId('');
+        setMonitorStatus(`<span class="muted">Monitor expired/unknown. Start a new one.</span>`);
+        const body = $('monitorTableBody');
+        if (body) body.innerHTML = `<tr><td colspan="10" class="muted">Start the monitor to see live updates.</td></tr>`;
+      } else {
+        setMonitorStatus(`<span style="color:#b91c1c;">Monitor error: ${esc(msg)}</span>`);
+      }
+    }
+  }
+
+  let _lastStreamPollMs = 0;
+
+  function ensurePolling(){
+    if (pollTimer) return;
+    pollTimer = setInterval(() => {
+      const hasMonitor = !!currentMonitorId();
+      if (hasMonitor){
+        refreshMonitor().catch(()=>{});
+        const now = Date.now();
+        if ((now - _lastStreamPollMs) >= 5000){
+          _lastStreamPollMs = now;
+          refreshStreamStatus().catch(()=>{});
+        }
+      }
+    }, 1500);
+  }
+
+    function collectCandidateSymbolsFromDOM(limit=10, opts={}){
+    const topN = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
+    const longOnly = !!(opts && opts.longOnly);
+
+    const body = $('candidatesBody');
+    if (!body) return [];
+
+    const buttons = Array.from(body.querySelectorAll('button.addBtn[data-add-symbol]'));
+    const out = [];
+    const seen = new Set();
+
+    for (const btn of buttons){
+      const sym = String(btn.getAttribute('data-add-symbol') || '').trim().toUpperCase();
+      if (!sym || seen.has(sym)) continue;
+
+      const bestSide = String(btn.getAttribute('data-best-side') || '').trim().toLowerCase();
+      if (longOnly && bestSide && bestSide !== 'long') continue;
+
+      seen.add(sym);
+      out.push(sym);
+      if (out.length >= topN) break;
+    }
+
+    return out;
+  }
+
+
+  let _monitorStartInFlight = false;
+  let _monitorStopInFlight = false;
+
+  async function startMonitor(){
+    if (_monitorStartInFlight) return;
+    _monitorStartInFlight = true;
+
+    const startBtn = $('monitorStartBtn');
+    if (startBtn) startBtn.disabled = true;
+
+    try{
+      const existingMid = currentMonitorId();
+      if (existingMid){
+        try{
+          await getJSON('/api/monitor_stop', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({monitor_id: existingMid}),
+          });
+        }catch(e){}
+        setCurrentMonitorId('');
+      }
+
+      const topN = Math.max(1, Math.min(50, parseInt(($('liveMonitorTopN')?.value || '10'), 10) || 10));
+      if ($('liveMonitorTopN')) $('liveMonitorTopN').value = String(topN);
+      localStorage.setItem(LS_MONITOR_TOPN, String(topN));
+
+      const manual = String($('liveMonitorSymbols')?.value || '').trim();
+      const sourcePref = String($('liveMonitorSource')?.value || 'candidates');
+      const rules = readMonitorRules();
+      localStorage.setItem(LS_MONITOR_SOURCE, sourcePref);
+      const body = { top_n: topN, long_only: rules.longOnly ? 1 : 0 };
+
+      if (manual){
+        body.symbols = manual;
+        body.source = 'manual';
+      } else if (sourcePref === 'candidates') {
+        const syms = collectCandidateSymbolsFromDOM(topN, { longOnly: rules.longOnly });
+        if (!syms.length){
+          throw new Error('Candidates list is empty. Run Scan first (or adjust filters), or enter manual symbols.');
+        }
+        const jid = localStorage.getItem('orb_job_id') || '';
+        if (!jid){
+          throw new Error('No saved scan job_id yet. Run Scan once, or enter manual symbols.');
+        }
+        body.job_id = jid;
+        body.symbols_order = syms;
+        body.source = 'candidates_dom';
+      } else if (sourcePref === 'pinned') {
+        const pins = loadPins();
+        if (!pins.length) throw new Error('No pinned symbols yet. Click ☆ Pin on a row first.');
+        body.symbols = pins.join(',');
+        body.source = 'pinned';
+      } else { // scan
+        const jid = localStorage.getItem('orb_job_id') || '';
+        if (!jid){
+          throw new Error('No saved scan job_id yet. Run Scan once, or enter manual symbols.');
+        }
+        body.job_id = jid;
+        body.source = 'scan_latest';
+      }
+
+      setMonitorStatus('<span class="muted">Starting monitor…</span>');
+      const j = await getJSON('/api/monitor_start', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body),
+      });
+      setCurrentMonitorId(j.monitor_id || '');
+      ensurePolling();
+      refreshMonitor().catch(()=>{});
+    } finally {
+      _monitorStartInFlight = false;
+      if (startBtn) startBtn.disabled = false;
+    }
+  }
+
+  async function stopMonitor(){
+    if (_monitorStopInFlight) return;
+    _monitorStopInFlight = true;
+
+    const stopBtn = $('monitorStopBtn');
+    if (stopBtn) stopBtn.disabled = true;
+
+    try{
+      const mid = currentMonitorId();
+      if (!mid){
+        setMonitorStatus('<span class="muted">No active monitor id.</span>');
+        return;
+      }
+      const j = await getJSON('/api/monitor_stop', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({monitor_id: mid}),
+      });
+      setCurrentMonitorId('');
+      setMonitorStatus(`<span class="muted">Stopped monitor ${esc(j.monitor_id || mid)}.</span>`);
+    } finally {
+      _monitorStopInFlight = false;
+      if (stopBtn) stopBtn.disabled = false;
+    }
+  }
+
+  function bind(){
+    applySavedMonitorRules();
+    try { const savedCanary = localStorage.getItem(LS_PREFLIGHT_CANARY); if (savedCanary && $('preflightCanarySymbol')) $('preflightCanarySymbol').value = savedCanary; } catch(e){}
+    const topNEl = $('liveMonitorTopN');
+    if (topNEl){
+      const savedTopN = localStorage.getItem(LS_MONITOR_TOPN);
+      if (savedTopN) topNEl.value = savedTopN;
+    }
+    const srcEl = $('liveMonitorSource');
+    if (srcEl){
+      const savedSrc = localStorage.getItem(LS_MONITOR_SOURCE);
+      if (savedSrc && Array.from(srcEl.options).some(o=>o.value===savedSrc)) srcEl.value = savedSrc;
+      else srcEl.value = srcEl.value || 'candidates';
+      srcEl.addEventListener('change', () => localStorage.setItem(LS_MONITOR_SOURCE, srcEl.value || 'candidates'));
+    }
+    $('monitorStartBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await startMonitor(); } catch(err) {
+        setMonitorStatus(`<span style="color:#b91c1c;">${esc(err.message || String(err))}</span>`);
+      }
+    });
+    $('monitorRefreshBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await refreshStreamStatus(); await refreshMonitor(); } catch(err) {
+        setMonitorStatus(`<span style="color:#b91c1c;">${esc(err.message || String(err))}</span>`);
+      }
+    });
+    $('monitorStopBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await stopMonitor(); } catch(err) {
+        setMonitorStatus(`<span style="color:#b91c1c;">${esc(err.message || String(err))}</span>`);
+      }
+    });
+
+    // Ticket / pin buttons inside the live monitor table
+    $('monitorTableBody')?.addEventListener('click', async (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      const sym = t.getAttribute('data-sym') || '';
+      if (t.getAttribute('data-ticket') === '1'){
+        ev.preventDefault();
+        const mid2 = currentMonitorId();
+        if (!mid2) return;
+        try{
+          const j = await getJSON(`/api/monitor_status?monitor_id=${encodeURIComponent(mid2)}&no_refresh=1`);
+          const rows = Array.isArray(j.symbols)? j.symbols: [];
+          const row = rows.find(r => String(r.symbol||'').toUpperCase() === String(sym||'').toUpperCase());
+          if (!row) return;
+          const rules = readMonitorRules();
+          const txt = buildTicketText(row, rules.riskDollars);
+          await navigator.clipboard.writeText(txt);
+          t.textContent = 'Copied ✓';
+          setTimeout(()=>{ t.textContent='Copy Ticket'; }, 1200);
+        }catch(e){
+          console.warn(e);
+        }
+      }
+      if (t.getAttribute('data-pin') === '1'){
+        ev.preventDefault();
+        togglePin(sym);
+        refreshMonitor().catch(()=>{});
+      }
+    });
+
+    ['liveMonitorMinGrade','liveMonitorMaxSpreadPct','liveMonitorMaxQuoteAgeMs','liveMonitorMaxTradeAgeMs','liveMonitorRiskDollars','liveMonitorNearTriggerPct','liveMonitorEnableSound','liveMonitorEnableNotify','liveMonitorLongOnly','liveMonitorHideShortRows','liveMonitorRequireTapeLive','liveMonitorRequireTrigger','liveMonitorRequireVwapAlign'].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener('change', () => { saveMonitorRules(); refreshMonitor().catch(()=>{}); });
+      el.addEventListener('input', () => { saveMonitorRules(); });
+    });
+    $('preflightRunBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try { await runPreflight(); } catch(err) { renderPreflight({ok:false, error: err.message || String(err)}); }
+    });
+  }
+
+  bind();
+  refreshStreamStatus().catch(()=>{});
+  if (currentMonitorId()) {
+    refreshMonitor().catch(()=>{});
+    ensurePolling();
+  }
+  runPreflight().catch(()=>{});
+})();
+</script>
+
+
+
+<script id="orb_meta_json" type="application/json">{{ (out or {})|tojson }}</script>
+<script id="orb_candidates_json" type="application/json">{{ (candidates or [])|tojson }}</script>
+
+
+
+
+
+
+
+<script>
+(function(){
+  const KEY="orb_scan_strategy";
+  function ready(fn){ if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", fn); else fn(); }
+  function syncStrategyUi(strategy){
+    const isRR = String(strategy || "").toLowerCase() === "rr";
+    document.querySelectorAll(".rr-only").forEach(el => {
+      el.hidden = !isRR;
+      const inputs = el.querySelectorAll("input, select, textarea");
+      inputs.forEach(inp => {
+        if (!inp.dataset.originalName) inp.dataset.originalName = inp.name || "";
+        if (isRR) {
+          if (inp.dataset.originalName) inp.name = inp.dataset.originalName;
+          inp.disabled = false;
+        } else {
+          inp.disabled = true;
+        }
+      });
+    });
+  }
+  ready(function(){
+    const el=document.getElementById("scanStrategy");
+    if(!el) return;
+    const queryValue = "{{ request.args.get('strategy', strategy or 'orb') }}";
+    el.value = queryValue || localStorage.getItem(KEY) || el.value || "orb";
+    syncStrategyUi(el.value);
+    el.addEventListener("change", ()=>{
+      localStorage.setItem(KEY, el.value);
+      syncStrategyUi(el.value);
+    });
+  });
+})();
+</script>
+
+
+
+
+<script>
+(function(){
+  let alertSource = null;
+  function esc2(v){ return v===null || v===undefined ? '' : String(v); }
+  function fmt2(v, d=2){ const n = Number(v); return Number.isFinite(n) ? n.toFixed(d) : '—'; }
+
+  window.renderContextStatus = function(ctx){
+    const sum = document.getElementById('contextSummary');
+    const tags = document.getElementById('contextTags');
+    if (!sum || !tags) return;
+    if (!ctx || Object.keys(ctx).length===0){
+      sum.innerHTML = '<span class="muted">No context snapshot yet.</span>';
+      tags.innerHTML = '';
+      return;
+    }
+    sum.innerHTML = `SPY <b>${esc2(ctx.spy_trend_state || 'unknown')}</b> • QQQ <b>${esc2(ctx.qqq_trend_state || 'unknown')}</b> • breadth <b>${fmt2(ctx.breadth_score,2)}</b> • risk-on <b>${fmt2(ctx.risk_on_score,2)}</b> • volatility <b>${esc2(ctx.volatility_regime || 'unknown')}</b> • bucket <b>${esc2(ctx.time_of_day_bucket || 'unknown')}</b>`;
+    const sector = ctx.sector_strength_by_etf || {};
+    const leaderTags = Array.isArray(ctx.leaders) ? ctx.leaders.map(s => `<span class="tag">leader ${esc2(s)}</span>`).join('') : '';
+    const lagTags = Array.isArray(ctx.laggards) ? ctx.laggards.map(s => `<span class="tag">laggard ${esc2(s)}</span>`).join('') : '';
+    const scoreTags = Object.entries(sector).slice(0, 12).map(([k,v]) => `<span class="tag">${esc2(k)} <b>${fmt2(v,2)}%</b></span>`).join('');
+    tags.innerHTML = leaderTags + lagTags + scoreTags + `<span class="tag">cohort tape <b>${fmt2(ctx.cohort_tape_quality,2)}</b></span>`;
+  };
+
+  window.renderAlertTape = function(items){
+    const body = document.getElementById('alertTapeBody');
+    const count = document.getElementById('alertTapeCount');
+    if (!body || !count) return;
+    const rows = Array.isArray(items) ? items : [];
+    count.textContent = String(rows.length);
+    if (!rows.length){
+      body.innerHTML = '<div class="muted">No alerts yet.</div>';
+      return;
+    }
+    body.innerHTML = rows.slice(0, 20).map(a => {
+      const reasons = Array.isArray(a.reasons) ? a.reasons.slice(0,4).join(' • ') : '';
+      const flags = Array.isArray(a.flags) ? a.flags.slice(0,4).join(' • ') : '';
+      const stateTxt = `${esc2(a.from_state || '—')} → ${esc2(a.to_state || '—')}`;
+      return `<div style="padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.03);">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div><b>${esc2(a.symbol || '—')}</b> <span class="tag">${esc2(a.playbook || '—')}</span> <span class="tag">${stateTxt}</span></div>
+          <div class="muted">${a.event_ts ? new Date(Number(a.event_ts)*1000).toLocaleTimeString() : ''}</div>
+        </div>
+        <div class="muted" style="margin-top:4px;">price $${fmt2(a.price,2)} • spread ${fmt2(a.spread_pct,2)}% • chase-R ${fmt2(a.live_chase_r,2)} • catalyst ${fmt2(a.catalyst_score,2)} • context ${fmt2(a.context_score,2)}</div>
+        <div class="muted" style="margin-top:4px;">${esc2(reasons)}${flags ? ` • flags: ${esc2(flags)}` : ''}</div>
+      </div>`;
+    }).join('');
+  };
+
+  async function refreshContextStatus(){
+    try{
+      const j = await getJSON('/api/context_status');
+      if (j && j.ok) renderContextStatus(j.context || {});
+    }catch(e){}
+  }
+
+  async function refreshAlertsRecent(){
+    const mid = currentMonitorId();
+    if (!mid) return;
+    try{
+      const j = await getJSON(`/api/alerts_recent?monitor_id=${encodeURIComponent(mid)}&limit=25`);
+      if (j && j.ok) renderAlertTape(j.alerts || []);
+    }catch(e){}
+  }
+
+  function ensureAlertStream(){
+    const mid = currentMonitorId();
+    if (!mid || typeof EventSource === 'undefined') return;
+    if (alertSource) return;
+    let since = 0;
+    alertSource = new EventSource(`/api/alerts_stream?monitor_id=${encodeURIComponent(mid)}&since=${encodeURIComponent(since)}`);
+    alertSource.addEventListener('alert', (evt) => {
+      try{
+        const row = JSON.parse(evt.data || '{}');
+        since = Math.max(since, Number(row.event_ts || 0));
+        refreshAlertsRecent().catch(()=>{});
+      }catch(e){}
+    });
+    alertSource.addEventListener('error', () => {});
+  }
+
+  const oldEnsurePolling = window.ensurePolling;
+  window.addEventListener('DOMContentLoaded', () => {
+    refreshContextStatus().catch(()=>{});
+    refreshAlertsRecent().catch(()=>{});
+    setInterval(() => { refreshContextStatus().catch(()=>{}); refreshAlertsRecent().catch(()=>{}); ensureAlertStream(); }, 5000);
+  });
+})();
+</script>
+
+<script>
+// STANDALONE_CANDIDATE_HYDRATOR_V14
+(function(){
+  function num(v, d=2){ const n=Number(v); return Number.isFinite(n)? n.toFixed(d): ""; }
+  function txt(v){ return v===null || v===undefined ? "" : String(v); }
+  function candidateRows(){ const body=document.getElementById('candidatesBody'); return body ? body.querySelectorAll('tr').length : 0; }
+  function finalCount(){
+    const el=document.getElementById('finalCandidates');
+    if(!el) return 0;
+    const n=parseInt((el.textContent||'').trim(),10);
+    return Number.isFinite(n)?n:0;
+  }
+  function renderRows(items){
+    const body=document.getElementById('candidatesBody');
+    if(!body) return;
+    body.innerHTML='';
+    for(const c of (items||[])){
+      const symbol = c.symbol || c.ticker || '';
+      const price = c.price ?? c.last_price ?? c.live_price ?? '';
+      const entry = c.long_entry ?? c.entry ?? '';
+      const stop = c.long_stop ?? c.stop ?? c.stop_loss ?? '';
+      const target = c.long_2r ?? c.target ?? c.take_profit ?? '';
+      const tr=document.createElement('tr');
+      tr.innerHTML = `
+        <td><button type="button" class="addBtn">+</button></td>
+        <td>${txt(symbol)}</td>
+        <td>${txt(price)}</td>
+        <td>${txt(c.pct_change ?? '')}</td>
+        <td>${txt(c.rvol ?? '')}</td>
+        <td>${txt(c.today_dollar_vol ?? '')}</td>
+        <td>${txt(c.or_range_pct ?? '')}</td>
+        <td>${txt(c.best_side || 'long')}</td>
+        <td>${txt(entry)}</td>
+        <td>${c.long_triggered ? 'TRIG' : '—'}</td>
+        <td>${txt(c.long_trigger_delta ?? '')}</td>
+        <td>${txt(stop)}</td>
+        <td>${txt(target)}</td>
+        <td>${txt(c.long_shares ?? c.shares ?? '')}</td>
+        <td>${txt(c.long_notional ?? c.notional ?? '')}</td>
+        <td>${txt(c.short_entry ?? '')}</td>
+        <td>${c.short_triggered ? 'TRIG' : '—'}</td>
+        <td>${txt(c.short_trigger_delta ?? '')}</td>
+        <td>${txt(c.short_stop ?? '')}</td>
+        <td>${txt(c.short_2r ?? '')}</td>
+        <td>${txt(c.short_shares ?? '')}</td>
+        <td>${txt(c.short_notional ?? '')}</td>
+        <td>${txt(c.ml_score ?? '')}</td>
+        <td>${txt(c.sentiment_score ?? '')}</td>
+        <td>${txt(c.combined_score ?? c.score ?? '')}</td>
+        <td>${txt(c.notes ?? '')}</td>
+      `;
+      body.appendChild(tr);
+    }
+  }
+  async function hydrate(){
+    const body=document.getElementById('candidatesBody');
+    if(!body) return;
+    const fc=finalCount();
+    if(fc<=0) return;
+    if(candidateRows()>0) return;
+    try{
+      const jobId = localStorage.getItem('orb_job_id') || '';
+      let url = jobId ? `/api/debug_last_scan?job_id=${encodeURIComponent(jobId)}` : '/api/debug_last_scan';
+      let r = await fetch(url, {cache:'no-store'});
+      let j = await r.json();
+      let arr = j.candidates || j.results || [];
+      if((!Array.isArray(arr) || !arr.length) && url !== '/api/debug_last_scan'){
+        r = await fetch('/api/debug_last_scan', {cache:'no-store'});
+        j = await r.json();
+        arr = j.candidates || j.results || [];
+      }
+      if(Array.isArray(arr) && arr.length){
+        renderRows(arr);
+      }
+    }catch(e){}
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>{ hydrate().catch(()=>{}); setInterval(()=>{hydrate().catch(()=>{});}, 1500); });
+  } else {
+    hydrate().catch(()=>{}); setInterval(()=>{hydrate().catch(()=>{});}, 1500);
+  }
+})();
+</script>
+
+
+
+<!-- WATCHLIST_REFRESH_PRICES_V2 -->
+<script>
+(function(){
+  function looksLikeTicker(t){ return /^[A-Z]{1,6}([.\-][A-Z0-9]{1,3})?$/.test((t||"").trim().toUpperCase()); }
+
+  function readSymbolsFromWatchlistTable(){
+    const syms=[];
+    const rows=document.querySelectorAll("table tbody tr");
+    for(const r of rows){
+      const tds=r.querySelectorAll("td");
+      if(!tds || tds.length < 4) continue;
+      const sym=(tds[1].textContent||"").trim().toUpperCase(); // Symbol col (after ✕)
+      if(looksLikeTicker(sym)) syms.push(sym);
+    }
+    return Array.from(new Set(syms)).slice(0,25);
+  }
+
+  function repaintPrices(payload){
+    const rows=document.querySelectorAll("table tbody tr");
+    const map = payload.rows || {};
+    for(const r of rows){
+      const tds=r.querySelectorAll("td");
+      if(!tds || tds.length < 4) continue;
+      const sym=(tds[1].textContent||"").trim().toUpperCase();
+      const rec = map[sym];
+      if(!rec) continue;
+      const px = rec.trade && rec.trade.p;
+      if(px != null){
+        tds[3].textContent = "$" + Number(px).toFixed(2); // Price column
+      }
+    }
+  }
+
+  async function refreshOnce(){
+    const syms = readSymbolsFromWatchlistTable();
+    if(!syms.length) return;
+    const r = await fetch("/api/watchlist_snapshot?symbols=" + encodeURIComponent(syms.join(",")), {cache:"no-store"});
+    const j = await r.json();
+    if(!r.ok || j.ok === false) throw new Error(j.error || ("HTTP " + r.status));
+    repaintPrices(j);
+  }
+
+  function ready(fn){ if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", fn); else fn(); }
+
+  ready(function(){
+    const btn=document.getElementById("watchlistRefreshBtn");
+    if(!btn) return;
+    btn.addEventListener("click", async ()=>{
+      const old=btn.textContent;
+      btn.disabled=true;
+      btn.textContent="Refreshing…";
+      try{ await refreshOnce(); }
+      catch(e){ console.error(e); alert("Refresh failed: " + (e && e.message ? e.message : String(e))); }
+      finally{ btn.textContent=old; btn.disabled=false; }
+    });
+  });
+
+  window.refreshWatchlistPricesOnce = refreshOnce; // for debugging
+})();
+</script>
+
+</body>
+</html>
