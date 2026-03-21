@@ -1013,6 +1013,22 @@ th {
   </div>
   {% endif %}
 
+      <div class="card compactCard utilityCard" id="brokerCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Broker</div>
+            <h3 style="margin:0;">Account cockpit</h3>
+            <div class="muted" style="margin-top:4px;">Live broker snapshot, buying power, and open positions import.</div>
+          </div>
+          <div class="positionToolbar">
+            <button type="button" id="brokerRefreshBtn">Refresh broker</button>
+            <button type="button" id="brokerImportBtn">Import positions to desk</button>
+          </div>
+        </div>
+        <div id="brokerSummary" class="metricRow" style="margin-top:10px;"></div>
+        <div id="brokerPositions" class="positionChartShell" style="margin-top:10px;"><div class="positionGuide" style="padding:10px;">Broker positions will appear here.</div></div>
+      </div>
+
       <div class="card compactCard utilityCard" id="positionDeskCard">
         <div class="sectionIntro">
           <div>
@@ -1138,6 +1154,7 @@ th {
 </div>
 
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script id="orb_broker_snapshot_json" type="application/json">{{ (broker_snapshot or {})|tojson }}</script>
 <script id="orb_context_json" type="application/json">{{ (context_snapshot or {})|tojson }}</script>
 <script id="orb_recent_alerts_json" type="application/json">{{ (recent_alerts or [])|tojson }}</script>
 <script>
@@ -2806,6 +2823,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   function pdBannerClass(action){ const a=String(action||'').toLowerCase(); if(a.includes('exit')) return 'banner-danger'; if(a.includes('trim')||a.includes('reduce')) return 'banner-caution'; if(a.includes('hold')||a.includes('trail')) return 'banner-ok'; return 'banner-neutral'; }
   function pdBannerText(r){ const a=String(r?.action||'').toLowerCase(); if(a.includes('exit now')) return 'DANGER — FLAT THIS IF IT CONFIRMS'; if(a.includes('exit into close')) return 'DO NOT GET CUTE INTO THE BELL'; if(a.includes('trim')) return 'PAY YOURSELF AND DE-RISK'; if(a.includes('trail')) return 'WINNER — PROTECT IT, DO NOT ROUND-TRIP'; if(a.includes('hold')) return 'SAFE HOLD — ONLY WHILE STRUCTURE HOLDS'; if(a.includes('reduce')) return 'WEAK HOLD — CUT RISK ON FAILURE'; return 'MIXED — WAIT FOR CONFIRMATION'; }
   function pdDefaultRow(sym=''){ return {symbol:sym, side:'long', entry:'', stop:'', shares:'', target:'', must_flat:false, notes:''}; }
+  function pdInferStop(entry, side){ const e=Number(entry); if(!Number.isFinite(e) || e<=0) return ''; const risk=Math.max(e*0.005, 0.1); return side==='short' ? (e+risk).toFixed(2) : (e-risk).toFixed(2); }
   function pdLoad(){ try{ const raw=localStorage.getItem(LS_POSITION_DESK); const j=JSON.parse(raw||'null'); return Array.isArray(j)&&j.length?j:window.PositionDeskSeed.slice(); }catch(e){ return window.PositionDeskSeed.slice(); } }
   function pdSave(rows){ try{ localStorage.setItem(LS_POSITION_DESK, JSON.stringify(rows)); }catch(e){} }
   function pdCollect(){
@@ -2819,6 +2837,23 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       must_flat: row.querySelector('[data-k="must_flat"]').checked,
       notes: row.querySelector('[data-k="notes"]').value.trim(),
     }));
+  }
+  function brokerSeed(){ try{ return JSON.parse(document.getElementById('orb_broker_snapshot_json')?.textContent || '{}'); }catch(e){ return {}; } }
+  async function brokerRefresh(){
+    const sum=document.getElementById('brokerSummary'); const box=document.getElementById('brokerPositions');
+    try{
+      const res=await fetch('/api/broker_snapshot'); const j=await res.json();
+      if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
+      const s=j.snapshot||{}; window.__brokerSnapshot=s;
+      if(sum) sum.innerHTML=`<span class="tag">Broker</span><b>${pdEsc(s.broker||'—')}</b><span class="tag">Buying power</span><b>${pdMoney(s.buying_power)}</b><span class="tag">Cash</span><b>${pdMoney(s.cash)}</b><span class="tag">Equity</span><b>${pdMoney(s.equity)}</b><span class="tag">Open positions</span><b>${pdEsc(s.position_count ?? 0)}</b>`;
+      const rows=(s.positions||[]).map(p=>`<tr><td><b>${pdEsc(p.symbol||'')}</b></td><td>${pdEsc(p.side||'')}</td><td>${pdNum(p.qty,0)}</td><td>${pdMoney(p.avg_entry_price)}</td><td>${pdMoney(p.current_price)}</td><td>${pdMoney(p.market_value,0)}</td><td>${pdMoney(p.unrealized_pl,0)}</td><td>${pdNum((Number(p.unrealized_plpc)||0)*100,2)}%</td></tr>`).join('');
+      if(box) box.innerHTML=`<div class="positionChartHead"><div class="denseMeta"><span class="tag">Live positions</span><span class="positionGuide">Import brings these into Position Desk with inferred stop placeholders you can edit.</span></div></div><table class="scoreTable"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg entry</th><th>Current</th><th>Value</th><th>Unreal P/L</th><th>P/L %</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No broker positions.</td></tr>'}</tbody></table>`;
+    }catch(e){ if(sum) sum.innerHTML=`<span class="positionError">${pdEsc(String(e.message||e))}</span>`; }
+  }
+  function brokerImportToDesk(){
+    const s=window.__brokerSnapshot || brokerSeed() || {}; const pos=Array.isArray(s.positions)?s.positions:[]; if(!pos.length) return;
+    const rows=pos.map(p=>({symbol:String(p.symbol||'').toUpperCase(), side:String(p.side||'long').toLowerCase(), entry:Number(p.avg_entry_price||0)||'', stop:pdInferStop(Number(p.avg_entry_price||0), String(p.side||'long').toLowerCase()), shares:Number(p.qty||0)||'', target:'', must_flat:false, notes:'imported from broker'}));
+    pdSave(rows); pdRenderInputs(rows); pdRefresh();
   }
   function pdRenderInputs(rows){
     const wrap=document.getElementById('positionDeskInputs'); if(!wrap) return;
@@ -2926,6 +2961,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     bundle.chart.timeScale().fitContent();
   }
   function pdBind(){
+    document.getElementById('brokerRefreshBtn')?.addEventListener('click', ()=>brokerRefresh());
+    document.getElementById('brokerImportBtn')?.addEventListener('click', ()=>brokerImportToDesk());
     document.getElementById('positionDeskAddRowBtn')?.addEventListener('click', ()=>{ const rows=pdCollect(); rows.push(pdDefaultRow()); pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
@@ -2933,7 +2970,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     document.addEventListener('change', (e)=>{ const sel=e.target.closest('[data-chart-timeframe]'); if(!sel) return; const symbol=sel.getAttribute('data-chart-timeframe'); const btn=document.querySelector(`[data-chart-symbol="${symbol}"]`); if(btn) pdLoadChart(btn).catch(()=>{}); });
     const auto=document.getElementById('positionDeskAutoRefresh');
     auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); } });
-    const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); }
+    brokerRefresh().catch(()=>{});
+    const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>{ pdRefresh(); brokerRefresh().catch(()=>{}); }, 15000); }
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pdBind); else pdBind();
 })();

@@ -670,6 +670,59 @@ class AlpacaProvider(MarketDataProvider):
             return json.loads(data.decode("utf-8"))
         except Exception as e:
             raise RuntimeError(f"Alpaca HTTP GET failed for {url}: {e}") from e
+
+    def get_account(self, timeout_s: float = 15.0) -> dict[str, Any]:
+        url = f"{self._alpaca_trading_base_url()}/v2/account"
+        payload = self._http_get_json(url, timeout_s=timeout_s)
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Unexpected Alpaca account response shape: {type(payload).__name__}")
+        return payload
+
+    def get_positions(self, timeout_s: float = 15.0) -> list[dict[str, Any]]:
+        url = f"{self._alpaca_trading_base_url()}/v2/positions"
+        payload = self._http_get_json(url, timeout_s=timeout_s)
+        if not isinstance(payload, list):
+            raise RuntimeError(f"Unexpected Alpaca positions response shape: {type(payload).__name__}")
+        out: list[dict[str, Any]] = []
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            out.append({
+                "symbol": str(row.get("symbol") or "").upper(),
+                "side": str(row.get("side") or "").lower(),
+                "qty": float(row.get("qty") or 0.0),
+                "avg_entry_price": float(row.get("avg_entry_price") or 0.0),
+                "market_value": float(row.get("market_value") or 0.0),
+                "cost_basis": float(row.get("cost_basis") or 0.0),
+                "unrealized_pl": float(row.get("unrealized_pl") or 0.0),
+                "unrealized_plpc": float(row.get("unrealized_plpc") or 0.0),
+                "current_price": float(row.get("current_price") or 0.0),
+                "lastday_price": float(row.get("lastday_price") or 0.0),
+                "change_today": float(row.get("change_today") or 0.0),
+                "asset_class": row.get("asset_class"),
+            })
+        return out
+
+    def get_broker_snapshot(self, timeout_s: float = 15.0) -> dict[str, Any]:
+        acct = self.get_account(timeout_s=timeout_s)
+        positions = self.get_positions(timeout_s=timeout_s)
+        return {
+            "broker": "alpaca",
+            "account_id": acct.get("id"),
+            "account_number": acct.get("account_number"),
+            "status": acct.get("status"),
+            "currency": acct.get("currency") or "USD",
+            "buying_power": float(acct.get("buying_power") or 0.0),
+            "cash": float(acct.get("cash") or 0.0),
+            "equity": float(acct.get("equity") or 0.0),
+            "last_equity": float(acct.get("last_equity") or 0.0),
+            "portfolio_value": float(acct.get("portfolio_value") or acct.get("equity") or 0.0),
+            "daytrade_count": int(acct.get("daytrade_count") or 0),
+            "multiplier": acct.get("multiplier"),
+            "pattern_day_trader": bool(acct.get("pattern_day_trader") or False),
+            "positions": positions,
+            "position_count": len(positions),
+        }
     def get_news_batch(
         self,
         symbols: list[str],

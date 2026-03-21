@@ -3106,6 +3106,20 @@ def api_position_manager():
     return jsonify(ok=True, context_snapshot=ctx, rows=rows, scoreboard=scoreboard, errors=errors, count=len(rows))
 
 
+@app.get("/api/broker_snapshot")
+def api_broker_snapshot():
+    provider = _ALPACA_PROVIDER
+    if provider is None:
+        return jsonify(ok=False, error=(_PROVIDER_ERROR or "provider_not_initialized")), 503
+    if not hasattr(provider, "get_broker_snapshot"):
+        return jsonify(ok=False, error="broker_snapshot_not_supported"), 501
+    try:
+        snap = provider.get_broker_snapshot()
+        return jsonify(ok=True, snapshot=snap)
+    except Exception as e:
+        return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
+
+
 @app.post("/api/position_chart")
 def api_position_chart():
     payload = request.get_json(silent=True) or {}
@@ -3601,6 +3615,13 @@ def index():
         ml_state = dict(_ML_STATE)
     ml_state["model_loaded"] = (ml_state.get("status") == "ready")
 
+    broker_snapshot = None
+    if _ALPACA_PROVIDER is not None and hasattr(_ALPACA_PROVIDER, "get_broker_snapshot"):
+        try:
+            broker_snapshot = _ALPACA_PROVIDER.get_broker_snapshot(timeout_s=8.0)
+        except Exception:
+            broker_snapshot = None
+
     return render_template(
         "index.html",
         job_running=job_running,
@@ -3617,6 +3638,7 @@ def index():
         min_or_range_pct=min_or_range_pct,
         max_or_range_pct=max_or_range_pct,
         provider=provider,
+        broker_snapshot=broker_snapshot,
         context_snapshot=_CONTEXT_ENGINE.snapshot(),
         recent_alerts=_RUNTIME_STORE.recent_alerts(limit=25),
         prefilter_counts=prefilter_counts,
