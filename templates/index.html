@@ -2789,6 +2789,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 (function(){
   const LS_POSITION_DESK = 'kingdom_position_desk_v1';
   let positionDeskTimer = null;
+  const positionDeskCharts = new Map();
 
   function pdEsc(s){ return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
   function pdNum(v, d=2){ const n=Number(v); return Number.isFinite(n) ? n.toFixed(d) : '—'; }
@@ -2863,7 +2864,10 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
           <div class="positionChartShell">
             <div class="positionChartHead">
               <div class="denseMeta"><span class="tag">Decision chart</span><span class="positionGuide">Candles + VWAP + EMA9/20 + Bollinger + your trade levels</span></div>
-              <button type="button" class="btn" data-chart-symbol="${pdEsc(r.symbol||'')}" data-chart-entry="${pdEsc(r.entry)}" data-chart-stop="${pdEsc(r.stop)}" data-chart-target="${pdEsc(r.target)}" data-chart-side="${pdEsc(r.side||'long')}">Load chart</button>
+              <div class="denseMeta">
+                <select data-chart-timeframe="${pdEsc(r.symbol||'')}"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option></select>
+                <button type="button" class="btn" data-chart-symbol="${pdEsc(r.symbol||'')}" data-chart-entry="${pdEsc(r.entry)}" data-chart-stop="${pdEsc(r.stop)}" data-chart-target="${pdEsc(r.target)}" data-chart-side="${pdEsc(r.side||'long')}" data-chart-timeframe-value="1m">Load chart</button>
+              </div>
             </div>
             <div class="positionGuide" style="padding:8px 10px;">Trading-for-dummies view: <b>yellow = VWAP</b>, <b>green = EMA9</b>, <b>blue = EMA20</b>, <b>gray rails = Bollinger Bands</b>, <b>red line = stop / get out</b>, <b>gold line = entry</b>, <b>green targets = pay window</b>.</div>
             <div class="positionChartBox" id="chart_${pdEsc(r.symbol||'')}"></div>
@@ -2878,31 +2882,41 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     const symbol=btn?.dataset.chartSymbol; if(!symbol || !window.LightweightCharts) return;
     const host=document.getElementById(`chart_${symbol}`); if(!host) return;
     host.innerHTML='';
-    const res = await fetch('/api/position_chart', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol, entry: btn.dataset.chartEntry, stop: btn.dataset.chartStop, target: btn.dataset.chartTarget, side: btn.dataset.chartSide})});
+    const tfSel=document.querySelector(`[data-chart-timeframe="${symbol}"]`);
+    const timeframe=(tfSel?.value || btn?.dataset.chartTimeframeValue || '1m');
+    if(btn) btn.dataset.chartTimeframeValue = timeframe;
+    const res = await fetch('/api/position_chart', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({symbol, entry: btn.dataset.chartEntry, stop: btn.dataset.chartStop, target: btn.dataset.chartTarget, side: btn.dataset.chartSide, timeframe})});
     const j = await res.json();
     if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
-    const chart = LightweightCharts.createChart(host, {height:360, layout:{background:{type:'solid', color:'#0f0e0b'}, textColor:'#e7e2d6'}, grid:{vertLines:{color:'rgba(255,255,255,0.05)'}, horzLines:{color:'rgba(255,255,255,0.05)'}}, rightPriceScale:{borderColor:'rgba(255,255,255,0.12)'}, timeScale:{borderColor:'rgba(255,255,255,0.12)', timeVisible:true, secondsVisible:false}, crosshair:{mode:1}});
-    const candle = chart.addCandlestickSeries({upColor:'#22c55e', downColor:'#ef4444', wickUpColor:'#22c55e', wickDownColor:'#ef4444', borderVisible:false});
-    candle.setData(j.bars||[]);
-    const addLine=(data,color,width=2)=>{ const s=chart.addLineSeries({color,lineWidth:width, priceLineVisible:false, lastValueVisible:false}); s.setData(data||[]); return s; };
-    addLine(j.overlays?.vwap||[], '#facc15', 2);
-    addLine(j.overlays?.ema9||[], '#4ade80', 2);
-    addLine(j.overlays?.ema20||[], '#60a5fa', 2);
-    addLine(j.overlays?.bb_upper||[], 'rgba(203,213,225,0.65)', 1);
-    addLine(j.overlays?.bb_mid||[], 'rgba(148,163,184,0.45)', 1);
-    addLine(j.overlays?.bb_lower||[], 'rgba(203,213,225,0.65)', 1);
-    Object.entries(j.levels||{}).forEach(([k,v])=>{ if(v===null||v===undefined||Number.isNaN(Number(v))) return; candle.createPriceLine({price:Number(v), color:(k==='stop'||k==='or_low')?'#ef4444':(k==='entry'?'#fbbf24':(k.startsWith('r')||k==='target'||k==='or_high')?'#22c55e':'#a78bfa'), lineWidth:(k==='entry'||k==='stop')?2:1, lineStyle:(k==='entry'||k==='stop')?0:2, axisLabelVisible:true, title:k.toUpperCase()}); });
-    (j.labels||[]).forEach(label => {
-      if(label?.price===null || label?.price===undefined) return;
-      candle.createPriceLine({price:Number(label.price), color:String(label.color||'#ffffff'), lineWidth:1, lineStyle:2, axisLabelVisible:true, title:String(label.text||label.key||'')});
-    });
-    chart.timeScale().fitContent();
+    let bundle = positionDeskCharts.get(symbol);
+    if(bundle && bundle.timeframe !== timeframe){ try{ bundle.chart.remove(); }catch(e){} positionDeskCharts.delete(symbol); bundle = null; }
+    if(!bundle){
+      const chart = LightweightCharts.createChart(host, {height:360, layout:{background:{type:'solid', color:'#0f0e0b'}, textColor:'#e7e2d6'}, grid:{vertLines:{color:'rgba(255,255,255,0.05)'}, horzLines:{color:'rgba(255,255,255,0.05)'}}, rightPriceScale:{borderColor:'rgba(255,255,255,0.12)'}, timeScale:{borderColor:'rgba(255,255,255,0.12)', timeVisible:true, secondsVisible:false}, crosshair:{mode:1}});
+      const candle = chart.addCandlestickSeries({upColor:'#22c55e', downColor:'#ef4444', wickUpColor:'#22c55e', wickDownColor:'#ef4444', borderVisible:false});
+      const mk=(color,width=2)=>chart.addLineSeries({color,lineWidth:width, priceLineVisible:false, lastValueVisible:false});
+      bundle = {chart, candle, lines:{vwap:mk('#facc15',2), ema9:mk('#4ade80',2), ema20:mk('#60a5fa',2), bb_upper:mk('rgba(203,213,225,0.65)',1), bb_mid:mk('rgba(148,163,184,0.45)',1), bb_lower:mk('rgba(203,213,225,0.65)',1)}, timeframe, priceLines:[]};
+      positionDeskCharts.set(symbol, bundle);
+    }
+    bundle.timeframe = timeframe;
+    bundle.candle.setData(j.bars||[]);
+    bundle.lines.vwap.setData(j.overlays?.vwap||[]);
+    bundle.lines.ema9.setData(j.overlays?.ema9||[]);
+    bundle.lines.ema20.setData(j.overlays?.ema20||[]);
+    bundle.lines.bb_upper.setData(j.overlays?.bb_upper||[]);
+    bundle.lines.bb_mid.setData(j.overlays?.bb_mid||[]);
+    bundle.lines.bb_lower.setData(j.overlays?.bb_lower||[]);
+    (bundle.priceLines||[]).forEach(pl=>{ try{ bundle.candle.removePriceLine(pl); }catch(e){} });
+    bundle.priceLines = [];
+    Object.entries(j.levels||{}).forEach(([k,v])=>{ if(v===null||v===undefined||Number.isNaN(Number(v))) return; bundle.priceLines.push(bundle.candle.createPriceLine({price:Number(v), color:(k==='stop'||k==='or_low')?'#ef4444':(k==='entry'?'#fbbf24':(k.startsWith('r')||k==='target'||k==='or_high')?'#22c55e':'#a78bfa'), lineWidth:(k==='entry'||k==='stop')?2:1, lineStyle:(k==='entry'||k==='stop')?0:2, axisLabelVisible:true, title:k.toUpperCase()})); });
+    (j.labels||[]).forEach(label => { if(label?.price===null || label?.price===undefined) return; bundle.priceLines.push(bundle.candle.createPriceLine({price:Number(label.price), color:String(label.color||'#ffffff'), lineWidth:1, lineStyle:2, axisLabelVisible:true, title:String(label.text||label.key||'')})); });
+    bundle.chart.timeScale().fitContent();
   }
   function pdBind(){
     document.getElementById('positionDeskAddRowBtn')?.addEventListener('click', ()=>{ const rows=pdCollect(); rows.push(pdDefaultRow()); pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
     document.addEventListener('click', (e)=>{ const btn=e.target.closest('[data-chart-symbol]'); if(!btn) return; pdLoadChart(btn).catch(err=>{ const host=document.getElementById(`chart_${btn.dataset.chartSymbol}`); if(host) host.innerHTML=`<div class="positionError" style="padding:12px;">${pdEsc(err.message||err)}</div>`; }); });
+    document.addEventListener('change', (e)=>{ const sel=e.target.closest('[data-chart-timeframe]'); if(!sel) return; const symbol=sel.getAttribute('data-chart-timeframe'); const btn=document.querySelector(`[data-chart-symbol="${symbol}"]`); if(btn) pdLoadChart(btn).catch(()=>{}); });
     const auto=document.getElementById('positionDeskAutoRefresh');
     auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); } });
     const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); }

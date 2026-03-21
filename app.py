@@ -3109,9 +3109,14 @@ def api_position_chart():
     stop = _safe_float(payload.get("stop"))
     target = _safe_float(payload.get("target"))
     side = str(payload.get("side") or "long").strip().lower()
+    timeframe = str(payload.get("timeframe") or "1m").strip().lower()
 
     intraday, live_price = _entry_now_intraday_context(provider, symbol, include_prepost=False)
     import pandas as _pd
+    if timeframe == "5m":
+        intraday = intraday.resample("5min").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
+    elif timeframe == "15m":
+        intraday = intraday.resample("15min").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
     close = _col(intraday, 'Close', 'close').astype(float)
     high = _col(intraday, 'High', 'high').astype(float)
     low = _col(intraday, 'Low', 'low').astype(float)
@@ -3192,13 +3197,26 @@ def api_position_chart():
         labels.append({"key": "or_low", "price": levels["or_low"], "text": "ORB LOW", "color": "#a78bfa"})
     if len(vw) > 0:
         try:
-            labels.append({"key": "vwap", "price": float(vw.iloc[-1]), "text": "WEAK IF LOSES VWAP", "color": "#facc15"})
+            vwap_px = float(vw.iloc[-1])
+            labels.append({"key": "vwap", "price": vwap_px, "text": "WEAK IF LOSES VWAP", "color": "#facc15"})
+            if side == "long":
+                labels.append({"key": "hold_above", "price": vwap_px, "text": "OKAY TO HOLD ABOVE THIS", "color": "#eab308"})
+            else:
+                labels.append({"key": "hold_below", "price": vwap_px, "text": "OKAY TO HOLD BELOW THIS", "color": "#eab308"})
         except Exception:
             pass
+    if risk_per_share is not None and entry is not None:
+        if side == "long":
+            labels.append({"key": "chase", "price": float(entry) + 1.25 * risk_per_share, "text": "DON'T CHASE ABOVE THIS", "color": "#fb7185"})
+            labels.append({"key": "cooked", "price": float(stop), "text": "LOSES THIS = YOU'RE COOKED", "color": "#ef4444"})
+        else:
+            labels.append({"key": "chase", "price": float(entry) - 1.25 * risk_per_share, "text": "DON'T CHASE BELOW THIS", "color": "#fb7185"})
+            labels.append({"key": "cooked", "price": float(stop), "text": "BREAKS THIS = YOU'RE COOKED", "color": "#ef4444"})
 
     return jsonify(
         ok=True,
         symbol=symbol,
+        timeframe=timeframe,
         live_price=live_price,
         bars=bars,
         overlays={
