@@ -543,6 +543,14 @@ th {
           <span class="tag">Universe</span><span>{{ universe }}</span>
         </div>
       </div>
+      <div class="quickCard" id="capitalStatusCard">
+        <div class="sectionLabel">Capital</div>
+        <div id="capitalStatusBody" class="denseMeta">
+          <span class="tag">Broker</span><span>{{ (broker_snapshot or {}).get('broker', '—') }}</span>
+          <span class="tag">BP</span><span>{{ '%.0f'|format((broker_snapshot or {}).get('buying_power', 0) or 0) }}</span>
+          <span class="tag">Equity</span><span>{{ '%.0f'|format((broker_snapshot or {}).get('equity', 0) or 0) }}</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1039,6 +1047,7 @@ th {
           <div class="positionToolbar">
             <button type="button" id="positionDeskAddRowBtn">Add row</button>
             <button type="button" id="positionDeskRefreshBtn">Refresh guidance</button>
+            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="positionDeskBrokerSync" /> Sync broker positions</label>
           </div>
         </div>
         <div class="positionDeskGrid" style="margin-top:10px;">
@@ -2813,6 +2822,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 <script>
 (function(){
   const LS_POSITION_DESK = 'kingdom_position_desk_v1';
+  const LS_POSITION_BROKER_SYNC = 'kingdom_position_broker_sync_v1';
   let positionDeskTimer = null;
   const positionDeskCharts = new Map();
 
@@ -2840,19 +2850,28 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   }
   function brokerSeed(){ try{ return JSON.parse(document.getElementById('orb_broker_snapshot_json')?.textContent || '{}'); }catch(e){ return {}; } }
   async function brokerRefresh(){
-    const sum=document.getElementById('brokerSummary'); const box=document.getElementById('brokerPositions');
+    const sum=document.getElementById('brokerSummary'); const box=document.getElementById('brokerPositions'); const cap=document.getElementById('capitalStatusBody');
     try{
       const res=await fetch('/api/broker_snapshot'); const j=await res.json();
       if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
       const s=j.snapshot||{}; window.__brokerSnapshot=s;
       if(sum) sum.innerHTML=`<span class="tag">Broker</span><b>${pdEsc(s.broker||'—')}</b><span class="tag">Buying power</span><b>${pdMoney(s.buying_power)}</b><span class="tag">Cash</span><b>${pdMoney(s.cash)}</b><span class="tag">Equity</span><b>${pdMoney(s.equity)}</b><span class="tag">Open positions</span><b>${pdEsc(s.position_count ?? 0)}</b>`;
+      if(cap) cap.innerHTML=`<span class="tag">Broker</span><span>${pdEsc(s.broker||'—')}</span><span class="tag">BP</span><span>${pdMoney(s.buying_power,0)}</span><span class="tag">Equity</span><span>${pdMoney(s.equity,0)}</span><span class="tag">Pos</span><span>${pdEsc(s.position_count ?? 0)}</span>`;
       const rows=(s.positions||[]).map(p=>`<tr><td><b>${pdEsc(p.symbol||'')}</b></td><td>${pdEsc(p.side||'')}</td><td>${pdNum(p.qty,0)}</td><td>${pdMoney(p.avg_entry_price)}</td><td>${pdMoney(p.current_price)}</td><td>${pdMoney(p.market_value,0)}</td><td>${pdMoney(p.unrealized_pl,0)}</td><td>${pdNum((Number(p.unrealized_plpc)||0)*100,2)}%</td></tr>`).join('');
       if(box) box.innerHTML=`<div class="positionChartHead"><div class="denseMeta"><span class="tag">Live positions</span><span class="positionGuide">Import brings these into Position Desk with inferred stop placeholders you can edit.</span></div></div><table class="scoreTable"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg entry</th><th>Current</th><th>Value</th><th>Unreal P/L</th><th>P/L %</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No broker positions.</td></tr>'}</tbody></table>`;
+      const syncOn = localStorage.getItem(LS_POSITION_BROKER_SYNC) === '1';
+      if(syncOn) brokerImportToDesk(true);
     }catch(e){ if(sum) sum.innerHTML=`<span class="positionError">${pdEsc(String(e.message||e))}</span>`; }
   }
-  function brokerImportToDesk(){
+  function brokerImportToDesk(silent=false){
     const s=window.__brokerSnapshot || brokerSeed() || {}; const pos=Array.isArray(s.positions)?s.positions:[]; if(!pos.length) return;
-    const rows=pos.map(p=>({symbol:String(p.symbol||'').toUpperCase(), side:String(p.side||'long').toLowerCase(), entry:Number(p.avg_entry_price||0)||'', stop:pdInferStop(Number(p.avg_entry_price||0), String(p.side||'long').toLowerCase()), shares:Number(p.qty||0)||'', target:'', must_flat:false, notes:'imported from broker'}));
+    const existing = silent ? pdCollect() : [];
+    const bySym = new Map(existing.filter(r=>r.symbol).map(r=>[String(r.symbol).toUpperCase(), r]));
+    const rows=pos.map(p=>{
+      const sym=String(p.symbol||'').toUpperCase();
+      const prev=bySym.get(sym);
+      return {symbol:sym, side:String(p.side||prev?.side||'long').toLowerCase(), entry:Number(p.avg_entry_price||prev?.entry||0)||'', stop:(prev?.stop||pdInferStop(Number(p.avg_entry_price||0), String(p.side||'long').toLowerCase())), shares:Number(p.qty||prev?.shares||0)||'', target:(prev?.target||''), must_flat:!!prev?.must_flat, notes:(prev?.notes||'imported from broker')};
+    });
     pdSave(rows); pdRenderInputs(rows); pdRefresh();
   }
   function pdRenderInputs(rows){
@@ -2963,6 +2982,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   function pdBind(){
     document.getElementById('brokerRefreshBtn')?.addEventListener('click', ()=>brokerRefresh());
     document.getElementById('brokerImportBtn')?.addEventListener('click', ()=>brokerImportToDesk());
+    const brokerSync=document.getElementById('positionDeskBrokerSync');
+    if(brokerSync){ brokerSync.checked = localStorage.getItem(LS_POSITION_BROKER_SYNC) === '1'; brokerSync.addEventListener('change', ()=>{ localStorage.setItem(LS_POSITION_BROKER_SYNC, brokerSync.checked ? '1' : '0'); if(brokerSync.checked) brokerRefresh().catch(()=>{}); }); }
     document.getElementById('positionDeskAddRowBtn')?.addEventListener('click', ()=>{ const rows=pdCollect(); rows.push(pdDefaultRow()); pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
