@@ -9,6 +9,8 @@ import platform
 import os
 import sys
 import subprocess
+import atexit
+import fcntl
 import threading
 import concurrent.futures
 import time
@@ -80,6 +82,42 @@ def _alpaca_secret() -> str | None:
 _load_local_env_files()
 
 BROKER_ACTIONS_ENABLED = (os.getenv("BROKER_ACTIONS_ENABLED") or "0").strip().lower() in {"1", "true", "yes", "on"}
+_SINGLE_INSTANCE_LOCK = None
+
+
+def _acquire_single_instance_lock() -> None:
+    global _SINGLE_INSTANCE_LOCK
+    if (os.getenv("ORB_SINGLE_INSTANCE") or "1").strip().lower() not in {"1", "true", "yes", "on"}:
+        return
+    lock_path = os.getenv("ORB_SINGLE_INSTANCE_LOCK_PATH") or "/tmp/kingdom_app.lock"
+    fh = open(lock_path, "a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            fh.seek(0)
+            holder = fh.read().strip()
+        except Exception:
+            holder = ""
+        raise RuntimeError(f"another_kingdom_instance_running lock={lock_path} holder={holder or 'unknown'}")
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"pid={os.getpid()} port={os.getenv('ORB_PORT', '8050')} started_at={int(time.time())}\n")
+    fh.flush()
+    _SINGLE_INSTANCE_LOCK = fh
+
+    def _cleanup_lock() -> None:
+        global _SINGLE_INSTANCE_LOCK
+        try:
+            if _SINGLE_INSTANCE_LOCK is not None:
+                fcntl.flock(_SINGLE_INSTANCE_LOCK.fileno(), fcntl.LOCK_UN)
+                _SINGLE_INSTANCE_LOCK.close()
+        except Exception:
+            pass
+        _SINGLE_INSTANCE_LOCK = None
+
+    atexit.register(_cleanup_lock)
+
 
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -3929,6 +3967,8 @@ def api_monitor_status():
 
 if __name__ == "__main__":
     import os
+
+    _acquire_single_instance_lock()
 
     host = os.getenv("ORB_HOST", "127.0.0.1")
     port = int(os.getenv("ORB_PORT", "8050"))
