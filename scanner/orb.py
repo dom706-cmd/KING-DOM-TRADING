@@ -2591,10 +2591,11 @@ def scan_symbols(
         admissible.sort(key=_orb_base_score, reverse=True)
         seed_candidates.sort(key=_orb_base_score, reverse=True)
 
-    # In monitor-first mode, the surfaced candidate pool should include monitor seeds
-    # even when they are not yet trade-ready. This preserves monitor workflows,
-    # characterization snapshots, and pre-trade watchlist building.
-    top_pool = seed_candidates if monitor_first_mode else admissible
+    # Best trader setup: the main surfaced candidate pool should remain strictly
+    # trade-ready/admissible. Monitor seeds are preserved in separate counters and
+    # rejected/debug payloads for watchlist/monitor workflows, but do not pollute
+    # the primary trading list.
+    top_pool = admissible
     top = top_pool[: int(limit)]
     catalyst_enriched = sum(1 for c in candidates if c.catalyst_article_count)
 
@@ -2633,6 +2634,7 @@ def scan_symbols(
         "trade_ready_total": len(admissible),
         "rejected_total": len(rejected_candidates),
         "candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in top],
+        "seed_candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in seed_candidates[: int(limit)]],
         "rejected_candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in rejected_candidates[: int(limit)]],
         "prefilter_counts": pre_counts,
         "prefilter_samples": prefilter_samples,

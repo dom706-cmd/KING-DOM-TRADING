@@ -934,7 +934,7 @@ def _get_scan_candidates_for_monitor(job_id: str) -> list[dict]:
     if st != "done":
         raise RuntimeError(f"scan_job_not_done:{st}")
     result = job.get("result") or {}
-    cands = result.get("candidates") or []
+    cands = result.get("seed_candidates") or result.get("candidates") or []
     if not isinstance(cands, list):
         raise RuntimeError("scan_job_candidates_invalid")
     out = [c for c in cands if isinstance(c, dict)]
@@ -2440,9 +2440,10 @@ def _scan_worker(jid: str):
             try:
                 monitor_top_n = _param_int(params, "monitor_top_n", min(25, max(5, limit)))
                 stream_cache = _ensure_stream(start=True, require=True)
+                monitor_candidates = list(result.get("seed_candidates") or top)
                 sess = _MONITOR.start_from_scan_candidates(
                     job_id=jid,
-                    candidates=top,
+                    candidates=monitor_candidates,
                     top_n=monitor_top_n,
                     feed=(os.getenv("ALPACA_DATA_FEED") or "iex").strip().lower() or "iex",
                     provider=provider,
