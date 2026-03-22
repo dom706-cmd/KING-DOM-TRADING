@@ -2471,6 +2471,7 @@ function renderLastRun(summary){
     );
 
     const rejected = Array.isArray(summary.rejected_candidates) ? summary.rejected_candidates : [];
+    const seedCandidates = Array.isArray(summary.seed_candidates) ? summary.seed_candidates : [];
     const rejectedPreview = rejected.slice(0, 8).map((c) => {
       const sym = esc(String(c.symbol || '—'));
       const reasons = [];
@@ -2481,6 +2482,13 @@ function renderLastRun(summary){
       }
       const shown = reasons.slice(0, 3).map(rejectLabel).join(', ') || 'rejected';
       return `<span class="tag"><b>${sym}</b> — ${esc(shown)}</span>`;
+    });
+
+    const seedPreview = seedCandidates.slice(0, 8).map((c) => {
+      const sym = esc(String(c.symbol || '—'));
+      const side = esc(String(c.best_side || 'long').toUpperCase());
+      const reasons = Array.isArray(c.monitor_seed_reasons) ? c.monitor_seed_reasons.slice(0, 3).map(rejectLabel).join(', ') : '';
+      return `<span class="tag"><b>${sym}</b> • ${side}${reasons ? ` — ${esc(reasons)}` : ''}</span>`;
     });
 
     const thresholdParts = [
@@ -2526,6 +2534,10 @@ function renderLastRun(summary){
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
           <b>Top rejects:</b>
           ${topRejects.length ? topRejects.join(' ') : '<span class="muted">No reject counts returned.</span>'}
+        </div>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+          <b>On deck / monitor seeds:</b>
+          ${seedPreview.length ? seedPreview.join(' ') : '<span class="muted">No seed preview returned.</span>'}
         </div>
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
           <b>Rejected symbols:</b>

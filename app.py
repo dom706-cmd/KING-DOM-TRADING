@@ -3447,6 +3447,7 @@ def api_scan_status():
             "seed_symbols": result.get("seed_symbols") or [],
             # include candidates so the browser can render without a full page reload
             "candidates": _apply_live_state_to_candidates(result.get("candidates") or []),
+            "seed_candidates": _apply_live_state_to_candidates(result.get("seed_candidates") or []),
             "rejected_candidates": result.get("rejected_candidates") or [],
         }
     if summary is not None and _is_truthy(request.args.get("debug", "")):
@@ -3467,6 +3468,10 @@ def api_debug_last_scan():
         enriched_candidates = _apply_live_state_to_candidates(candidates)
         if "candidates" in result or candidates:
             result["candidates"] = enriched_candidates
+
+        seed_candidates = list(result.get("seed_candidates") or [])
+        if seed_candidates:
+            result["seed_candidates"] = _apply_live_state_to_candidates(seed_candidates)
 
         rejected_candidates = list(result.get("rejected_candidates") or [])
         if rejected_candidates:
