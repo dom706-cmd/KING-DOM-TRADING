@@ -79,6 +79,8 @@ def _alpaca_secret() -> str | None:
 
 _load_local_env_files()
 
+BROKER_ACTIONS_ENABLED = (os.getenv("BROKER_ACTIONS_ENABLED") or "0").strip().lower() in {"1", "true", "yes", "on"}
+
 app = Flask(__name__)
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 app.jinja_env.auto_reload = True
@@ -3139,6 +3141,8 @@ def api_broker_action():
     provider = _BROKER_PROVIDER
     if provider is None:
         return jsonify(ok=False, error=(_BROKER_PROVIDER_ERROR or "provider_not_initialized"), broker=_BROKER_PROVIDER_NAME), 503
+    if not BROKER_ACTIONS_ENABLED:
+        return jsonify(ok=False, error="broker_actions_disabled", broker=_BROKER_PROVIDER_NAME), 403
     payload = request.get_json(silent=True) or {}
     action = str(payload.get("action") or "").strip().lower()
     symbol = str(payload.get("symbol") or "").strip().upper()
@@ -3161,7 +3165,7 @@ def api_broker_action():
             out = provider.submit_exit_order(symbol=symbol)
         else:
             out = provider.submit_exit_order(symbol=symbol, qty=qty, limit_price=limit_price)
-        return jsonify(ok=True, broker="alpaca", action=action, symbol=symbol, order=out)
+        return jsonify(ok=True, broker=_BROKER_PROVIDER_NAME, action=action, symbol=symbol, order=out)
     except Exception as e:
         return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
 
@@ -3686,6 +3690,7 @@ def index():
         provider=provider,
         broker_provider_name=_BROKER_PROVIDER_NAME,
         broker_provider_error=_BROKER_PROVIDER_ERROR,
+        broker_actions_enabled=BROKER_ACTIONS_ENABLED,
         broker_snapshot=broker_snapshot,
         context_snapshot=_CONTEXT_ENGINE.snapshot(),
         recent_alerts=_RUNTIME_STORE.recent_alerts(limit=25),

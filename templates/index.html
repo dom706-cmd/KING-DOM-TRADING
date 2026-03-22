@@ -2930,11 +2930,15 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
           <div class="metricRow"><span class="tag">Plan</span><span>${(r.exit_plan||[]).map(pdEsc).join(' • ') || 'No explicit exit plan.'}</span></div>
           <div class="metricRow"><span class="tag">Overnight reasons</span><span>${(r.overnight_reasons||[]).map(pdEsc).join(' • ') || '—'}</span></div>
           <div class="brokerActionRow">
+            {% if broker_actions_enabled %}
             <button type="button" class="btn" data-broker-act="trim25" data-broker-symbol="${pdEsc(r.symbol||'')}">Trim 25%</button>
             <button type="button" class="btn" data-broker-act="trim50" data-broker-symbol="${pdEsc(r.symbol||'')}">Trim 50%</button>
             <button type="button" class="btn btn-danger" data-broker-act="flatten" data-broker-symbol="${pdEsc(r.symbol||'')}">Flatten</button>
             <input data-broker-limit="${pdEsc(r.symbol||'')}" placeholder="limit px" inputmode="decimal" style="width:110px;" />
             <button type="button" class="btn" data-broker-act="limit_exit" data-broker-symbol="${pdEsc(r.symbol||'')}" data-broker-qty="${pdEsc(r.shares||'')}">Limit exit</button>
+            {% else %}
+            <div class="muted">In-app broker order buttons are disabled for safety right now. Snapshot + position import stay live.</div>
+            {% endif %}
           </div>
           <div class="positionChartShell">
             <div class="positionChartHead">
