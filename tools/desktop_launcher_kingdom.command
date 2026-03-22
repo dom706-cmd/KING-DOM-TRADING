@@ -22,9 +22,13 @@ unset APCA_API_BASE_URL
 unset ALPACA_DATA_FEED
 
 source "$VENV_ACTIVATE"
+export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 export ORB_HOST=127.0.0.1
 export ORB_PORT="$PORT"
 export ORB_SINGLE_INSTANCE=1
+export ORB_SCAN_WORKERS=8
+export ORB_SCAN_WORKERS_MAX=8
+export LOKY_MAX_CPU_COUNT=8
 
 existing_pid=""
 if [[ -f "$LOCK_FILE" ]]; then

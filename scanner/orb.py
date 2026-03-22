@@ -2385,11 +2385,15 @@ def scan_symbols(
         except Exception:
             return default
 
-    default_workers = min(16, max(4, (os.cpu_count() or 8) * 2))
+    # Fast but reliable default for Alpaca-backed scans on a local workstation.
+    # Over-threading this path tends to increase upstream contention/rate limiting
+    # more than it improves real scan completion time.
+    default_workers = min(8, max(4, (os.cpu_count() or 8)))
     scan_workers = _env_int("ORB_SCAN_WORKERS", default_workers)
 
-    # Alpaca rate-limits aggressively; clamp parallelism for reliability (override by ORB_SCAN_WORKERS_MAX).
-    scan_workers_max = _env_int("ORB_SCAN_WORKERS_MAX", 16)
+    # Alpaca rate-limits aggressively; keep the default cap conservative.
+    # Advanced tuning can still override via env when deliberately benchmarking.
+    scan_workers_max = _env_int("ORB_SCAN_WORKERS_MAX", 8)
     scan_workers = max(1, min(scan_workers, scan_workers_max))
 
     def _build_one(sym: str) -> tuple[str, Candidate | None, dict[str, Any] | None]:
