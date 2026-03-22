@@ -1024,12 +1024,27 @@ def api_watchlist():
         return jsonify(ok=False, max=_WATCHLIST_MAX, symbols=_WATCHLIST, rows={}, streaming=False, error=(_STREAM_ERROR or "stream_not_initialized")), 500
 
     st = stream_cache.state()
-    # Build rows from real stream cache (no placeholders)
     rows={}
     for sym in _WATCHLIST:
+        trade = stream_cache.latest_trade(sym) or {}
+        quote = stream_cache.latest_quote(sym) or {}
+        source = "stream"
+        if not trade and _ALPACA_PROVIDER is not None:
+            try:
+                trade = _ALPACA_PROVIDER.get_latest_trade(sym) or {}
+                source = "rest"
+            except Exception:
+                pass
+        if not quote and _ALPACA_PROVIDER is not None:
+            try:
+                quote = _ALPACA_PROVIDER.get_latest_quote(sym) or {}
+                source = "rest" if source == "stream" else source
+            except Exception:
+                pass
         rows[sym] = {
-            "trade": stream_cache.latest_trade(sym) or {},
-            "quote": stream_cache.latest_quote(sym) or {},
+            "trade": trade,
+            "quote": quote,
+            "source": source,
         }
     return jsonify(ok=True, max=_WATCHLIST_MAX, symbols=_WATCHLIST, rows=rows, streaming=bool(st.streaming), connected=bool(st.connected), last_event_at=st.last_event_at, error=st.error)
 

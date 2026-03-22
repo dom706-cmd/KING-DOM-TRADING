@@ -2591,10 +2591,10 @@ def scan_symbols(
         admissible.sort(key=_orb_base_score, reverse=True)
         seed_candidates.sort(key=_orb_base_score, reverse=True)
 
-    # Trade-facing scan results must surface only admissible/trade-ready candidates.
-    # Monitor seed candidates are preserved separately for monitor/debug workflows,
-    # but must not become the main surfaced pool.
-    top_pool = admissible
+    # In monitor-first mode, the surfaced candidate pool should include monitor seeds
+    # even when they are not yet trade-ready. This preserves monitor workflows,
+    # characterization snapshots, and pre-trade watchlist building.
+    top_pool = seed_candidates if monitor_first_mode else admissible
     top = top_pool[: int(limit)]
     catalyst_enriched = sum(1 for c in candidates if c.catalyst_article_count)
 
