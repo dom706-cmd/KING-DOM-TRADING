@@ -3186,7 +3186,10 @@ def api_position_chart():
     side = str(payload.get("side") or "long").strip().lower()
     timeframe = str(payload.get("timeframe") or "1m").strip().lower()
 
-    intraday, live_price = _entry_now_intraday_context(provider, symbol, include_prepost=False)
+    try:
+        intraday, live_price = _entry_now_intraday_context(provider, symbol, include_prepost=False)
+    except IntradayDataFailure as e:
+        return jsonify(ok=False, error=e.code, message=e.message, symbol=symbol), 400
     import pandas as _pd
     if timeframe == "5m":
         intraday = intraday.resample("5min").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
