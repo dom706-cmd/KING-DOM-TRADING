@@ -1364,6 +1364,16 @@ function fmtR(x){
   return Number(x).toFixed(2) + "R";
 }
 
+function gradeClass(g){
+  const x = String(g || "").toUpperCase();
+  if (x === "A+") return "grade-Aplus";
+  if (x === "A") return "grade-A";
+  if (x === "B") return "grade-B";
+  if (x === "C") return "grade-C";
+  if (x === "D") return "grade-D";
+  return "grade-F";
+}
+
 
   function vwapTrendLine(c){
     const vwap = Number(c.vwap_last ?? NaN);
