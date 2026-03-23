@@ -1467,10 +1467,14 @@ function gradeClass(g){
         data-long-trigger-delta="${c.long_trigger_delta ?? ""}"
         data-long-triggered="${c.long_triggered ? "1":"0"}"
         data-long-stop="${c.long_stop ?? ""}"
+        data-long-2r="${c.long_2r ?? ""}"
+        data-long-3r="${c.long_3r ?? ""}"
         data-short-trigger="${c.short_entry ?? ""}"
         data-short-trigger-delta="${c.short_trigger_delta ?? ""}"
         data-short-triggered="${c.short_triggered ? "1":"0"}"
         data-short-stop="${c.short_stop ?? ""}"
+        data-short-2r="${c.short_2r ?? ""}"
+        data-short-3r="${c.short_3r ?? ""}"
         data-add-date="${c.data_date ?? ""}"
       data-ml-score="${(c.ml_score ?? c.ml ?? c.model_score ?? "")}"
         data-combined-score="${(c.combined_score ?? c.score ?? c.total_score ?? "")}"
@@ -3667,6 +3671,10 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   }
 
     function collectCandidateSymbolsFromDOM(limit=10, opts={}){
+    return collectCandidatePlansFromDOM(limit, opts).map(x => x.symbol).filter(Boolean);
+  }
+
+  function collectCandidatePlansFromDOM(limit=10, opts={}){
     const topN = Math.max(1, Math.min(50, parseInt(limit, 10) || 10));
     const longOnly = !!(opts && opts.longOnly);
 
@@ -3684,8 +3692,32 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const bestSide = String(btn.getAttribute('data-best-side') || '').trim().toLowerCase();
       if (longOnly && bestSide && bestSide !== 'long') continue;
 
+      const isShort = bestSide === 'short';
+      const entry = Number(btn.getAttribute(isShort ? 'data-short-trigger' : 'data-long-trigger'));
+      const stop = Number(btn.getAttribute(isShort ? 'data-short-stop' : 'data-long-stop'));
+      const target2 = Number(btn.getAttribute(isShort ? 'data-short-2r' : 'data-long-2r'));
+      const target3 = Number(btn.getAttribute(isShort ? 'data-short-3r' : 'data-long-3r'));
+      const livePrice = Number(btn.getAttribute('data-last-price'));
+      const mlScore = Number(btn.getAttribute('data-ml-score'));
+      const combinedScore = Number(btn.getAttribute('data-combined-score'));
+      const sentimentScore = Number(btn.getAttribute('data-sent-score'));
+
       seen.add(sym);
-      out.push(sym);
+      out.push({
+        symbol: sym,
+        best_side: bestSide || 'long',
+        strategy: String($('strategy')?.value || 'orb').trim().toLowerCase() === 'range reversion' ? 'rr' : 'orb',
+        exec_style: String($('executionStyle')?.value || '').toLowerCase().includes('breakout') ? 'breakout_now' : 'retest',
+        entry: Number.isFinite(entry) ? entry : null,
+        stop_loss: Number.isFinite(stop) ? stop : null,
+        target_2r: Number.isFinite(target2) ? target2 : null,
+        target_3r: Number.isFinite(target3) ? target3 : null,
+        price: Number.isFinite(livePrice) ? livePrice : null,
+        last_price: Number.isFinite(livePrice) ? livePrice : null,
+        ml_score: Number.isFinite(mlScore) ? mlScore : null,
+        combined_score: Number.isFinite(combinedScore) ? combinedScore : null,
+        sentiment_score: Number.isFinite(sentimentScore) ? sentimentScore : null,
+      });
       if (out.length >= topN) break;
     }
 
@@ -3730,16 +3762,14 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         body.symbols = manual;
         body.source = 'manual';
       } else if (sourcePref === 'candidates') {
-        const syms = collectCandidateSymbolsFromDOM(topN, { longOnly: rules.longOnly });
-        if (!syms.length){
+        const plans = collectCandidatePlansFromDOM(topN, { longOnly: rules.longOnly });
+        if (!plans.length){
           throw new Error('Candidates list is empty. Run Scan first (or adjust filters), or enter manual symbols.');
         }
         const jid = localStorage.getItem('orb_job_id') || '';
-        if (!jid){
-          throw new Error('No saved scan job_id yet. Run Scan once, or enter manual symbols.');
-        }
-        body.job_id = jid;
-        body.symbols_order = syms;
+        if (jid) body.job_id = jid;
+        body.candidates = plans;
+        body.symbols_order = plans.map(p => p.symbol).filter(Boolean);
         body.source = 'candidates_dom';
       } else if (sourcePref === 'pinned') {
         const pins = loadPins();

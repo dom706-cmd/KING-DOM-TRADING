@@ -1186,6 +1186,7 @@ def api_monitor_start():
     symbols = data.get("symbols")
     long_only = _is_truthy(data.get("long_only", "0"))
     symbols_order = data.get("symbols_order")
+    candidates = data.get("candidates")
     if isinstance(symbols_order, str) and symbols_order.strip():
         symbols_order = [s.strip().upper() for s in symbols_order.split(",") if s.strip()]
     elif isinstance(symbols_order, list):
@@ -1200,9 +1201,12 @@ def api_monitor_start():
         elif isinstance(symbols, list) and symbols:
             sess = _MONITOR.start_from_symbols(symbols=symbols, feed=feed, provider=_ALPACA_PROVIDER, stream_cache=stream_cache)
         else:
-            if not job_id:
-                return jsonify(ok=False, error="missing_job_id_or_symbols"), 400
-            cands = _get_scan_candidates_for_monitor(job_id)
+            if isinstance(candidates, list) and candidates:
+                cands = [c for c in candidates if isinstance(c, dict) and str(c.get("symbol") or "").strip()]
+            else:
+                if not job_id:
+                    return jsonify(ok=False, error="missing_job_id_or_symbols"), 400
+                cands = _get_scan_candidates_for_monitor(job_id)
             if long_only:
                 cands = [c for c in cands if str((c or {}).get("best_side") or "").strip().lower() != "short"]
             sess = _MONITOR.start_from_scan_candidates(
@@ -1214,8 +1218,8 @@ def api_monitor_start():
                 stream_cache=stream_cache,
                 symbols_order=symbols_order,
                 long_only=long_only,
-                source=str(data.get("source") or "scan_job_top_n"),
-                promotion_candidates=_get_scan_seed_symbols(job_id),
+                source=str(data.get("source") or ("candidates_payload" if isinstance(candidates, list) and candidates else "scan_job_top_n")),
+                promotion_candidates=_get_scan_seed_symbols(job_id) if job_id else None,
             )
         return jsonify(ok=True, monitor_id=sess.monitor_id, job_id=sess.job_id, symbols=sorted(list(sess.symbols.keys())), feed_requested=sess.feed_requested, feed_used=sess.feed_used, source=sess.source, started_at=sess.started_at, long_only=long_only)
     except KeyError as e:
