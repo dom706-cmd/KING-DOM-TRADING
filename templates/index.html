@@ -2262,7 +2262,12 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
     modeSel.addEventListener("change", ()=> localStorage.setItem(AUTO_SCAN_MODE_KEY, modeSel.value));
   }
 
-  setInterval(refreshVisibleQuotes, 5000);
+  if (!window.__kingdomVisibleQuotesTimer) {
+    window.__kingdomVisibleQuotesTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      refreshVisibleQuotes().catch?.(()=>{});
+    }, 5000);
+  }
 
   // init
   // Hook up sort controls (persisted in localStorage)
@@ -3029,9 +3034,9 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     document.addEventListener('click', async (e)=>{ const btn=e.target.closest('[data-broker-act]'); if(!btn) return; const action=btn.getAttribute('data-broker-act'); const symbol=btn.getAttribute('data-broker-symbol'); const limitInput=document.querySelector(`[data-broker-limit="${symbol}"]`); const limitPrice=limitInput?.value; const ok=window.confirm(`Confirm ${action} for ${symbol}?`); if(!ok) return; try{ const res=await fetch('/api/broker_action',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, symbol, confirm:true, limit_price: limitPrice, qty: btn.getAttribute('data-broker-qty')})}); const j=await res.json(); if(!res.ok||!j||j.ok===false) throw new Error((j&&(j.error||j.message))||`HTTP ${res.status}`); await brokerRefresh(); await pdRefresh(); }catch(err){ window.alert(`Broker action failed: ${String(err.message||err)}`); } });
     document.addEventListener('change', (e)=>{ const sel=e.target.closest('[data-chart-timeframe]'); if(!sel) return; const symbol=sel.getAttribute('data-chart-timeframe'); const btn=document.querySelector(`[data-chart-symbol="${symbol}"]`); if(btn) pdLoadChart(btn).catch(()=>{}); });
     const auto=document.getElementById('positionDeskAutoRefresh');
-    auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>pdRefresh(), 15000); } });
+    auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>{ if (document.visibilityState !== 'visible') return; pdRefresh(); }, 15000); } });
     brokerRefresh().catch(()=>{});
-    const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>{ pdRefresh(); brokerRefresh().catch(()=>{}); }, 15000); }
+    const seed=pdLoad(); pdRenderInputs(seed); pdRefresh(); if(auto?.checked){ positionDeskTimer=setInterval(()=>{ if (document.visibilityState !== 'visible') return; pdRefresh(); brokerRefresh().catch(()=>{}); }, 15000); }
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pdBind); else pdBind();
 })();
@@ -3658,6 +3663,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   function ensurePolling(){
     if (pollTimer) return;
     pollTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
       const hasMonitor = !!currentMonitorId();
       if (hasMonitor){
         refreshMonitor().catch(()=>{});
@@ -3667,7 +3673,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
           refreshStreamStatus().catch(()=>{});
         }
       }
-    }, 1500);
+    }, 4000);
   }
 
     function collectCandidateSymbolsFromDOM(limit=10, opts={}){
@@ -4052,7 +4058,14 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     } catch(e){}
     refreshContextStatus().catch(()=>{});
     refreshAlertsRecent().catch(()=>{});
-    setInterval(() => { refreshContextStatus().catch(()=>{}); refreshAlertsRecent().catch(()=>{}); ensureAlertStream(); }, 5000);
+    if (!window.__kingdomContextAlertsTimer) {
+      window.__kingdomContextAlertsTimer = setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        refreshContextStatus().catch(()=>{});
+        refreshAlertsRecent().catch(()=>{});
+        ensureAlertStream();
+      }, 10000);
+    }
   });
 })();
 </script>
@@ -4134,9 +4147,9 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     }catch(e){}
   }
   if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ hydrate().catch(()=>{}); setInterval(()=>{hydrate().catch(()=>{});}, 1500); });
+    document.addEventListener('DOMContentLoaded', ()=>{ hydrate().catch(()=>{}); });
   } else {
-    hydrate().catch(()=>{}); setInterval(()=>{hydrate().catch(()=>{});}, 1500);
+    hydrate().catch(()=>{});
   }
 })();
 </script>
