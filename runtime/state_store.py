@@ -94,6 +94,7 @@ class RuntimeStateStore:
                     symbol TEXT NOT NULL,
                     headline TEXT NOT NULL,
                     source TEXT,
+                    url TEXT,
                     published_at TEXT,
                     received_at REAL NOT NULL,
                     sentiment_score REAL,
@@ -114,6 +115,10 @@ class RuntimeStateStore:
                     name TEXT PRIMARY KEY,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
+                    favorite INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    category TEXT,
+                    last_used_at REAL,
                     payload_json TEXT NOT NULL
                 );
 
@@ -125,7 +130,19 @@ class RuntimeStateStore:
                 );
                 """
             )
+            self._ensure_column(conn, "news_events", "url", "TEXT")
+            self._ensure_column(conn, "saved_scan_presets", "favorite", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "saved_scan_presets", "notes", "TEXT")
+            self._ensure_column(conn, "saved_scan_presets", "category", "TEXT")
+            self._ensure_column(conn, "saved_scan_presets", "last_used_at", "REAL")
             conn.commit()
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        cols = {str(r["name"]) for r in rows}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def save_session(self, session_payload: dict[str, Any]) -> None:
         payload = dict(session_payload or {})
@@ -252,8 +269,8 @@ class RuntimeStateStore:
                 """
                 INSERT OR REPLACE INTO news_events (
                     news_id, symbol, headline, source, published_at, received_at,
-                    sentiment_score, catalyst_score, freshness_sec, tags_json, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    url, sentiment_score, catalyst_score, freshness_sec, tags_json, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     news_id,
@@ -262,6 +279,7 @@ class RuntimeStateStore:
                     row.get("source"),
                     row.get("published_at"),
                     float(row.get("received_at") or time.time()),
+                    row.get("url"),
                     row.get("sentiment_score"),
                     row.get("catalyst_score"),
                     row.get("freshness_sec"),
@@ -360,7 +378,12 @@ class RuntimeStateStore:
     def recent_scan_presets(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock, self._conn() as conn:
             rows = conn.execute(
-                "SELECT name, created_at, updated_at, payload_json FROM saved_scan_presets ORDER BY updated_at DESC LIMIT ?",
+                """
+                SELECT name, created_at, updated_at, favorite, notes, category, last_used_at, payload_json
+                FROM saved_scan_presets
+                ORDER BY favorite DESC, COALESCE(last_used_at, 0) DESC, updated_at DESC
+                LIMIT ?
+                """,
                 (max(1, min(int(limit), 500)),),
             ).fetchall()
         out: list[dict[str, Any]] = []
@@ -373,11 +396,24 @@ class RuntimeStateStore:
                 "name": r["name"],
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
+                "favorite": bool(r["favorite"]),
+                "notes": r["notes"],
+                "category": r["category"],
+                "last_used_at": r["last_used_at"],
                 "payload": payload,
             })
         return out
 
-    def save_scan_preset(self, name: str, payload: dict[str, Any]) -> None:
+    def save_scan_preset(
+        self,
+        name: str,
+        payload: dict[str, Any],
+        *,
+        favorite: bool = False,
+        notes: str | None = None,
+        category: str | None = None,
+        last_used_at: float | None = None,
+    ) -> None:
         nm = str(name or '').strip()
         if not nm:
             raise ValueError('save_scan_preset.name required')
@@ -385,15 +421,41 @@ class RuntimeStateStore:
         with self._lock, self._conn() as conn:
             conn.execute(
                 """
-                INSERT INTO saved_scan_presets (name, created_at, updated_at, payload_json)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO saved_scan_presets (name, created_at, updated_at, favorite, notes, category, last_used_at, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     updated_at=excluded.updated_at,
+                    favorite=excluded.favorite,
+                    notes=excluded.notes,
+                    category=excluded.category,
+                    last_used_at=COALESCE(excluded.last_used_at, saved_scan_presets.last_used_at),
                     payload_json=excluded.payload_json
                 """,
-                (nm, now, now, json.dumps(payload or {}, separators=(",", ":"), default=str)),
+                (
+                    nm,
+                    now,
+                    now,
+                    1 if favorite else 0,
+                    (str(notes).strip() if notes is not None else None),
+                    (str(category).strip() if category is not None else None),
+                    float(last_used_at) if last_used_at is not None else None,
+                    json.dumps(payload or {}, separators=(",", ":"), default=str),
+                ),
             )
             conn.commit()
+
+    def touch_scan_preset(self, name: str, *, last_used_at: float | None = None) -> bool:
+        nm = str(name or "").strip()
+        if not nm:
+            return False
+        used_ts = float(last_used_at or time.time())
+        with self._lock, self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE saved_scan_presets SET last_used_at=?, updated_at=? WHERE name=?",
+                (used_ts, used_ts, nm),
+            )
+            conn.commit()
+            return int(cur.rowcount or 0) > 0
 
     def delete_scan_preset(self, name: str) -> bool:
         nm = str(name or '').strip()

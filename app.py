@@ -3972,6 +3972,30 @@ def provider_info():
     })
 
 
+def _benchmark_scorecard_payload() -> dict[str, Any]:
+    features = [
+        {"key": "saved_presets", "label": "Server-saved presets", "kingdom": True, "benchmark": ["Trade Ideas", "TrendSpider", "TradingView"], "notes": "SQLite-backed presets with quick-load support."},
+        {"key": "preset_metadata", "label": "Preset metadata", "kingdom": True, "benchmark": ["Trade Ideas", "TrendSpider"], "notes": "Favorites, notes, categories, and usage timestamps."},
+        {"key": "candidate_explain", "label": "Structured candidate explain", "kingdom": True, "benchmark": ["Trade Ideas", "TrendSpider"], "notes": "Rank, plan, catalyst, and diagnostic sections."},
+        {"key": "detail_chart", "label": "Decision chart hook", "kingdom": True, "benchmark": ["TradingView", "TrendSpider"], "notes": "Real intraday chart API with OR, VWAP, EMA, and risk overlays."},
+        {"key": "news_timeline", "label": "Stored catalyst timeline", "kingdom": True, "benchmark": ["Benzinga", "Trade Ideas"], "notes": "Timeline rendered from stored runtime news events."},
+        {"key": "alert_routing", "label": "Alert routing tiers", "kingdom": True, "benchmark": ["Trade Ideas"], "notes": "Near-trigger, ready, and triggered separation with suppression."},
+        {"key": "monitor_replay", "label": "Monitor replay snapshot", "kingdom": True, "benchmark": ["TrendSpider"], "notes": "Replay snapshots persisted for monitor sessions."},
+        {"key": "scanner_categories", "label": "Scanner categories", "kingdom": True, "benchmark": ["Trade Ideas", "Finviz"], "notes": "Momentum, news, reversal, and liquidity filters in UI."},
+        {"key": "broker_sync", "label": "Broker sync", "kingdom": bool(BROKER_ACTIONS_ENABLED), "benchmark": ["Trade Ideas"], "notes": "Live broker snapshot and optional order actions when enabled."},
+    ]
+    supported = sum(1 for item in features if item["kingdom"])
+    return {
+        "updated_at": time.time(),
+        "score": {
+            "supported": supported,
+            "total": len(features),
+            "coverage_pct": round((supported / max(1, len(features))) * 100.0, 1),
+        },
+        "features": features,
+    }
+
+
 
 @app.get('/api/scan_presets')
 def api_scan_presets():
@@ -3983,12 +4007,36 @@ def api_scan_presets_save():
     data = request.get_json(silent=True) or request.form.to_dict(flat=True) or {}
     name = str(data.get('name') or '').strip()
     payload = data.get('payload') or {}
+    meta = data.get('meta') or {}
     if not name:
         return jsonify(ok=False, error='missing_name'), 400
     if not isinstance(payload, dict):
         return jsonify(ok=False, error='invalid_payload'), 400
-    _RUNTIME_STORE.save_scan_preset(name, payload)
+    if meta and not isinstance(meta, dict):
+        return jsonify(ok=False, error='invalid_meta'), 400
+    favorite = _is_truthy(meta.get('favorite') if isinstance(meta, dict) else data.get('favorite', 0))
+    notes = meta.get('notes') if isinstance(meta, dict) else data.get('notes')
+    category = meta.get('category') if isinstance(meta, dict) else data.get('category')
+    last_used_at = _safe_float(meta.get('last_used_at') if isinstance(meta, dict) else data.get('last_used_at'))
+    _RUNTIME_STORE.save_scan_preset(
+        name,
+        payload,
+        favorite=favorite,
+        notes=(str(notes).strip() if notes is not None else None),
+        category=(str(category).strip() if category is not None else None),
+        last_used_at=last_used_at,
+    )
     return jsonify(ok=True, name=name)
+
+
+@app.post('/api/scan_presets/touch')
+def api_scan_presets_touch():
+    data = request.get_json(silent=True) or request.form.to_dict(flat=True) or {}
+    name = str(data.get('name') or '').strip()
+    if not name:
+        return jsonify(ok=False, error='missing_name'), 400
+    touched = _RUNTIME_STORE.touch_scan_preset(name, last_used_at=_safe_float(data.get('last_used_at')))
+    return jsonify(ok=True, touched=bool(touched), name=name)
 
 
 @app.post('/api/scan_presets/delete')
@@ -4006,6 +4054,11 @@ def api_news_recent():
     symbol = str(request.args.get('symbol') or '').strip().upper() or None
     limit = _safe_int(request.args.get('limit', 25), 25)
     return jsonify(ok=True, items=_RUNTIME_STORE.recent_news(symbol=symbol, limit=limit))
+
+
+@app.get('/api/benchmark_scorecard')
+def api_benchmark_scorecard():
+    return jsonify(ok=True, scorecard=_benchmark_scorecard_payload())
 
 
 @app.get("/api/watchlist_snapshot")

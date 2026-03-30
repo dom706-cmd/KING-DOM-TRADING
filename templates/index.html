@@ -229,9 +229,62 @@ th {
 .badge-red { background: rgba(239,68,68,0.18); color: rgba(254,202,202,0.95); border-color: rgba(239,68,68,0.35); }
 .badge-amber { background: rgba(200,176,138,0.18); color: rgba(245,235,217,0.95); border-color: rgba(200,176,138,0.38); }
 .badge-gray { background: rgba(255,255,255,0.10); color: rgba(229,231,235,0.95); border-color: rgba(255,255,255,0.15); }
+.badge-blue { background: rgba(96,165,250,0.16); color: rgba(219,234,254,0.95); border-color: rgba(96,165,250,0.34); }
 
 .notes { max-width: 420px; color: var(--muted); }
 .muted { color: var(--muted); font-size: 13px; }
+.miniMuted{ color: var(--muted2); font-size: 12px; }
+.timelineList{ display:flex; flex-direction:column; gap:10px; }
+.timelineItem{
+  display:grid;
+  grid-template-columns: 90px 1fr;
+  gap:10px;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:12px;
+  background: rgba(255,255,255,0.03);
+}
+.timelineStamp{ color: var(--muted); font-size:12px; }
+.freshnessHot{ color: rgba(187,247,208,0.95); }
+.freshnessWarm{ color: rgba(253,230,138,0.95); }
+.freshnessCold{ color: rgba(226,232,240,0.88); }
+.presetMetaRow{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:10px; }
+.presetMetaRow label{ display:flex; flex-direction:column; gap:6px; min-width:140px; flex:1; }
+.presetMetaRow textarea{
+  min-height: 68px;
+  resize: vertical;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 9px;
+  padding: 7px 9px;
+}
+.benchmarkList{ display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.benchmarkRow{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+  padding:10px 12px;
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:12px;
+  background: rgba(255,255,255,0.03);
+}
+.candidateDetailGrid{
+  display:grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap:12px;
+}
+@media (max-width: 980px){
+  .candidateDetailGrid{ grid-template-columns: 1fr; }
+}
+.candidateChartHost{
+  height: 300px;
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:12px;
+  background: rgba(0,0,0,0.18);
+  overflow:hidden;
+}
 
 .statusGrid{
   display:flex;
@@ -591,6 +644,30 @@ th {
           </label>
           <button type="button" class="btn" id="loadSavedPresetBtn">Load</button>
         </div>
+        <div class="presetMetaRow">
+          <label style="min-width:120px; flex:0 0 auto;">
+            <span class="muted" style="font-size:12px;">Priority</span>
+            <span style="display:flex; align-items:center; gap:8px; min-height:34px;">
+              <input type="checkbox" id="presetFavoriteInput" style="min-height:auto;" />
+              <span>Favorite / starred</span>
+            </span>
+          </label>
+          <label>
+            <span class="muted" style="font-size:12px;">Category</span>
+            <select id="presetCategoryInput">
+              <option value="">Uncategorized</option>
+              <option value="momentum">Momentum</option>
+              <option value="news">News</option>
+              <option value="reversal">Reversal</option>
+              <option value="liquidity">Liquidity</option>
+              <option value="benchmark">Benchmark</option>
+            </select>
+          </label>
+          <label style="flex:1 1 100%;">
+            <span class="muted" style="font-size:12px;">Desk notes</span>
+            <textarea id="presetNotesInput" placeholder="Why this preset exists, when to use it, or desk reminders."></textarea>
+          </label>
+        </div>
 
         <div class="toolDivider"></div>
         <div class="toolRow" style="gap:8px; flex-wrap:wrap;">
@@ -600,6 +677,16 @@ th {
           <button type="button" class="btn categoryTabBtn" data-category="news">News</button>
           <button type="button" class="btn categoryTabBtn" data-category="reversal">Reversal</button>
           <button type="button" class="btn categoryTabBtn" data-category="liquidity">Liquidity</button>
+        </div>
+
+        <div class="toolDivider"></div>
+        <div>
+          <div class="toolSectionTitle">Benchmark scorecard</div>
+          <div class="muted" style="margin-top:4px;">Groundwork for comparing KingDom against pro scanner workflows without inventing external claims.</div>
+          <div id="benchmarkScoreSummary" class="muted" style="margin-top:8px;">Loading scorecard…</div>
+          <div id="benchmarkScoreBody" class="benchmarkList">
+            <div class="muted">No scorecard yet.</div>
+          </div>
         </div>
 
         <div class="toolDivider"></div>
@@ -909,7 +996,7 @@ th {
             <label style="display:flex; gap:8px; align-items:center; margin-left:auto;"><input type="checkbox" id="liveMonitorEnableSound" /><span class="muted" style="font-size:12px;">Sound</span></label>
             <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorEnableNotify" /><span class="muted" style="font-size:12px;">Desktop notify</span></label>
             <label style="display:flex; gap:6px; align-items:center;"><span class="muted" style="font-size:12px;">Cooldown s</span><input id="liveMonitorAlertCooldownSec" inputmode="numeric" value="60" style="width:70px;" /></label>
-            <label style="display:flex; gap:6px; align-items:center;"><span class="muted" style="font-size:12px;">Alert level</span><select id="liveMonitorAlertLevel" style="width:110px;"><option value="all">All</option><option value="ready">Ready+</option><option value="triggered">Triggered only</option></select></label>
+            <label style="display:flex; gap:6px; align-items:center;"><span class="muted" style="font-size:12px;">Alert level</span><select id="liveMonitorAlertLevel" style="width:130px;"><option value="all">All</option><option value="near">Near+</option><option value="ready">Ready+</option><option value="triggered">Triggered only</option></select></label>
           </div>
           <div class="muted" style="margin-top:8px; font-size:12px;">Risk sizing uses <b>risk_per_share</b> from the scan plan when available: Shares ≈ Risk$/risk_per_share. Near-trigger alerts fire when a symbol is within Near-trigger % of its OR trigger.</div>
         </div>
@@ -1497,7 +1584,114 @@ function gradeClass(g){
     return 'liquidity';
   }
 
-  function openCandidateExplain(c){
+  function normalizeNewsEvent(item){
+    if (!item || typeof item !== 'object') return null;
+    const symbol = String(item.symbol || '').toUpperCase();
+    const headline = String(item.headline || item.title || '').trim();
+    if (!symbol || !headline) return null;
+    return {
+      news_id: item.news_id || '',
+      symbol,
+      headline,
+      source: item.source || '',
+      url: item.url || '',
+      published_at: item.published_at || '',
+      received_at: item.received_at || null,
+      sentiment_score: item.sentiment_score,
+      catalyst_score: item.catalyst_score,
+      freshness_sec: item.freshness_sec,
+      tags: Array.isArray(item.tags) ? item.tags : [],
+    };
+  }
+
+  function parseNewsTs(item){
+    const raw = item?.published_at || item?.received_at;
+    if (raw === null || raw === undefined || raw === '') return null;
+    if (typeof raw === 'number') return raw > 1000000000000 ? raw : raw * 1000;
+    const ts = Date.parse(String(raw));
+    return Number.isFinite(ts) ? ts : null;
+  }
+
+  function freshnessBadge(item){
+    const sec = Number(item?.freshness_sec);
+    if (Number.isFinite(sec)) {
+      if (sec <= 7200) return '<span class="badge badge-green">fresh</span>';
+      if (sec <= 21600) return '<span class="badge badge-amber">active</span>';
+      return '<span class="badge badge-gray">older</span>';
+    }
+    return '<span class="badge badge-gray">stored</span>';
+  }
+
+  function renderNewsTimelineHtml(items, emptyText){
+    const rows = (Array.isArray(items) ? items : []).map(normalizeNewsEvent).filter(Boolean).sort((a,b) => (parseNewsTs(b) || 0) - (parseNewsTs(a) || 0));
+    if (!rows.length) return `<div class="muted">${escapeHtml(emptyText || 'No stored news events.')}</div>`;
+    return `<div class="timelineList">${rows.map(item => {
+      const ts = parseNewsTs(item);
+      const stamp = ts ? new Date(ts).toLocaleString() : 'Stored event';
+      const tags = (item.tags || []).slice(0,4).map(tag => `<span class="tag">${escapeHtml(String(tag))}</span>`).join('');
+      const sourceLink = item.url ? `<a href="${escapeHtml(String(item.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(String(item.source || 'source'))}</a>` : escapeHtml(String(item.source || 'source unavailable'));
+      return `<div class="timelineItem">
+        <div class="timelineStamp">${escapeHtml(stamp)}</div>
+        <div>
+          <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div><b>${escapeHtml(item.headline)}</b></div>
+            <div>${freshnessBadge(item)}</div>
+          </div>
+          <div class="miniMuted" style="margin-top:4px;">${sourceLink} • catalyst ${num(item.catalyst_score,2)} • sentiment ${num(item.sentiment_score,2)}</div>
+          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">${tags || '<span class="miniMuted">No event tags</span>'}</div>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  async function loadCandidateDetailNews(symbol){
+    const res = await fetch(`/api/news_recent?symbol=${encodeURIComponent(symbol)}&limit=8`, {cache:'no-store'});
+    const data = await res.json();
+    if (!res.ok || data?.ok === false) throw new Error(data?.error || `news_recent_failed:${res.status}`);
+    return Array.isArray(data?.items) ? data.items : [];
+  }
+
+  async function renderCandidateExplainChart(c){
+    const host = document.getElementById('candidateExplainChart');
+    const meta = document.getElementById('candidateExplainChartMeta');
+    if (!host || !window.LightweightCharts) return;
+    host.innerHTML = '';
+    if (meta) meta.textContent = 'Loading chart…';
+    const side = String(c?.best_side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+    const target = side === 'short' ? (c?.short_2r ?? c?.target_2r) : (c?.long_2r ?? c?.target_2r);
+    const entry = side === 'short' ? (c?.short_entry ?? c?.entry) : (c?.long_entry ?? c?.entry);
+    const stop = side === 'short' ? (c?.short_stop ?? c?.stop_loss) : (c?.long_stop ?? c?.stop_loss);
+    const res = await fetch('/api/position_chart', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: c.symbol, entry, stop, target, side, timeframe: '1m'}),
+    });
+    const payload = await res.json();
+    if (!res.ok || payload?.ok === false) throw new Error(payload?.message || payload?.error || `position_chart_failed:${res.status}`);
+    const chart = LightweightCharts.createChart(host, {
+      height: 300,
+      layout: {background: {type:'solid', color:'#0f0e0b'}, textColor:'#e7e2d6'},
+      grid: {vertLines:{color:'rgba(255,255,255,0.05)'}, horzLines:{color:'rgba(255,255,255,0.05)'}},
+      rightPriceScale: {borderColor:'rgba(255,255,255,0.12)'},
+      timeScale: {borderColor:'rgba(255,255,255,0.12)', timeVisible:true, secondsVisible:false},
+    });
+    const candle = chart.addCandlestickSeries({upColor:'#4ade80', downColor:'#fb7185', borderVisible:false, wickUpColor:'#4ade80', wickDownColor:'#fb7185'});
+    candle.setData(Array.isArray(payload?.bars) ? payload.bars : []);
+    const makeLine = (color) => chart.addLineSeries({color, lineWidth:2, priceLineVisible:false, lastValueVisible:false});
+    const overlays = payload?.overlays || {};
+    const lines = {vwap: makeLine('#facc15'), ema9: makeLine('#4ade80'), ema20: makeLine('#60a5fa')};
+    if (Array.isArray(overlays.vwap)) lines.vwap.setData(overlays.vwap);
+    if (Array.isArray(overlays.ema9)) lines.ema9.setData(overlays.ema9);
+    if (Array.isArray(overlays.ema20)) lines.ema20.setData(overlays.ema20);
+    for (const label of (Array.isArray(payload?.labels) ? payload.labels : []).slice(0, 8)){
+      if (!Number.isFinite(Number(label?.price))) continue;
+      candle.createPriceLine({price: Number(label.price), color: String(label.color || '#94a3b8'), lineWidth:1, lineStyle:2, axisLabelVisible:true, title: String(label.text || label.key || '')});
+    }
+    chart.timeScale().fitContent();
+    if (meta) meta.textContent = `Live ${money(payload?.live_price)} • ${String(payload?.timeframe || '1m')} • OR/VWAP/EMA overlays`;
+  }
+
+  async function openCandidateExplain(c){
     const modal = document.getElementById('candidateExplainModal');
     const title = document.getElementById('candidateExplainTitle');
     const body = document.getElementById('candidateExplainBody');
@@ -1509,6 +1703,10 @@ function gradeClass(g){
     const seedReasons = Array.isArray(c?.monitor_seed_reasons) ? c.monitor_seed_reasons : [];
     const headlines = Array.isArray(c?.catalyst_headlines) ? c.catalyst_headlines.slice(0,5) : [];
     const tags = Array.isArray(c?.catalyst_tags) ? c.catalyst_tags : [];
+    const side = String(c?.best_side || 'long').toLowerCase() === 'short' ? 'short' : 'long';
+    const entry = side === 'short' ? (c?.short_entry ?? c?.entry) : (c?.long_entry ?? c?.entry);
+    const stop = side === 'short' ? (c?.short_stop ?? c?.stop_loss) : (c?.long_stop ?? c?.stop_loss);
+    const target = side === 'short' ? (c?.short_2r ?? c?.target_2r) : (c?.long_2r ?? c?.target_2r);
     body.innerHTML = `
       <div class="kpiRow">
         <div class="kpiCard"><div class="k">Best side</div><div class="v">${escapeHtml(String(c?.best_side || '—').toUpperCase())}</div></div>
@@ -1516,25 +1714,55 @@ function gradeClass(g){
         <div class="kpiCard"><div class="k">ML</div><div class="v">${num(c?.ml_score ?? c?.ml, 3)}</div></div>
         <div class="kpiCard"><div class="k">Catalyst</div><div class="v">${num(c?.catalyst_score, 2)}</div></div>
       </div>
-      <div class="card compactCard" style="margin-top:12px;">
-        <div class="sectionLabel">Why this ranked here</div>
-        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${rankWhy.map(x=>`<span class="tag">${escapeHtml(String(x))}</span>`).join('') || '<span class="muted">No rank explanation available.</span>'}</div>
-        <div class="muted" style="margin-top:10px;">Gate fails: ${escapeHtml(gateReasons.join(', ') || 'none')} • Seed reasons: ${escapeHtml(seedReasons.join(', ') || 'none')}</div>
+      <div class="candidateDetailGrid" style="margin-top:12px;">
+        <div class="card compactCard" style="margin-top:0;">
+          <div class="sectionLabel">Decision chart</div>
+          <div id="candidateExplainChartMeta" class="muted" style="margin-top:6px;">Preparing intraday context…</div>
+          <div id="candidateExplainChart" class="candidateChartHost" style="margin-top:10px;"></div>
+        </div>
+        <div class="card compactCard" style="margin-top:0;">
+          <div class="sectionLabel">Execution plan</div>
+          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
+            <span class="tag">Entry <b>${money(entry)}</b></span>
+            <span class="tag">Stop <b>${money(stop)}</b></span>
+            <span class="tag">2R <b>${money(target)}</b></span>
+            <span class="tag">Risk/share <b>${money(c?.risk_per_share, 3)}</b></span>
+            <span class="tag">VWAP <b>${money(c?.vwap_last)}</b></span>
+          </div>
+          <div class="muted" style="margin-top:10px;">Long plan ${money(c?.long_entry)} / ${money(c?.long_stop)} / ${money(c?.long_2r)} • Short plan ${money(c?.short_entry)} / ${money(c?.short_stop)} / ${money(c?.short_2r)}</div>
+          <div class="sectionLabel" style="margin-top:14px;">Structured explanation</div>
+          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${rankWhy.map(x=>`<span class="tag">${escapeHtml(String(x))}</span>`).join('') || '<span class="muted">No rank explanation available.</span>'}</div>
+          <div class="muted" style="margin-top:10px;">Gate fails: ${escapeHtml(gateReasons.join(', ') || 'none')}</div>
+          <div class="muted" style="margin-top:4px;">Monitor seeds: ${escapeHtml(seedReasons.join(', ') || 'none')}</div>
+          <div class="sectionLabel" style="margin-top:14px;">Catalyst context</div>
+          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${tags.map(t=>`<span class="tag">${escapeHtml(String(t))}</span>`).join('') || '<span class="muted">No catalyst tags.</span>'}</div>
+          <div class="muted" style="margin-top:10px;">${headlines.length ? headlines.map(h => escapeHtml(String(h))).join(' • ') : 'No headlines attached to this candidate payload.'}</div>
+        </div>
       </div>
       <div class="card compactCard" style="margin-top:12px;">
-        <div class="sectionLabel">Plan</div>
-        <div class="muted" style="margin-top:8px;">Long entry ${money(c?.long_entry)} • long stop ${money(c?.long_stop)} • long 2R ${money(c?.long_2r)} • short entry ${money(c?.short_entry)} • short stop ${money(c?.short_stop)} • short 2R ${money(c?.short_2r)}</div>
-      </div>
-      <div class="card compactCard" style="margin-top:12px;">
-        <div class="sectionLabel">Catalyst context</div>
-        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${tags.map(t=>`<span class="tag">${escapeHtml(String(t))}</span>`).join('') || '<span class="muted">No catalyst tags.</span>'}</div>
-        <div class="muted" style="margin-top:10px;">${headlines.length ? headlines.map(h => escapeHtml(String(h))).join(' • ') : 'No headlines attached to this candidate payload.'}</div>
+        <div class="sectionLabel">Stored news timeline</div>
+        <div id="candidateExplainNews" style="margin-top:10px;"><div class="muted">Loading stored news events…</div></div>
       </div>
       <div class="card compactCard" style="margin-top:12px;">
         <div class="sectionLabel">Score breakdown</div>
         <pre style="white-space:pre-wrap; overflow:auto; margin:8px 0 0 0;">${escapeHtml(JSON.stringify(scoreBreak, null, 2))}</pre>
       </div>`;
     modal.style.display = 'block';
+    const newsHost = document.getElementById('candidateExplainNews');
+    try {
+      const items = await loadCandidateDetailNews(String(c?.symbol || '').toUpperCase());
+      if (newsHost) newsHost.innerHTML = renderNewsTimelineHtml(items, 'No stored news events for this symbol yet.');
+    } catch (err) {
+      if (newsHost) newsHost.innerHTML = `<div class="muted">${escapeHtml(err?.message || String(err))}</div>`;
+    }
+    try {
+      await renderCandidateExplainChart(c);
+    } catch (err) {
+      const host = document.getElementById('candidateExplainChart');
+      const meta = document.getElementById('candidateExplainChartMeta');
+      if (host) host.innerHTML = `<div class="muted" style="padding:12px;">${escapeHtml(err?.message || String(err))}</div>`;
+      if (meta) meta.textContent = 'Chart unavailable';
+    }
   }
 
   function renderCandidatesTable(items){
@@ -3343,6 +3571,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 
       const best = String(s?.best_side||"").toLowerCase();
       const trig = (best==="long") ? !!s?.long_triggered : (best==="short") ? !!s?.short_triggered : false;
+      const ready = ['arming','confirmed','touch_wait_confirm'].includes(String(s?.monitor_state || '').toLowerCase());
+      const near = !!s?.near_trigger || (!trig && Number.isFinite(Number(s?.retest_distance_r)) && Math.abs(Number(s?.retest_distance_r)) <= Math.max(0.05, nearPct));
       const trigPx = pickTriggerPrice(s);
       const px = Number(s?.price);
       let distPct = null;
@@ -3352,21 +3582,18 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       }
 
       const prev = _lastAlertMap[sym] || {};
-      newMap[sym] = { trig, distPct, t: now };
+      newMap[sym] = { trig, ready, near, distPct, t: now };
 
-      // Triggered alert
-      if (trig && prev.trig === false){
-        if (alertLevel === 'all' || alertLevel === 'ready' || alertLevel === 'triggered') {
+      if (trig && prev.trig !== true){
+        if (alertLevel === 'all' || alertLevel === 'near' || alertLevel === 'ready' || alertLevel === 'triggered') {
           fireAlert(`TRIGGERED: ${sym}`, `Triggered (${best}) • Entry ${s?.entry ?? "—"} • Stop ${s?.stop_loss ?? "—"}`, enableSound, enableNotify);
         }
       }
-
-      const stateTxt = String(s?.monitor_state || '').toLowerCase();
-      if ((stateTxt.includes('ready') || stateTxt.includes('armed')) && prev.state !== stateTxt && (alertLevel === 'all' || alertLevel === 'ready')){
+      if (ready && prev.ready !== true && (alertLevel === 'all' || alertLevel === 'near' || alertLevel === 'ready')){
         const lastReady = prev.lastReady || 0;
         if ((now - lastReady) > cooldownMs){
           newMap[sym].lastReady = now;
-          fireAlert(`READY: ${sym}`, `Ready state • ${stateTxt} • Score ${s?.live_confidence_score ?? '—'}`, enableSound, enableNotify);
+          fireAlert(`READY: ${sym}`, `Ready state • ${String(s?.monitor_state || 'ready')} • Score ${s?.live_confidence_score ?? '—'}`, enableSound, enableNotify);
         } else {
           newMap[sym].lastReady = lastReady;
         }
@@ -3374,19 +3601,17 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         newMap[sym].lastReady = prev.lastReady;
       }
 
-      // Near-trigger alert (only if not triggered and distPct within threshold)
-      if (!trig && distPct !== null && Number.isFinite(distPct) && distPct > 0 && Number.isFinite(nearPct) && distPct <= nearPct && alertLevel === 'all'){
+      if (!trig && near && prev.near !== true && (alertLevel === 'all' || alertLevel === 'near')){
         const lastNear = prev.lastNear || 0;
         if ((now - lastNear) > cooldownMs){
           newMap[sym].lastNear = now;
-          fireAlert(`NEAR TRIGGER: ${sym}`, `Within ${distPct.toFixed(2)}% of trigger • Entry ${s?.entry ?? "—"} • Risk $${Number(riskDollars||0).toFixed(0)}`, enableSound, enableNotify);
+          fireAlert(`NEAR TRIGGER: ${sym}`, `Within ${distPct !== null && Number.isFinite(distPct) ? distPct.toFixed(2) : '—'}% of trigger • Entry ${s?.entry ?? "—"} • Risk $${Number(riskDollars||0).toFixed(0)}`, enableSound, enableNotify);
         } else {
           newMap[sym].lastNear = lastNear;
         }
       } else if (prev.lastNear){
         newMap[sym].lastNear = prev.lastNear;
       }
-      newMap[sym].state = stateTxt;
     }
     _lastAlertMap = newMap;
   }
@@ -3394,35 +3619,57 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   function renderNewsCatalystPanel(candidates, monitorRows){
     const body = document.getElementById('newsCatalystBody');
     if (!body) return;
-    const seen = new Map();
-    for (const item of [...(Array.isArray(candidates) ? candidates : []), ...(Array.isArray(monitorRows) ? monitorRows : [])]){
+    const symbolMeta = new Map();
+    for (const item of (Array.isArray(candidates) ? candidates : [])){
       const sym = String(item?.symbol || '').toUpperCase();
       if (!sym) continue;
-      const cat = Number(item?.catalyst_score ?? NaN);
-      const sent = Number(item?.sentiment_score ?? item?.sent ?? NaN);
-      const score = Number(item?.combined_score ?? item?.score ?? NaN);
-      const existing = seen.get(sym);
-      const payload = existing || Object.assign({}, item, {symbol: sym});
-      if (!existing || (Number.isFinite(cat) && cat > Number(existing?.catalyst_score ?? -Infinity))) {
-        seen.set(sym, payload);
-      }
-      payload.__sort = (Number.isFinite(cat) ? cat * 100 : 0) + (Number.isFinite(sent) ? sent * 10 : 0) + (Number.isFinite(score) ? score : 0);
+      symbolMeta.set(sym, item);
     }
-    const rows = Array.from(seen.values()).sort((a,b) => Number(b.__sort || 0) - Number(a.__sort || 0)).slice(0, 10);
+    const newsItems = (Array.isArray(monitorRows) ? monitorRows : []).map(normalizeNewsEvent).filter(Boolean);
+    const grouped = new Map();
+    for (const evt of newsItems){
+      const bucket = grouped.get(evt.symbol) || [];
+      bucket.push(evt);
+      grouped.set(evt.symbol, bucket);
+    }
+    for (const [sym, meta] of symbolMeta.entries()){
+      if (!grouped.has(sym) && (Array.isArray(meta?.catalyst_headlines) || Number.isFinite(Number(meta?.catalyst_score)))){
+        const synthetic = (Array.isArray(meta?.catalyst_headlines) ? meta.catalyst_headlines : []).slice(0,2).map((headline, idx) => normalizeNewsEvent({
+          news_id: `${sym}-${idx}`,
+          symbol: sym,
+          headline,
+          source: meta?.news_source || '',
+          catalyst_score: meta?.catalyst_score,
+          sentiment_score: meta?.sentiment_score ?? meta?.sent,
+          tags: Array.isArray(meta?.catalyst_tags) ? meta.catalyst_tags : [],
+        })).filter(Boolean);
+        if (synthetic.length) grouped.set(sym, synthetic);
+      }
+    }
+    const rows = Array.from(grouped.entries()).map(([sym, items]) => {
+      const meta = symbolMeta.get(sym) || {};
+      const latest = items.slice().sort((a,b) => (parseNewsTs(b) || 0) - (parseNewsTs(a) || 0));
+      const cat = Number(meta?.catalyst_score ?? latest[0]?.catalyst_score ?? NaN);
+      const sent = Number(meta?.sentiment_score ?? meta?.sent ?? latest[0]?.sentiment_score ?? NaN);
+      const score = Number(meta?.combined_score ?? meta?.score ?? NaN);
+      const freshness = latest[0]?.freshness_sec;
+      const freshBoost = Number.isFinite(Number(freshness)) ? Math.max(0, 20000 - Number(freshness)) / 1000 : 0;
+      return {symbol: sym, meta, items: latest.slice(0,4), __sort: (Number.isFinite(cat) ? cat * 100 : 0) + (Number.isFinite(sent) ? sent * 10 : 0) + (Number.isFinite(score) ? score : 0) + freshBoost};
+    }).sort((a,b) => Number(b.__sort || 0) - Number(a.__sort || 0)).slice(0, 12);
     if (!rows.length){
       body.innerHTML = '<div class="muted">No catalyst-rich names yet.</div>';
       return;
     }
-    body.innerHTML = rows.map(r => {
+    body.innerHTML = rows.map(row => {
+      const r = row.meta || {};
       const tags = Array.isArray(r.catalyst_tags) ? r.catalyst_tags.slice(0,5) : [];
-      const headlines = Array.isArray(r.catalyst_headlines) ? r.catalyst_headlines.slice(0,2) : [];
       return `<div style="padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.03);">
         <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <div><b>${escapeHtml(r.symbol || '—')}</b> <span class="tag">${escapeHtml(candidateCategory(r))}</span></div>
+          <div><b>${escapeHtml(row.symbol || '—')}</b> <span class="tag">${escapeHtml(candidateCategory(r))}</span></div>
           <div class="muted">Cat ${num(r.catalyst_score,2)} • Sent ${num(r.sentiment_score ?? r.sent,2)} • Score ${num(r.combined_score ?? r.score,3)}</div>
         </div>
         <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">${tags.map(t => `<span class="tag">${escapeHtml(String(t))}</span>`).join('') || '<span class="muted">No tags</span>'}</div>
-        <div class="muted" style="margin-top:6px;">${headlines.map(h => escapeHtml(String(h))).join(' • ') || 'No headlines attached.'}</div>
+        <div style="margin-top:10px;">${renderNewsTimelineHtml(row.items, 'No stored events for this symbol.')}</div>
       </div>`;
     }).join('');
   }
@@ -4211,10 +4458,12 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const reasons = Array.isArray(a.reasons) ? a.reasons.slice(0,4).join(' • ') : '';
       const flags = Array.isArray(a.flags) ? a.flags.slice(0,4).join(' • ') : '';
       const stateTxt = `${esc2(a.from_state || '—')} → ${esc2(a.to_state || '—')}`;
-      const severity = String(a.to_state || '').toLowerCase() === 'triggered' ? 'badge-green' : (String(a.to_state || '').toLowerCase().includes('ready') ? 'badge-amber' : 'badge-gray');
+      const bucket = String(a.alert_bucket || a.event_type || '').toLowerCase();
+      const severity = bucket === 'triggered' ? 'badge-green' : (bucket === 'ready' ? 'badge-amber' : (bucket === 'near_trigger' ? 'badge-blue' : 'badge-gray'));
+      const bucketLabel = bucket ? bucket.replaceAll('_', ' ') : 'transition';
       return `<div style="padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.03);">
         <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
-          <div><b>${esc2(a.symbol || '—')}</b> <span class="tag">${esc2(a.playbook || '—')}</span> <span class="badge ${severity}">${stateTxt}</span></div>
+          <div><b>${esc2(a.symbol || '—')}</b> <span class="tag">${esc2(a.playbook || '—')}</span> <span class="badge ${severity}">${esc2(bucketLabel)}</span> <span class="miniMuted">${stateTxt}</span></div>
           <div class="muted">${a.event_ts ? new Date(Number(a.event_ts)*1000).toLocaleTimeString() : ''}</div>
         </div>
         <div class="muted" style="margin-top:4px;">price $${fmt2(a.price,2)} • spread ${fmt2(a.spread_pct,2)}% • chase-R ${fmt2(a.live_chase_r,2)} • catalyst ${fmt2(a.catalyst_score,2)} • context ${fmt2(a.context_score,2)}</div>
@@ -4274,6 +4523,32 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         return Array.isArray(j?.presets) ? j.presets : [];
       } catch(e){ return []; }
     }
+    function currentPresetMetaFromUI(){
+      return {
+        favorite: !!document.getElementById('presetFavoriteInput')?.checked,
+        category: String(document.getElementById('presetCategoryInput')?.value || '').trim(),
+        notes: String(document.getElementById('presetNotesInput')?.value || '').trim(),
+      };
+    }
+    function applyPresetMetaToUI(meta){
+      const favorite = !!(meta && meta.favorite);
+      const category = String(meta?.category || '');
+      const notes = String(meta?.notes || '');
+      if (document.getElementById('presetFavoriteInput')) document.getElementById('presetFavoriteInput').checked = favorite;
+      if (document.getElementById('presetCategoryInput')) document.getElementById('presetCategoryInput').value = category;
+      if (document.getElementById('presetNotesInput')) document.getElementById('presetNotesInput').value = notes;
+    }
+    function syncPresetMetaFromSelection(){
+      const name = document.getElementById('savedPresetSelect')?.value || '';
+      const presets = Array.isArray(window.__serverPresets) ? window.__serverPresets : [];
+      const hit = presets.find(p => p && p.name === name);
+      applyPresetMetaToUI(hit || {});
+    }
+    function presetOptionLabel(p){
+      const star = p?.favorite ? '★ ' : '';
+      const cat = p?.category ? ` [${String(p.category)}]` : '';
+      return `${star}${String(p?.name || '')}${cat}`;
+    }
     function currentFormSnapshot(){
       const form = document.getElementById('scanForm');
       const fd = new FormData(form);
@@ -4296,18 +4571,22 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const sel = document.getElementById('savedPresetSelect');
       if (!sel) return;
       const presets = await fetchSavedPresetsServer();
-      sel.innerHTML = `<option value="">No saved preset</option>` + presets.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+      const prev = sel.value || '';
+      sel.innerHTML = `<option value="">No saved preset</option>` + presets.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(presetOptionLabel(p))}</option>`).join('');
+      if (prev && presets.some(p => p && p.name === prev)) sel.value = prev;
       window.__serverPresets = presets;
+      syncPresetMetaFromSelection();
     }
     refreshSavedPresetSelect().catch(()=>{});
 
     document.getElementById('savePresetBtn')?.addEventListener('click', async () => {
-      const name = window.prompt('Save preset as:');
+      const current = document.getElementById('savedPresetSelect')?.value || '';
+      const name = window.prompt('Save preset as:', current || '');
       if (!name) return;
       await fetch('/api/scan_presets/save', {
         method: 'POST',
         headers: {'content-type':'application/json'},
-        body: JSON.stringify({name, payload: currentFormSnapshot()})
+        body: JSON.stringify({name, payload: currentFormSnapshot(), meta: currentPresetMetaFromUI()})
       });
       refreshSavedPresetSelect().catch(()=>{});
     });
@@ -4317,6 +4596,12 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const presets = Array.isArray(window.__serverPresets) ? window.__serverPresets : [];
       const hit = presets.find(p => p && p.name === name);
       if (hit && hit.payload) applyFormSnapshot(hit.payload);
+      applyPresetMetaToUI(hit || {});
+      fetch('/api/scan_presets/touch', {
+        method: 'POST',
+        headers: {'content-type':'application/json'},
+        body: JSON.stringify({name, last_used_at: Date.now() / 1000}),
+      }).then(() => refreshSavedPresetSelect()).catch(()=>{});
     });
     document.getElementById('deletePresetBtn')?.addEventListener('click', async () => {
       const name = document.getElementById('savedPresetSelect')?.value;
@@ -4328,6 +4613,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       });
       refreshSavedPresetSelect().catch(()=>{});
     });
+    document.getElementById('savedPresetSelect')?.addEventListener('change', syncPresetMetaFromSelection);
     document.getElementById('applyQuickPresetBtn')?.addEventListener('click', () => {
       const val = document.getElementById('quickPresetSelect')?.value || 'auto';
       localStorage.setItem(QUICK_PRESET_KEY, val);
@@ -4336,6 +4622,34 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     });
     const qp = localStorage.getItem(QUICK_PRESET_KEY);
     if (qp && document.getElementById('quickPresetSelect')) document.getElementById('quickPresetSelect').value = qp;
+
+    async function refreshBenchmarkScorecard(){
+      const summary = document.getElementById('benchmarkScoreSummary');
+      const host = document.getElementById('benchmarkScoreBody');
+      if (!summary || !host) return;
+      try {
+        const r = await fetch('/api/benchmark_scorecard', {cache:'no-store'});
+        const j = await r.json();
+        if (!r.ok || j?.ok === false) throw new Error(j?.error || `benchmark_scorecard_failed:${r.status}`);
+        const sc = j.scorecard || {};
+        const score = sc.score || {};
+        summary.textContent = `Coverage ${Number(score.coverage_pct || 0).toFixed(1)}% • ${score.supported || 0}/${score.total || 0} tracked capabilities`;
+        host.innerHTML = (Array.isArray(sc.features) ? sc.features : []).map(item => `
+          <div class="benchmarkRow">
+            <div>
+              <div><b>${escapeHtml(String(item.label || item.key || 'feature'))}</b></div>
+              <div class="miniMuted" style="margin-top:4px;">Benchmarks: ${escapeHtml((Array.isArray(item.benchmark) ? item.benchmark.join(', ') : 'n/a'))}</div>
+              <div class="miniMuted" style="margin-top:4px;">${escapeHtml(String(item.notes || ''))}</div>
+            </div>
+            <div><span class="badge ${item.kingdom ? 'badge-green' : 'badge-gray'}">${item.kingdom ? 'Live' : 'Not enabled'}</span></div>
+          </div>
+        `).join('') || '<div class="muted">No benchmark entries.</div>';
+      } catch (err) {
+        summary.textContent = 'Benchmark scorecard unavailable';
+        host.innerHTML = `<div class="muted">${escapeHtml(err?.message || String(err))}</div>`;
+      }
+    }
+    refreshBenchmarkScorecard().catch(()=>{});
 
     document.querySelectorAll('.categoryTabBtn').forEach(btn => btn.addEventListener('click', () => {
       const val = btn.getAttribute('data-category') || 'all';

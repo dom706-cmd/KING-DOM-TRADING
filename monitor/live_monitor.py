@@ -158,6 +158,32 @@ def _monitor_live_confidence_reasons(st: "MonitorSymbolState", reasons: list[str
     return _dedupe_keep(reasons_out)
 
 
+def _near_trigger_live(st: "MonitorSymbolState") -> bool:
+    if not st.tape_live:
+        return False
+    if st.entry is None or st.risk_per_share in (None, 0.0) or st.price is None:
+        return False
+    if st.long_triggered_live or st.short_triggered_live:
+        return False
+    try:
+        return abs(float(st.retest_distance_r or 999.0)) <= 0.20
+    except Exception:
+        return False
+
+
+def _alert_bucket_for_state(st: "MonitorSymbolState", state: str) -> str:
+    state_norm = str(state or "watch").strip().lower()
+    if state_norm == "triggered":
+        return "triggered"
+    if state_norm in {"arming", "confirmed", "touch_wait_confirm"}:
+        return "ready"
+    if state_norm in {"failed", "extended"}:
+        return "suppressed"
+    if _near_trigger_live(st):
+        return "near_trigger"
+    return "watch"
+
+
 
 
 def _trade_refresh_update(sym: str, *, provider: Any, stream_cache: Any) -> dict[str, Any]:
@@ -247,6 +273,7 @@ class MonitorAlertEvent:
     catalyst_score: float | None
     context_score: float | None
     dedupe_key: str
+    alert_bucket: str = "watch"
     reasons: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
 
@@ -269,6 +296,7 @@ class MonitorAlertEvent:
             "catalyst_score": self.catalyst_score,
             "context_score": self.context_score,
             "dedupe_key": self.dedupe_key,
+            "alert_bucket": self.alert_bucket,
             "reasons": list(self.reasons),
             "flags": list(self.flags),
         }
@@ -342,10 +370,12 @@ class MonitorSymbolState:
     tape_deterioration: str | None = None
     market_session_state: str = "unknown"
     time_of_day_bucket: str = "unknown"
+    near_trigger_live: bool = False
 
     # state machine
     previous_state: str = "watch"
     monitor_state: str = "watch"
+    alert_state_bucket: str = "watch"
     last_transition_ts: float | None = None
     cooldown_until_ts: float | None = None
     alert_fired_count: int = 0
@@ -431,6 +461,8 @@ class MonitorSymbolState:
             "tape_live": self.tape_live,
             "tape_live_reason": self.tape_live_reason,
             "tape_deterioration": self.tape_deterioration,
+            "near_trigger": self.near_trigger_live,
+            "alert_state_bucket": self.alert_state_bucket,
             "context_score": self.context_score,
             "live_score": self.live_score,
             "live_confidence_score": self.live_confidence_score,
@@ -458,6 +490,7 @@ class MonitorSession:
     updated_at: float = field(default_factory=_now_ts)
     running: bool = True
     refresh_count: int = 0
+    last_replay_persist_ts: float = 0.0
     min_refresh_interval_s: float = 1.0
     symbols: dict[str, MonitorSymbolState] = field(default_factory=dict)
     alerts: list[MonitorAlertEvent] = field(default_factory=list)
@@ -1280,6 +1313,7 @@ class LiveMonitorManager:
             st.cooldown_until_ts = None
 
         self._compute_tape_locked(sess, st, now_ts=now_ts)
+        st.near_trigger_live = _near_trigger_live(st)
         self._compute_state_and_alerts_locked(sess, st, context=context, now_ts=now_ts)
         self._persist_symbol(sess, st)
 
@@ -1334,9 +1368,12 @@ class LiveMonitorManager:
 
         # Transition tracking.
         old_state = st.monitor_state
+        old_bucket = st.alert_state_bucket or _alert_bucket_for_state(st, old_state)
         st.previous_state = old_state
         st.monitor_state = new_state
         st.just_transitioned = (new_state != old_state)
+        new_bucket = _alert_bucket_for_state(st, new_state)
+        st.alert_state_bucket = new_bucket
         if st.just_transitioned:
             st.last_transition_ts = now_ts
             st.promoted_by_monitor_transition = new_state in {"arming", "confirmed", "triggered"}
@@ -1383,20 +1420,36 @@ class LiveMonitorManager:
             "catalyst_freshness_hours": st.catalyst_freshness_hours,
         }
 
-        if st.just_transitioned:
-            self._emit_alert_locked(sess, st, old_state, new_state, reasons=st.live_confidence_reasons, flags=st.risk_flags, now_ts=now_ts)
+        should_emit = False
+        if new_bucket != old_bucket and new_bucket in {"near_trigger", "ready", "triggered"}:
+            should_emit = True
+        elif st.just_transitioned and new_state in {"failed", "extended"} and old_bucket in {"near_trigger", "ready", "triggered"}:
+            should_emit = True
+        elif st.just_transitioned and new_state == "cooldown" and old_bucket in {"ready", "triggered"}:
+            should_emit = True
+        if should_emit:
+            self._emit_alert_locked(
+                sess,
+                st,
+                old_state,
+                new_state,
+                reasons=st.live_confidence_reasons,
+                flags=st.risk_flags,
+                now_ts=now_ts,
+                alert_bucket=new_bucket,
+            )
 
-    def _dedupe_key(self, sess: MonitorSession, st: MonitorSymbolState, to_state: str, now_ts: float) -> str:
+    def _dedupe_key(self, sess: MonitorSession, st: MonitorSymbolState, to_state: str, now_ts: float, alert_bucket: str) -> str:
         minute = int(now_ts // 60)
-        raw = f"{sess.monitor_id}:{st.symbol}:{st.playbook}:{to_state}:{minute}"
+        raw = f"{sess.monitor_id}:{st.symbol}:{st.playbook}:{to_state}:{alert_bucket}:{minute}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
 
-    def _emit_alert_locked(self, sess: MonitorSession, st: MonitorSymbolState, from_state: str, to_state: str, *, reasons: list[str], flags: list[str], now_ts: float) -> None:
-        dedupe_key = self._dedupe_key(sess, st, to_state, now_ts)
+    def _emit_alert_locked(self, sess: MonitorSession, st: MonitorSymbolState, from_state: str, to_state: str, *, reasons: list[str], flags: list[str], now_ts: float, alert_bucket: str) -> None:
+        dedupe_key = self._dedupe_key(sess, st, to_state, now_ts, alert_bucket)
         for existing in sess.alerts[-50:]:
             if existing.dedupe_key == dedupe_key:
                 return
-        event_type = "state_transition"
+        event_type = alert_bucket
         alert = MonitorAlertEvent(
             event_id=uuid.uuid4().hex,
             monitor_id=sess.monitor_id,
@@ -1415,6 +1468,7 @@ class LiveMonitorManager:
             catalyst_score=st.catalyst_score,
             context_score=st.context_score,
             dedupe_key=dedupe_key,
+            alert_bucket=alert_bucket,
             reasons=list(reasons or []),
             flags=list(flags or []),
         )
@@ -1442,8 +1496,12 @@ class LiveMonitorManager:
     def _persist_session(self, sess: MonitorSession) -> None:
         if self._store is not None:
             try:
-                self._store.save_session(self._session_to_api(sess))
-                self._store.save_replay_snapshot(sess.monitor_id, self._session_to_api(sess))
+                payload = self._session_to_api(sess)
+                self._store.save_session(payload)
+                now_ts = _now_ts()
+                if (now_ts - float(getattr(sess, 'last_replay_persist_ts', 0.0) or 0.0)) >= 3.0:
+                    self._store.save_replay_snapshot(sess.monitor_id, payload)
+                    sess.last_replay_persist_ts = now_ts
             except Exception:
                 pass
 
@@ -1479,6 +1537,7 @@ class LiveMonitorManager:
                             "symbol": sym,
                             "headline": getattr(art, "headline", "") or "",
                             "source": getattr(art, "source", None),
+                            "url": getattr(art, "url", None),
                             "published_at": getattr(art, "created_at", None),
                             "received_at": now_ts,
                             "sentiment_score": getattr(art, "score", None),
