@@ -558,6 +558,51 @@ th {
   <form method="get" action="/" class="workspaceGrid" id="scanForm">
     <div class="sidebarStack">
       <div class="card toolPalette compactCard">
+        <div class="toolRow" style="justify-content:space-between; gap:8px; flex-wrap:wrap;">
+          <div>
+            <div class="toolSectionTitle">Pro workflow</div>
+            <div class="muted" style="margin-top:4px;">Saved presets, benchmark quick-loads, and scanner categories.</div>
+          </div>
+        </div>
+
+        <div class="toolDivider"></div>
+        <div class="toolRow" style="gap:8px; flex-wrap:wrap; align-items:flex-end;">
+          <label style="display:flex; flex-direction:column; gap:6px; min-width:180px; flex:1;">
+            <span class="muted" style="font-size:12px;">Quick preset</span>
+            <select id="quickPresetSelect" name="preset">
+              <option value="auto">Auto / KingDom default</option>
+              <option value="tradeideas">Trade Ideas style</option>
+              <option value="tradingview">TradingView style</option>
+              <option value="trendspider">TrendSpider style</option>
+              <option value="finviz">Finviz style</option>
+              <option value="benzinga">Benzinga style</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="applyQuickPresetBtn">Apply</button>
+          <button type="button" class="btn" id="savePresetBtn">Save current</button>
+          <button type="button" class="btn" id="deletePresetBtn">Delete saved</button>
+        </div>
+        <div class="toolRow" style="gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;">
+          <label style="display:flex; flex-direction:column; gap:6px; min-width:180px; flex:1;">
+            <span class="muted" style="font-size:12px;">Saved presets</span>
+            <select id="savedPresetSelect">
+              <option value="">No saved preset</option>
+            </select>
+          </label>
+          <button type="button" class="btn" id="loadSavedPresetBtn">Load</button>
+        </div>
+
+        <div class="toolDivider"></div>
+        <div class="toolRow" style="gap:8px; flex-wrap:wrap;">
+          <span class="tag">Scanner categories</span>
+          <button type="button" class="btn categoryTabBtn" data-category="all">All</button>
+          <button type="button" class="btn categoryTabBtn" data-category="momentum">Momentum</button>
+          <button type="button" class="btn categoryTabBtn" data-category="news">News</button>
+          <button type="button" class="btn categoryTabBtn" data-category="reversal">Reversal</button>
+          <button type="button" class="btn categoryTabBtn" data-category="liquidity">Liquidity</button>
+        </div>
+
+        <div class="toolDivider"></div>
         <div class="toolRow" style="justify-content:space-between;">
           <div>
             <div class="toolSectionTitle">Scanner controls</div>
@@ -863,6 +908,8 @@ th {
             <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorRequireVwapAlign" /><span class="muted" style="font-size:12px;">Require VWAP align</span></label>
             <label style="display:flex; gap:8px; align-items:center; margin-left:auto;"><input type="checkbox" id="liveMonitorEnableSound" /><span class="muted" style="font-size:12px;">Sound</span></label>
             <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="liveMonitorEnableNotify" /><span class="muted" style="font-size:12px;">Desktop notify</span></label>
+            <label style="display:flex; gap:6px; align-items:center;"><span class="muted" style="font-size:12px;">Cooldown s</span><input id="liveMonitorAlertCooldownSec" inputmode="numeric" value="60" style="width:70px;" /></label>
+            <label style="display:flex; gap:6px; align-items:center;"><span class="muted" style="font-size:12px;">Alert level</span><select id="liveMonitorAlertLevel" style="width:110px;"><option value="all">All</option><option value="ready">Ready+</option><option value="triggered">Triggered only</option></select></label>
           </div>
           <div class="muted" style="margin-top:8px; font-size:12px;">Risk sizing uses <b>risk_per_share</b> from the scan plan when available: Shares ≈ Risk$/risk_per_share. Near-trigger alerts fire when a symbol is within Near-trigger % of its OR trigger.</div>
         </div>
@@ -925,6 +972,8 @@ th {
           <span class="tag">Sort candidates</span>
           <select id="candSortKey"><option value="score">Score</option><option value="ml">ML</option><option value="sent">Sent</option></select>
           <select id="candSortDir"><option value="desc">High → Low</option><option value="asc">Low → High</option></select>
+          <span class="tag">Category</span>
+          <select id="candCategoryFilter"><option value="all">All</option><option value="momentum">Momentum</option><option value="news">News</option><option value="reversal">Reversal</option><option value="liquidity">Liquidity</option></select>
         </div>
 <div class="tableWrap" id="candidatesWrap"><table>
       <thead>
@@ -1143,6 +1192,22 @@ th {
         <div id="contextTags" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
       </div>
 
+      <div class="card compactCard utilityCard" id="newsCatalystCard">
+        <div class="sectionIntro">
+          <div>
+            <div class="sectionLabel">Catalyst desk</div>
+            <h3 style="margin:0;">News / Catalyst Panel</h3>
+            <div class="muted" style="margin-top:4px;">Fresh catalyst names, tags, confidence, and monitor context in one place.</div>
+          </div>
+          <div class="inlineStat">
+            <span class="tag">Source</span><span>scan + monitor payloads</span>
+          </div>
+        </div>
+        <div id="newsCatalystBody" style="margin-top:10px; display:flex; flex-direction:column; gap:8px;">
+          <div class="muted">No catalyst-rich names yet.</div>
+        </div>
+      </div>
+
       <div class="card compactCard utilityCard" id="alertTapeCard">
         <div class="sectionIntro">
           <div>
@@ -1161,6 +1226,19 @@ th {
       </div>
     </div>
   </form>
+</div>
+
+<div id="candidateExplainModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:9999; padding:40px 20px; overflow:auto;">
+  <div style="max-width:920px; margin:0 auto; background:var(--panel); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow-card); padding:18px;">
+    <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+      <div>
+        <div class="sectionLabel">Candidate detail</div>
+        <h3 id="candidateExplainTitle" style="margin:0;">Candidate</h3>
+      </div>
+      <button type="button" class="btn btn-danger" id="candidateExplainCloseBtn">Close</button>
+    </div>
+    <div id="candidateExplainBody" style="margin-top:14px;"></div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
@@ -1195,6 +1273,9 @@ window.PositionDeskSeed = [
   const CAND_FILTER_SIDE_KEY = "orb_cand_filter_side";
   const CAND_FILTER_QUERY_KEY = "orb_cand_filter_query";
   const CAND_FILTER_LIMIT_KEY = "orb_cand_filter_limit";
+  const CAND_FILTER_CATEGORY_KEY = "orb_cand_filter_category";
+  const SAVED_PRESETS_KEY = "orb_saved_presets_v1";
+  const QUICK_PRESET_KEY = "orb_quick_preset";
 
   function toFiniteNumber(v){
     const n = (v === null || v === undefined) ? NaN : Number(v);
@@ -1238,12 +1319,14 @@ window.PositionDeskSeed = [
     const sideEl = document.getElementById("candSideFilter");
     const qEl = document.getElementById("candSearchFilter");
     const limEl = document.getElementById("candShowLimit");
+    const catEl = document.getElementById("candCategoryFilter");
 
     const side = String((sideEl && sideEl.value) || localStorage.getItem(CAND_FILTER_SIDE_KEY) || "all").toLowerCase();
     const query = String((qEl && qEl.value) || localStorage.getItem(CAND_FILTER_QUERY_KEY) || "").trim().toLowerCase();
     const limitRaw = String((limEl && limEl.value) || localStorage.getItem(CAND_FILTER_LIMIT_KEY) || "10").toLowerCase();
     const limit = (limitRaw === "all") ? "all" : (String(parseInt(limitRaw,10) || 10));
-    return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit };
+    const category = String((catEl && catEl.value) || localStorage.getItem(CAND_FILTER_CATEGORY_KEY) || "all").toLowerCase();
+    return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit, category };
   }
 
   function applySavedCandFiltersToUI(){
@@ -1254,9 +1337,12 @@ window.PositionDeskSeed = [
       const side = localStorage.getItem(CAND_FILTER_SIDE_KEY);
       const q = localStorage.getItem(CAND_FILTER_QUERY_KEY);
       const lim = localStorage.getItem(CAND_FILTER_LIMIT_KEY);
+      const cat = localStorage.getItem(CAND_FILTER_CATEGORY_KEY);
       if (sideEl && side) sideEl.value = side;
       if (qEl && q !== null && q !== undefined) qEl.value = q;
       if (limEl && lim) limEl.value = lim;
+      const catEl = document.getElementById("candCategoryFilter");
+      if (catEl && cat) catEl.value = cat;
     }catch(e){}
   }
 
@@ -1266,6 +1352,7 @@ window.PositionDeskSeed = [
       localStorage.setItem(CAND_FILTER_SIDE_KEY, f.side);
       localStorage.setItem(CAND_FILTER_QUERY_KEY, (document.getElementById("candSearchFilter")?.value || ""));
       localStorage.setItem(CAND_FILTER_LIMIT_KEY, f.limit);
+      localStorage.setItem(CAND_FILTER_CATEGORY_KEY, f.category || 'all');
     }catch(e){}
     return f;
   }
@@ -1396,6 +1483,59 @@ function gradeClass(g){
     return `<div class="muted" style="margin-top:4px;">${parts.join(" • ")}</div>`;
   }
 
+  function candidateCategory(c){
+    const cat = Number(c?.catalyst_score ?? NaN);
+    const sent = Number(c?.sentiment_score ?? c?.sent ?? NaN);
+    const rv = Number(c?.rvol ?? NaN);
+    const best = String(c?.best_side || '').toLowerCase();
+    const trig = !!(best === 'long' ? c?.long_triggered : best === 'short' ? c?.short_triggered : false);
+    if (Number.isFinite(cat) && cat >= 0.35) return 'news';
+    if (best === 'short' || trig) return 'reversal';
+    if (Number.isFinite(rv) && rv >= 2.0) return 'momentum';
+    if (Number.isFinite(sent) && sent > 0.25) return 'news';
+    return 'liquidity';
+  }
+
+  function openCandidateExplain(c){
+    const modal = document.getElementById('candidateExplainModal');
+    const title = document.getElementById('candidateExplainTitle');
+    const body = document.getElementById('candidateExplainBody');
+    if (!modal || !title || !body) return;
+    title.textContent = `${String(c?.symbol || 'Candidate').toUpperCase()} • ${candidateCategory(c)}`;
+    const scoreBreak = c?.score_breakdown || {};
+    const rankWhy = Array.isArray(scoreBreak.rank_why) ? scoreBreak.rank_why : [];
+    const gateReasons = Array.isArray(c?.gate_fail_reasons) ? c.gate_fail_reasons : [];
+    const seedReasons = Array.isArray(c?.monitor_seed_reasons) ? c.monitor_seed_reasons : [];
+    const headlines = Array.isArray(c?.catalyst_headlines) ? c.catalyst_headlines.slice(0,5) : [];
+    const tags = Array.isArray(c?.catalyst_tags) ? c.catalyst_tags : [];
+    body.innerHTML = `
+      <div class="kpiRow">
+        <div class="kpiCard"><div class="k">Best side</div><div class="v">${escapeHtml(String(c?.best_side || '—').toUpperCase())}</div></div>
+        <div class="kpiCard"><div class="k">Combined</div><div class="v">${num(c?.combined_score ?? c?.score, 3)}</div></div>
+        <div class="kpiCard"><div class="k">ML</div><div class="v">${num(c?.ml_score ?? c?.ml, 3)}</div></div>
+        <div class="kpiCard"><div class="k">Catalyst</div><div class="v">${num(c?.catalyst_score, 2)}</div></div>
+      </div>
+      <div class="card compactCard" style="margin-top:12px;">
+        <div class="sectionLabel">Why this ranked here</div>
+        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${rankWhy.map(x=>`<span class="tag">${escapeHtml(String(x))}</span>`).join('') || '<span class="muted">No rank explanation available.</span>'}</div>
+        <div class="muted" style="margin-top:10px;">Gate fails: ${escapeHtml(gateReasons.join(', ') || 'none')} • Seed reasons: ${escapeHtml(seedReasons.join(', ') || 'none')}</div>
+      </div>
+      <div class="card compactCard" style="margin-top:12px;">
+        <div class="sectionLabel">Plan</div>
+        <div class="muted" style="margin-top:8px;">Long entry ${money(c?.long_entry)} • long stop ${money(c?.long_stop)} • long 2R ${money(c?.long_2r)} • short entry ${money(c?.short_entry)} • short stop ${money(c?.short_stop)} • short 2R ${money(c?.short_2r)}</div>
+      </div>
+      <div class="card compactCard" style="margin-top:12px;">
+        <div class="sectionLabel">Catalyst context</div>
+        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${tags.map(t=>`<span class="tag">${escapeHtml(String(t))}</span>`).join('') || '<span class="muted">No catalyst tags.</span>'}</div>
+        <div class="muted" style="margin-top:10px;">${headlines.length ? headlines.map(h => escapeHtml(String(h))).join(' • ') : 'No headlines attached to this candidate payload.'}</div>
+      </div>
+      <div class="card compactCard" style="margin-top:12px;">
+        <div class="sectionLabel">Score breakdown</div>
+        <pre style="white-space:pre-wrap; overflow:auto; margin:8px 0 0 0;">${escapeHtml(JSON.stringify(scoreBreak, null, 2))}</pre>
+      </div>`;
+    modal.style.display = 'block';
+  }
+
   function renderCandidatesTable(items){
     const body = document.getElementById("candidatesBody");
     if (!body) return;
@@ -1417,6 +1557,9 @@ function gradeClass(g){
         const notes = String(c.notes||c.note||c.reason||'').toLowerCase();
         return sym.includes(f.query) || notes.includes(f.query);
       });
+    }
+    if (f.category && f.category !== 'all'){
+      filtered = filtered.filter(c => candidateCategory(c) === f.category);
     }
     if (f.limit !== 'all'){
       const n = Math.max(1, Math.min(500, parseInt(f.limit,10) || 10));
@@ -1458,7 +1601,7 @@ function gradeClass(g){
       const sNear = (!sIsTrig && Number.isFinite(lastPx) && Number.isFinite(sEntry) && lastPx > 0 && ((lastPx - sEntry)/lastPx) <= nearPct && (lastPx - sEntry) > 0);
       const sTrigged = sIsTrig ? '<span class="badge badge-red">TRIG</span>' : (sNear ? '<span class="badge badge-amber">NEAR</span>' : '<span class="badge badge-gray">—</span>');
 
-      const addBtn = `<button type="button" class="addBtn"
+      const addBtn = `<div style="display:flex; gap:6px; flex-wrap:wrap;"><button type="button" class="addBtn"
         data-add-symbol="${sym}"
         data-add-price="${(c.live_price ?? c.last_price) ?? ""}"
         data-last-price="${(c.live_price ?? c.last_price) ?? ""}"
@@ -1479,7 +1622,7 @@ function gradeClass(g){
       data-ml-score="${(c.ml_score ?? c.ml ?? c.model_score ?? "")}"
         data-combined-score="${(c.combined_score ?? c.score ?? c.total_score ?? "")}"
       data-sent-score="${(c.sentiment_score ?? c.sent ?? c.sent_score ?? "")}"
-      >Add</button>`;
+      >Add</button><button type="button" class="btn explainCandidateBtn" data-explain-symbol="${sym}">Why</button></div>`;
 
       const lTrig = money(c.long_entry);
       // lTrigged computed above
@@ -1582,6 +1725,7 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
     body.innerHTML = rows;
     bindCandidateAddButtons();
     maybeAutoAddPassed();
+    try { renderNewsCatalystPanel(sorted, []); } catch(e){}
     // Keep the "Current Heat" panel fresh.
     try { if (window.renderHeatPanel) window.renderHeatPanel(); } catch(e){}
   }
@@ -3185,6 +3329,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     const enableNotify = !!rules.enableNotify;
     const nearPct = Number(rules.nearTriggerPct);
     const riskDollars = Number(rules.riskDollars);
+    const cooldownMs = Math.max(5000, (Number(document.getElementById('liveMonitorAlertCooldownSec')?.value || 60) || 60) * 1000);
+    const alertLevel = String(document.getElementById('liveMonitorAlertLevel')?.value || 'all').toLowerCase();
 
     const rows = Array.isArray(payload?.symbols) ? payload.symbols : [];
     const now = Date.now();
@@ -3209,14 +3355,28 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 
       // Triggered alert
       if (trig && prev.trig === false){
-        fireAlert(`TRIGGERED: ${sym}`, `Triggered (${best}) • Entry ${s?.entry ?? "—"} • Stop ${s?.stop_loss ?? "—"}`, enableSound, enableNotify);
+        if (alertLevel === 'all' || alertLevel === 'ready' || alertLevel === 'triggered') {
+          fireAlert(`TRIGGERED: ${sym}`, `Triggered (${best}) • Entry ${s?.entry ?? "—"} • Stop ${s?.stop_loss ?? "—"}`, enableSound, enableNotify);
+        }
+      }
+
+      const stateTxt = String(s?.monitor_state || '').toLowerCase();
+      if ((stateTxt.includes('ready') || stateTxt.includes('armed')) && prev.state !== stateTxt && (alertLevel === 'all' || alertLevel === 'ready')){
+        const lastReady = prev.lastReady || 0;
+        if ((now - lastReady) > cooldownMs){
+          newMap[sym].lastReady = now;
+          fireAlert(`READY: ${sym}`, `Ready state • ${stateTxt} • Score ${s?.live_confidence_score ?? '—'}`, enableSound, enableNotify);
+        } else {
+          newMap[sym].lastReady = lastReady;
+        }
+      } else if (prev.lastReady){
+        newMap[sym].lastReady = prev.lastReady;
       }
 
       // Near-trigger alert (only if not triggered and distPct within threshold)
-      if (!trig && distPct !== null && Number.isFinite(distPct) && distPct > 0 && Number.isFinite(nearPct) && distPct <= nearPct){
-        // only once per symbol per ~60s
+      if (!trig && distPct !== null && Number.isFinite(distPct) && distPct > 0 && Number.isFinite(nearPct) && distPct <= nearPct && alertLevel === 'all'){
         const lastNear = prev.lastNear || 0;
-        if ((now - lastNear) > 60000){
+        if ((now - lastNear) > cooldownMs){
           newMap[sym].lastNear = now;
           fireAlert(`NEAR TRIGGER: ${sym}`, `Within ${distPct.toFixed(2)}% of trigger • Entry ${s?.entry ?? "—"} • Risk $${Number(riskDollars||0).toFixed(0)}`, enableSound, enableNotify);
         } else {
@@ -3225,8 +3385,45 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       } else if (prev.lastNear){
         newMap[sym].lastNear = prev.lastNear;
       }
+      newMap[sym].state = stateTxt;
     }
     _lastAlertMap = newMap;
+  }
+
+  function renderNewsCatalystPanel(candidates, monitorRows){
+    const body = document.getElementById('newsCatalystBody');
+    if (!body) return;
+    const seen = new Map();
+    for (const item of [...(Array.isArray(candidates) ? candidates : []), ...(Array.isArray(monitorRows) ? monitorRows : [])]){
+      const sym = String(item?.symbol || '').toUpperCase();
+      if (!sym) continue;
+      const cat = Number(item?.catalyst_score ?? NaN);
+      const sent = Number(item?.sentiment_score ?? item?.sent ?? NaN);
+      const score = Number(item?.combined_score ?? item?.score ?? NaN);
+      const existing = seen.get(sym);
+      const payload = existing || Object.assign({}, item, {symbol: sym});
+      if (!existing || (Number.isFinite(cat) && cat > Number(existing?.catalyst_score ?? -Infinity))) {
+        seen.set(sym, payload);
+      }
+      payload.__sort = (Number.isFinite(cat) ? cat * 100 : 0) + (Number.isFinite(sent) ? sent * 10 : 0) + (Number.isFinite(score) ? score : 0);
+    }
+    const rows = Array.from(seen.values()).sort((a,b) => Number(b.__sort || 0) - Number(a.__sort || 0)).slice(0, 10);
+    if (!rows.length){
+      body.innerHTML = '<div class="muted">No catalyst-rich names yet.</div>';
+      return;
+    }
+    body.innerHTML = rows.map(r => {
+      const tags = Array.isArray(r.catalyst_tags) ? r.catalyst_tags.slice(0,5) : [];
+      const headlines = Array.isArray(r.catalyst_headlines) ? r.catalyst_headlines.slice(0,2) : [];
+      return `<div style="padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.03);">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div><b>${escapeHtml(r.symbol || '—')}</b> <span class="tag">${escapeHtml(candidateCategory(r))}</span></div>
+          <div class="muted">Cat ${num(r.catalyst_score,2)} • Sent ${num(r.sentiment_score ?? r.sent,2)} • Score ${num(r.combined_score ?? r.score,3)}</div>
+        </div>
+        <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:8px;">${tags.map(t => `<span class="tag">${escapeHtml(String(t))}</span>`).join('') || '<span class="muted">No tags</span>'}</div>
+        <div class="muted" style="margin-top:6px;">${headlines.map(h => escapeHtml(String(h))).join(' • ') || 'No headlines attached.'}</div>
+      </div>`;
+    }).join('');
   }
 
   function fireAlert(title, body, enableSound, enableNotify){
@@ -3634,6 +3831,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       renderMonitor(j);
       renderContextStatus(j.context || {});
       renderAlertTape(j.alerts_recent || []);
+      try { renderNewsCatalystPanel(loadCandidatesCache(), j.symbols || []); } catch(e){}
       setCurrentMonitorId(j.monitor_id || mid);
       try {
         const rc = j.refresh_count ?? '—';
@@ -4066,6 +4264,98 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const alertSeed = JSON.parse(document.getElementById('orb_recent_alerts_json')?.textContent || '[]');
       if (Array.isArray(alertSeed) && alertSeed.length) renderAlertTape(alertSeed);
     } catch(e){}
+
+    function loadSavedPresets(){
+      try { return JSON.parse(localStorage.getItem(SAVED_PRESETS_KEY) || '{}'); } catch(e){ return {}; }
+    }
+    function saveSavedPresets(obj){ localStorage.setItem(SAVED_PRESETS_KEY, JSON.stringify(obj || {})); }
+    function currentFormSnapshot(){
+      const form = document.getElementById('scanForm');
+      const fd = new FormData(form);
+      const out = {};
+      for (const [k,v] of fd.entries()) out[k] = v;
+      ['use_ml','use_sentiment','use_catalyst'].forEach(k => { out[k] = form.querySelector(`[name="${k}"]`)?.checked ? '1' : '0'; });
+      return out;
+    }
+    function applyFormSnapshot(obj){
+      const form = document.getElementById('scanForm');
+      if (!form || !obj) return;
+      Object.entries(obj).forEach(([k,v]) => {
+        const el = form.querySelector(`[name="${k}"]`);
+        if (!el) return;
+        if (el.type === 'checkbox') el.checked = String(v) === '1';
+        else el.value = String(v ?? '');
+      });
+    }
+    function refreshSavedPresetSelect(){
+      const sel = document.getElementById('savedPresetSelect');
+      if (!sel) return;
+      const presets = loadSavedPresets();
+      const names = Object.keys(presets).sort();
+      sel.innerHTML = `<option value="">No saved preset</option>` + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    }
+    refreshSavedPresetSelect();
+
+    document.getElementById('savePresetBtn')?.addEventListener('click', () => {
+      const name = window.prompt('Save preset as:');
+      if (!name) return;
+      const presets = loadSavedPresets();
+      presets[name] = currentFormSnapshot();
+      saveSavedPresets(presets);
+      refreshSavedPresetSelect();
+    });
+    document.getElementById('loadSavedPresetBtn')?.addEventListener('click', () => {
+      const name = document.getElementById('savedPresetSelect')?.value;
+      if (!name) return;
+      const presets = loadSavedPresets();
+      applyFormSnapshot(presets[name]);
+    });
+    document.getElementById('deletePresetBtn')?.addEventListener('click', () => {
+      const name = document.getElementById('savedPresetSelect')?.value;
+      if (!name) return;
+      const presets = loadSavedPresets();
+      delete presets[name];
+      saveSavedPresets(presets);
+      refreshSavedPresetSelect();
+    });
+    document.getElementById('applyQuickPresetBtn')?.addEventListener('click', () => {
+      const val = document.getElementById('quickPresetSelect')?.value || 'auto';
+      localStorage.setItem(QUICK_PRESET_KEY, val);
+      const hidden = document.querySelector('#scanForm [name="preset"]');
+      if (hidden) hidden.value = val;
+    });
+    const qp = localStorage.getItem(QUICK_PRESET_KEY);
+    if (qp && document.getElementById('quickPresetSelect')) document.getElementById('quickPresetSelect').value = qp;
+
+    document.querySelectorAll('.categoryTabBtn').forEach(btn => btn.addEventListener('click', () => {
+      const val = btn.getAttribute('data-category') || 'all';
+      const sel = document.getElementById('candCategoryFilter');
+      if (sel) sel.value = val;
+      localStorage.setItem(CAND_FILTER_CATEGORY_KEY, val);
+      try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}
+    }));
+
+    document.getElementById('candCategoryFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
+    document.getElementById('candidateExplainCloseBtn')?.addEventListener('click', () => {
+      const modal = document.getElementById('candidateExplainModal');
+      if (modal) modal.style.display = 'none';
+    });
+    document.getElementById('candidateExplainModal')?.addEventListener('click', (e) => {
+      if (e.target && e.target.id === 'candidateExplainModal') e.currentTarget.style.display = 'none';
+    });
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.explainCandidateBtn');
+      if (!btn) return;
+      const sym = String(btn.getAttribute('data-explain-symbol') || '').toUpperCase();
+      const hit = loadCandidatesCache().find(c => String(c.symbol || '').toUpperCase() === sym);
+      if (hit) openCandidateExplain(hit);
+    });
+
+    try {
+      const seedCandidates = JSON.parse(document.getElementById('orb_candidates_json')?.textContent || '[]');
+      if (Array.isArray(seedCandidates) && seedCandidates.length) renderNewsCatalystPanel(seedCandidates, []);
+    } catch(e){}
+
     refreshContextStatus().catch(()=>{});
     refreshAlertsRecent().catch(()=>{});
     if (!window.__kingdomContextAlertsTimer) {
