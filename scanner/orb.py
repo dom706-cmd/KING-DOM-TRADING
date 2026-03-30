@@ -574,14 +574,12 @@ def _buffer(price: float, cfg: ORBConfig) -> float:
 
 def _get_opening_range_5m(intraday_1m: pd.DataFrame) -> Tuple[float, float, str]:
     """
-    Derive a truthful opening range from the first available real 1-minute RTH bars.
+    Derive a truthful opening range from real 1-minute RTH bars.
 
-    Monitor-first rules:
-    - never invent bars
-    - prefer a true 09:30 ET print
-    - if 09:30 is missing, allow the earliest observed RTH print through 09:45
-    - tolerate modest real provider gaps
-    - if only 3-4 valid opening bars exist, use them as a provisional OR seed
+    Real feeds are messy. Professional scanners do not invent bars, but they also
+    do not throw away otherwise-usable symbols just because one or two opening
+    minutes are missing. So this routine prefers the true 09:30 open, tolerates
+    modest gaps, and falls back to the earliest sufficiently-dense opening slice.
     """
     df = intraday_1m.sort_index()
 
@@ -606,44 +604,80 @@ def _get_opening_range_5m(intraday_1m: pd.DataFrame) -> Tuple[float, float, str]
     session = session[~session.index.duplicated(keep="first")].sort_index()
 
     nominal_open = datetime.combine(day, dtime(9, 30), tzinfo=ET)
+
+    def _score_window(window: pd.DataFrame, anchor_ts: datetime) -> tuple[bool, str | None]:
+        if len(window.index) < 3:
+            return False, f"candidate_bars={len(window.index)}"
+        offsets = [int((ts - anchor_ts).total_seconds() // 60) for ts in window.index]
+        gaps = [b - a for a, b in zip(offsets, offsets[1:])]
+        gap_gt10 = sum(1 for g in gaps if g > 10)
+        gap_gt6 = sum(1 for g in gaps if g > 6)
+        if any(g <= 0 for g in gaps):
+            return False, f"gaps={gaps}"
+        if gap_gt10 > 0:
+            return False, f"gaps={gaps}"
+        # tolerate one ugly opening gap if we still have enough usable bars
+        if len(window.index) < 4 and gap_gt6 > 0:
+            return False, f"gaps={gaps}"
+        if gap_gt6 > 1:
+            return False, f"gaps={gaps}"
+        if offsets[-1] > 30:
+            return False, f"last_offset={offsets[-1]}"
+        return True, None
+
     opening_band = session.loc[
         (session.index >= nominal_open) &
-        (session.index <= nominal_open + pd.Timedelta(minutes=15))
+        (session.index <= nominal_open + pd.Timedelta(minutes=20))
     ].copy()
 
     if opening_band.empty:
         first_ts = session.index[0].isoformat() if len(session.index) else "none"
         raise RuntimeError(f"intraday_or_window_missing_open:first_rth_bar={first_ts}")
 
-    anchor_ts = opening_band.index[0]
-    anchor_delay_min = int((anchor_ts - nominal_open).total_seconds() // 60)
-    if anchor_delay_min > 15:
-        raise RuntimeError(f"intraday_or_window_missing_open:anchor_delay_min={anchor_delay_min}")
+    candidate_anchors: list[datetime] = []
+    if nominal_open in opening_band.index:
+        candidate_anchors.append(nominal_open)
+    first_opening_ts = opening_band.index[0]
+    if first_opening_ts not in candidate_anchors:
+        candidate_anchors.append(first_opening_ts)
+    for ts in opening_band.index[:5]:
+        if ts not in candidate_anchors:
+            candidate_anchors.append(ts)
 
-    candidate = session.loc[
-        (session.index >= anchor_ts) &
-        (session.index <= anchor_ts + pd.Timedelta(minutes=35))
-    ].copy()
+    chosen_window: pd.DataFrame | None = None
+    last_reason: str | None = None
+    chosen_anchor: datetime | None = None
 
-    if len(candidate.index) < 3:
-        raise RuntimeError(f"intraday_or_window_incomplete:candidate_bars={len(candidate.index)}")
+    for anchor_ts in candidate_anchors:
+        anchor_delay_min = int((anchor_ts - nominal_open).total_seconds() // 60)
+        if anchor_delay_min > 20:
+            last_reason = f"anchor_delay_min={anchor_delay_min}"
+            continue
 
-    window = candidate.iloc[: min(5, len(candidate.index))].copy()
-    if len(window.index) < 3:
-        raise RuntimeError(f"intraday_or_window_incomplete:window_bars={len(window.index)}")
+        candidate = session.loc[
+            (session.index >= anchor_ts) &
+            (session.index <= anchor_ts + pd.Timedelta(minutes=35))
+        ].copy()
+        window = candidate.iloc[: min(5, len(candidate.index))].copy()
+        ok, reason = _score_window(window, anchor_ts)
+        if ok:
+            chosen_window = window
+            chosen_anchor = anchor_ts
+            break
+        last_reason = reason
 
-    anchor_offsets = [int((ts - anchor_ts).total_seconds() // 60) for ts in window.index]
-    gaps = [b - a for a, b in zip(anchor_offsets, anchor_offsets[1:])]
+    if chosen_window is None or chosen_anchor is None:
+        if last_reason and last_reason.startswith("candidate_bars="):
+            raise RuntimeError(f"intraday_or_window_incomplete:{last_reason}")
+        if last_reason and last_reason.startswith("last_offset="):
+            raise RuntimeError(f"intraday_or_window_incomplete:{last_reason}")
+        if last_reason and last_reason.startswith("gaps="):
+            raise RuntimeError(f"intraday_or_window_incomplete:{last_reason}")
+        first_ts = session.index[0].isoformat() if len(session.index) else "none"
+        raise RuntimeError(f"intraday_or_window_missing_open:first_rth_bar={first_ts}")
 
-    gap_gt6 = sum(1 for g in gaps if g > 6)
-    if any(g <= 0 or g > 10 for g in gaps) or gap_gt6 > 2:
-        raise RuntimeError(f"intraday_or_window_incomplete:gaps={gaps}")
-
-    if anchor_offsets[-1] > 25:
-        raise RuntimeError(f"intraday_or_window_incomplete:last_offset={anchor_offsets[-1]}")
-
-    or_high = float(window["High"].astype(float).max())
-    or_low = float(window["Low"].astype(float).min())
+    or_high = float(chosen_window["High"].astype(float).max())
+    or_low = float(chosen_window["Low"].astype(float).min())
     if not math.isfinite(or_high) or not math.isfinite(or_low) or or_low >= or_high:
         raise RuntimeError(f"intraday_invalid_or_values:or_high={or_high}:or_low={or_low}")
 
@@ -3153,6 +3187,7 @@ def scan_range_reversion_symbols(
 
     for c in candidates:
         c.sentiment_score = sentiment_map.get(c.symbol)
+        feats = feat_by_symbol.get(c.symbol) or {}
 
         cb = catalyst_map.get(c.symbol) if isinstance(catalyst_map, dict) else None
         if cb is not None:
@@ -3195,8 +3230,15 @@ def scan_range_reversion_symbols(
         c.confidence_score = float(round(conf, 2))
         c.confidence_grade = _grade(conf)
 
-        feats = feat_by_symbol.get(c.symbol) or {}
         rr_ok, rr_reason, rr_touch_age_min, rr_chase_r = _passes_rr_actionable_long_gate(c, feats)
+        if rr_ok:
+            touch_after_pop = (
+                rr_chase_r is not None and float(rr_chase_r) > 1.0 and
+                rr_touch_age_min is not None and float(rr_touch_age_min) <= 0.0
+            )
+            if touch_after_pop:
+                rr_ok = False
+                rr_reason = "rr_touch_after_extension_pop"
         c.rr_actionable_now = bool(rr_ok)
         c.rr_touch_age_min = float(rr_touch_age_min)
         c.rr_chase_r = float(rr_chase_r)

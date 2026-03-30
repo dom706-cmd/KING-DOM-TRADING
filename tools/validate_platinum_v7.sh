@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+source ~/.orb_env
+source .venv/bin/activate
+
+OUT=/tmp/orb_v7_validation
+LOG=/tmp/orb_v7_validation.log
+rm -rf "$OUT"
+mkdir -p "$OUT"
+
+python -m py_compile app.py scanner/orb.py monitor/live_monitor.py providers/alpaca_provider.py providers/streaming.py
+
+python - <<'PY'
+import os
+feed=(os.getenv("ALPACA_DATA_FEED") or "").lower()
+print("ALPACA_DATA_FEED =", repr(feed))
+assert feed == "sip", f"Expected sip, got {feed!r}"
+print("ENV OK")
+PY
+
+pkill -f "python app.py" || true
+python app.py >"$LOG" 2>&1 &
+APP_PID=$!
+trap 'kill $APP_PID 2>/dev/null || true' EXIT
+sleep 5
+
+curl -s "http://127.0.0.1:8050/api/live_quotes?symbols=AAPL,MSFT,NVDA" | python -m json.tool > "$OUT/live_quotes.json"
+
+python - <<'PY'
+import json
+d=json.load(open('/tmp/orb_v7_validation/live_quotes.json'))
+quotes=d.get("quotes") or d
+print("TOP_LEVEL_FEED =", d.get("feed"))
+for sym,q in sorted(quotes.items()):
+    row = {
+        "feed": q.get("feed"),
+        "provider": q.get("provider"),
+        "price": q.get("price"),
+        "price_ts": q.get("price_ts") or q.get("last_trade_ts"),
+        "last_trade_ts": q.get("last_trade_ts"),
+        "bid": q.get("bid"),
+        "ask": q.get("ask"),
+        "quote_ts": q.get("quote_ts"),
+        "error": q.get("error"),
+        "stale_reason": q.get("stale_reason"),
+    }
+    print(sym, row)
+    assert (q.get("feed") or "").lower() == "sip", f"{sym} feed not sip"
+    assert q.get("provider"), f"{sym} provider missing"
+print("LIVE QUOTES OK")
+PY
+
+curl -s -X POST "http://127.0.0.1:8050/api/scan_start" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy":"orb","max_symbols":300,"limit":25,"use_ml":true,"use_sentiment":true}' \
+  | python -m json.tool > "$OUT/orb_start.json"
+
+python - <<'PY'
+import json, time, urllib.request, urllib.parse
+start=json.load(open('/tmp/orb_v7_validation/orb_start.json'))
+job_id=start.get("job_id") or start.get("id")
+assert job_id, "ORB start missing job_id"
+open('/tmp/orb_v7_validation/orb_job_id.txt','w').write(job_id)
+url="http://127.0.0.1:8050/api/debug_last_scan?job_id=" + urllib.parse.quote(job_id)
+for i in range(120):
+    with urllib.request.urlopen(url) as r:
+        d=json.load(r)
+    print({"i": i, "job_id": d.get("job_id"), "strategy": d.get("strategy"), "status": d.get("status"), "running": d.get("running")})
+    with open('/tmp/orb_v7_validation/debug_orb_final.json','w') as f:
+        json.dump(d,f,indent=2)
+    if d.get("job_id") == job_id and not d.get("running") and d.get("status") in ("completed","failed","done"):
+        break
+    time.sleep(2)
+PY
+
+python - <<'PY'
+import json
+d=json.load(open('/tmp/orb_v7_validation/debug_orb_final.json'))
+job_id=open('/tmp/orb_v7_validation/orb_job_id.txt').read().strip()
+assert d.get("job_id")==job_id, f"ORB job mismatch: {d.get('job_id')} != {job_id}"
+assert d.get("strategy")=="orb", f"ORB strategy mismatch: {d.get('strategy')}"
+assert d.get("thresholds_used") is not None, "ORB thresholds_used missing"
+assert d.get("session_date_used"), "ORB session_date_used missing"
+pc=d.get("prefilter_counts")
+rc=d.get("reject_counts")
+ps=d.get("prefilter_samples") or []
+fs=d.get("failure_samples_by_code")
+dfs=((d.get("debug") or {}).get("failure_samples_by_code") or {})
+assert isinstance(pc, dict) and pc, "ORB prefilter_counts missing"
+assert isinstance(rc, dict) and rc, "ORB reject_counts missing"
+assert ps, "ORB prefilter_samples empty"
+assert (isinstance(fs, dict) and fs) or (isinstance(dfs, dict) and dfs), "ORB failure_samples_by_code missing"
+missing_open = int((rc.get("intraday_or_window_missing_open") or 0))
+incomplete = int((rc.get("intraday_or_window_incomplete") or 0))
+# Real live feeds occasionally lack a usable 09:30 opening print for thin or odd symbols.
+# That's acceptable if the scanner surfaces it explicitly and the count stays small.
+assert missing_open <= 2, f"ORB missing_open too high: {missing_open}"
+assert incomplete <= 10, f"ORB opening window incomplete too high: {incomplete}"
+cands=d.get("candidates") or d.get("results") or []
+for c in cands:
+    if c.get("live_feed") == "sip":
+        assert c.get("provider"), f"{c.get('symbol')} has sip but null provider"
+print("ORB OK")
+print("ORB opening window", {k: rc.get(k) for k in ['intraday_or_window_incomplete','intraday_or_window_missing_open','intraday_or_window_missing_close','intraday_or_window']})
+PY
+
+curl -s -X POST "http://127.0.0.1:8050/api/scan_start" \
+  -H "Content-Type: application/json" \
+  -d '{"strategy":"range_reversion","max_symbols":300,"limit":25,"use_ml":true,"use_sentiment":true,"rr_touch_lookback_min":45,"range_window_min":60,"rr_min_risk_per_share":0.01,"rr_max_risk_per_share":5.0}' \
+  | python -m json.tool > "$OUT/rr_start.json"
+
+python - <<'PY'
+import json, time, urllib.request, urllib.parse
+start=json.load(open('/tmp/orb_v7_validation/rr_start.json'))
+job_id=start.get("job_id") or start.get("id")
+assert job_id, "RR start missing job_id"
+open('/tmp/orb_v7_validation/rr_job_id.txt','w').write(job_id)
+url="http://127.0.0.1:8050/api/debug_last_scan?job_id=" + urllib.parse.quote(job_id)
+for i in range(120):
+    with urllib.request.urlopen(url) as r:
+        d=json.load(r)
+    print({"i": i, "job_id": d.get("job_id"), "strategy": d.get("strategy"), "status": d.get("status"), "running": d.get("running")})
+    with open('/tmp/orb_v7_validation/debug_rr_final.json','w') as f:
+        json.dump(d,f,indent=2)
+    if d.get("job_id") == job_id and not d.get("running") and d.get("status") in ("completed","failed","done"):
+        break
+    time.sleep(2)
+PY
+
+python - <<'PY'
+import json
+d=json.load(open('/tmp/orb_v7_validation/debug_rr_final.json'))
+job_id=open('/tmp/orb_v7_validation/rr_job_id.txt').read().strip()
+assert d.get("job_id")==job_id, f"RR job mismatch: {d.get('job_id')} != {job_id}"
+assert d.get("strategy") in ("range_reversion","rr"), f"RR strategy mismatch: {d.get('strategy')}"
+assert d.get("thresholds_used") is not None, "RR thresholds_used missing"
+assert d.get("session_date_used"), "RR session_date_used missing"
+pc=d.get("prefilter_counts")
+rc=d.get("reject_counts")
+fs=d.get("failure_samples_by_code")
+dfs=((d.get("debug") or {}).get("failure_samples_by_code") or {})
+assert isinstance(pc, dict), "RR prefilter_counts missing"
+assert isinstance(rc, dict), "RR reject_counts missing"
+assert fs is not None or dfs is not None, "RR failure_samples_by_code missing"
+cands=d.get("candidates") or d.get("results") or []
+bad_provider=[]
+bad_math=[]
+for c in cands:
+    if c.get("live_feed") == "sip" and not c.get("provider"):
+        bad_provider.append(c.get("symbol"))
+    accepted = c.get("reject_reason") in (None, "", "accepted")
+    if accepted:
+        e, s, t, rr = c.get("entry"), c.get("stop"), c.get("target"), c.get("rr")
+        if e is None or s is None or t is None or rr is None:
+            bad_math.append({"symbol": c.get("symbol"), "reason": "missing_math", "entry": e, "stop": s, "target": t, "rr": rr})
+        elif not all(isinstance(x, (int, float)) for x in (e, s, t, rr)):
+            bad_math.append({"symbol": c.get("symbol"), "reason": "non_numeric", "entry": e, "stop": s, "target": t, "rr": rr})
+        else:
+            risk=e-s
+            reward=t-e
+            if risk <= 0:
+                bad_math.append({"symbol": c.get("symbol"), "reason": "non_positive_risk", "entry": e, "stop": s, "target": t, "rr": rr})
+            else:
+                calc=reward/risk
+                if calc <= 0 or abs(calc-rr) > 0.05:
+                    bad_math.append({"symbol": c.get("symbol"), "reason": "rr_mismatch", "entry": e, "stop": s, "target": t, "rr": rr, "calc": calc})
+assert not bad_provider, f"RR candidates with sip but null provider: {bad_provider}"
+assert not bad_math, f"RR accepted candidates with bad math: {bad_math}"
+print("RR OK")
+print("RR candidate_count =", len(cands))
+PY
+
+grep -nE "Traceback|ERROR|NameError|KeyError|TypeError|ValueError|exception" "$LOG" | tail -n 200 || true
+
+tar -czf ~/Desktop/orb_v7_validation_bundle.tgz "$OUT" "$LOG"
+echo "Wrote ~/Desktop/orb_v7_validation_bundle.tgz"

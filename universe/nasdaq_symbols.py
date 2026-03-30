@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,52 +17,60 @@ class UniverseConfig:
     ttl_seconds: int = 24 * 60 * 60
 
 
+NASDAQ_LISTING_URLS = [
+    "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+    "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+]
+
+
+def _fetch_text(url: str, timeout: int = 30) -> str:
+    resp = requests.get(
+        url,
+        timeout=timeout,
+        headers={"User-Agent": os.environ.get("ORB_USER_AGENT", "orb-scanner/11.0 (+https://localhost)")},
+    )
+    resp.raise_for_status()
+    return resp.text
+
+
+def _is_primary_common_equity(symbol: str) -> bool:
+    # Keep the live universe clean. Pro scanners usually exclude warrants, rights,
+    # units, preferreds, acquisition vehicles, and other low-signal junk from a
+    # default common-stock scan universe.
+    if not symbol:
+        return False
+    bad_suffixes = (
+        ".U", ".W", ".WS", ".R", ".RT", ".P", ".PR", ".WD", ".WT",
+    )
+    return not any(symbol.endswith(sfx) for sfx in bad_suffixes)
+
+
 def fetch_us_equity_symbols(cfg: UniverseConfig) -> List[str]:
     cache_dir = Path(cfg.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / "us_symbols.txt"
 
-    key = os.getenv("ALPACA_API_KEY") or os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_KEY_ID")
-    secret = os.getenv("ALPACA_SECRET_KEY") or os.getenv("APCA_API_SECRET_KEY") or os.getenv("ALPACA_API_SECRET")
-    if not key or not secret:
-        raise RuntimeError("Missing Alpaca credentials for assets-based universe fetch")
-
-    paper = str(os.getenv("ALPACA_PAPER") or "").strip().lower() in {"1", "true", "yes", "on"}
-    url = ("https://paper-api.alpaca.markets" if paper else "https://api.alpaca.markets") + "/v2/assets"
-    headers = {
-        "APCA-API-KEY-ID": key,
-        "APCA-API-SECRET-KEY": secret,
-        "accept": "application/json",
-        "User-Agent": os.environ.get("ORB_USER_AGENT", "orb-scanner/11.0 (+https://localhost)"),
-    }
-    params = {
-        "status": "active",
-        "asset_class": "us_equity",
-    }
-
-    resp = requests.get(url, headers=headers, params=params, timeout=30)
-    resp.raise_for_status()
-    payload = resp.json()
-    if not isinstance(payload, list):
-        raise RuntimeError(f"Unexpected Alpaca assets response shape: {type(payload).__name__}")
-
     symbols: Set[str] = set()
-    for row in payload:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("status") or "").strip().lower() != "active":
-            continue
-        if not bool(row.get("tradable")):
-            continue
-        if str(row.get("exchange") or "").strip().upper() == "OTC":
-            continue
-        sym = to_provider_symbol(str(row.get("symbol") or ""))
-        if sym:
+
+    for url in NASDAQ_LISTING_URLS:
+        payload = _fetch_text(url)
+        rows = csv.DictReader(payload.splitlines(), delimiter="|")
+        for row in rows:
+            raw_symbol = str(row.get("Symbol") or row.get("ACT Symbol") or "").strip().upper()
+            test_issue = str(row.get("Test Issue") or "").strip().upper()
+            etf_flag = str(row.get("ETF") or "").strip().upper()
+            if not raw_symbol or test_issue == "Y":
+                continue
+            sym = to_provider_symbol(raw_symbol)
+            if not sym or not _is_primary_common_equity(sym):
+                continue
+            # keep ETFs; top scanners include them by default
+            _ = etf_flag
             symbols.add(sym)
 
     out = sorted(symbols)
     if not out:
-        raise RuntimeError("Alpaca assets universe returned 0 active tradable symbols")
+        raise RuntimeError("NASDAQ symbol directory returned 0 symbols")
 
     tmp = cache_file.with_suffix(".tmp")
     tmp.write_text("\n".join(out), encoding="utf-8")
@@ -71,18 +80,16 @@ def fetch_us_equity_symbols(cfg: UniverseConfig) -> List[str]:
 
 # Backwards-compatible aliases (older scripts/tests)
 def nasdaq_symbols(*, include_non_common: bool = False, cache_dir: str = "cache", ttl_seconds: int = 24*60*60) -> List[str]:
-    """Return a live Alpaca assets-based US equity universe.
-
-    The function name is kept for backwards compatibility with older project code,
-    but the data source is Alpaca assets metadata so the scanner only sees tradable
-    symbols supported by the broker/data provider.
-    """
     cfg = UniverseConfig(cache_dir=cache_dir, ttl_seconds=ttl_seconds)
-    return fetch_us_equity_symbols(cfg)
+    syms = fetch_us_equity_symbols(cfg)
+    if include_non_common:
+        return syms
+    return [s for s in syms if _is_primary_common_equity(s)]
+
 
 def get_nasdaq_symbols(*, include_non_common: bool = False, cache_dir: str = "cache", ttl_seconds: int = 24*60*60) -> List[str]:
-    """Alias for nasdaq_symbols()."""
     return nasdaq_symbols(include_non_common=include_non_common, cache_dir=cache_dir, ttl_seconds=ttl_seconds)
+
 
 __all__ = [
     "fetch_us_equity_symbols",
