@@ -85,6 +85,10 @@ BROKER_ACTIONS_ENABLED = (os.getenv("BROKER_ACTIONS_ENABLED") or "0").strip().lo
 _SINGLE_INSTANCE_LOCK = None
 
 
+class SingleInstanceRunning(RuntimeError):
+    pass
+
+
 def _acquire_single_instance_lock() -> None:
     global _SINGLE_INSTANCE_LOCK
     if (os.getenv("ORB_SINGLE_INSTANCE") or "1").strip().lower() not in {"1", "true", "yes", "on"}:
@@ -99,7 +103,7 @@ def _acquire_single_instance_lock() -> None:
             holder = fh.read().strip()
         except Exception:
             holder = ""
-        raise RuntimeError(f"another_kingdom_instance_running lock={lock_path} holder={holder or 'unknown'}")
+        raise SingleInstanceRunning(f"another_kingdom_instance_running lock={lock_path} holder={holder or 'unknown'}")
     fh.seek(0)
     fh.truncate()
     fh.write(f"pid={os.getpid()} port={os.getenv('ORB_PORT', '8050')} started_at={int(time.time())}\n")
@@ -2158,7 +2162,7 @@ def _scan_worker(jid: str):
 
         _set_job(
             jid,
-            progress={"scanned": 0, "chunks_done": 0, "chunks_total": chunks_total, "offset": start, "end_offset": end},
+            progress={"scanned": 0, "chunks_done": 0, "chunks_total": chunks_total, "offset": start, "end_offset": end, "stage": "prefilter"},
         )
 
         for ci in range(chunks_total):
@@ -2180,6 +2184,7 @@ def _scan_worker(jid: str):
                         "current_chunk_size": len(chunk),
                         "chunk_started_at": time.time(),
                         "chunk_timeout_s": chunk_timeout_s,
+                        "stage": "scan_symbols",
                     },
                     updated_at=time.time(),
                 )
@@ -2437,11 +2442,13 @@ def _scan_worker(jid: str):
                 "chunks_total": chunks_total,
                 "offset": start,
                 "end_offset": end,
+                "stage": "done",
             },
             updated_at=time.time(),
         )
         if not _disable_auto_monitor(params):
             try:
+                _set_job(jid, progress={"scanned": scanned, "chunks_done": chunks_total, "chunks_total": chunks_total, "offset": start, "end_offset": end, "stage": "monitor_handoff"}, updated_at=time.time())
                 monitor_top_n = _param_int(params, "monitor_top_n", min(25, max(5, limit)))
                 stream_cache = _ensure_stream(start=True, require=True)
                 monitor_candidates = list(result.get("seed_candidates") or top)
@@ -2494,6 +2501,51 @@ def api_scan_start():
     strategy_norm = str(strategy).strip().lower()
     max_price_for_profile = _param_float(data, "max_price", 30.0)
     orb_scalp_under10 = strategy_norm == "orb" and max_price_for_profile <= 10.0
+    scan_preset = str(data.get("preset", data.get("scan_preset", "auto"))).strip().lower() or "auto"
+
+    # Benchmark-aware presets inspired by top scanner workflows.
+    if scan_preset == "tradeideas":
+        data.setdefault("use_ml", "1")
+        data.setdefault("use_sentiment", "1")
+        data.setdefault("use_catalyst", "1")
+        data.setdefault("min_grade", "B")
+        data.setdefault("min_combined_score", "0.46")
+        data.setdefault("min_rvol", "2.0")
+        data.setdefault("min_today_dollar_vol", "5000000")
+        data.setdefault("orb_min_minutes_after_open", "10")
+    elif scan_preset == "tradingview":
+        data.setdefault("use_ml", "0")
+        data.setdefault("use_sentiment", "0")
+        data.setdefault("use_catalyst", "0")
+        data.setdefault("min_grade", "C")
+        data.setdefault("min_combined_enabled", "0")
+        data.setdefault("min_rvol", "1.2")
+        data.setdefault("min_today_dollar_vol", "1500000")
+    elif scan_preset == "trendspider":
+        data.setdefault("use_ml", "1")
+        data.setdefault("use_sentiment", "1")
+        data.setdefault("use_catalyst", "1")
+        data.setdefault("min_grade", "B")
+        data.setdefault("min_combined_score", "0.44")
+        data.setdefault("no_chop_enabled", "1")
+        data.setdefault("min_vwap_enabled", "1")
+        data.setdefault("min_pct_over_vwap", "0.6")
+    elif scan_preset == "finviz":
+        data.setdefault("use_ml", "0")
+        data.setdefault("use_sentiment", "0")
+        data.setdefault("use_catalyst", "0")
+        data.setdefault("min_grade", "C")
+        data.setdefault("min_combined_enabled", "0")
+        data.setdefault("min_today_dollar_vol", "2000000")
+        data.setdefault("min_avg20_dollar_vol", "1500000")
+    elif scan_preset == "benzinga":
+        data.setdefault("use_ml", "1")
+        data.setdefault("use_sentiment", "1")
+        data.setdefault("use_catalyst", "1")
+        data.setdefault("min_grade", "B")
+        data.setdefault("min_combined_score", "0.42")
+        data.setdefault("min_today_dollar_vol", "3000000")
+        data.setdefault("min_rvol", "1.6")
 
     # Trade-facing scan defaults should be quality-first unless explicitly overridden.
     # These gates can still be turned off by passing 0/false, but the default live scan
@@ -2527,6 +2579,10 @@ def api_scan_start():
     thresholds_used = {
         "strategy": strategy,
         "exec_style": exec_style,
+        "scan_mode": "orb",
+        "trade_style": exec_style,
+        "top_tool_profile": True,
+        "scan_preset": scan_preset,
         "offset": offset,
         "max_symbols": max_symbols,
         "limit": limit,
@@ -3311,8 +3367,17 @@ def api_position_chart():
             levels["r3"] = float(entry) - 3.0 * risk_per_share
     try:
         first_5 = intraday.iloc[:5]
-        levels["or_high"] = float(_col(first_5, 'High', 'high').astype(float).max())
-        levels["or_low"] = float(_col(first_5, 'Low', 'low').astype(float).min())
+        if len(first_5) == 5:
+            idx = _pd.DatetimeIndex(first_5.index)
+            if idx.tz is None:
+                idx = idx.tz_localize(_ET)
+            else:
+                idx = idx.tz_convert(_ET)
+            expected_open = idx[0].normalize() + _pd.Timedelta(hours=9, minutes=30)
+            expected_window = _pd.date_range(expected_open, periods=5, freq="min", tz=_ET)
+            if all(idx[i] == expected_window[i] for i in range(5)):
+                levels["or_high"] = float(_col(first_5, 'High', 'high').astype(float).max())
+                levels["or_low"] = float(_col(first_5, 'Low', 'low').astype(float).min())
     except Exception:
         pass
 
@@ -3428,6 +3493,17 @@ def api_scan_status():
             next_offset = None
 
         # Return a rich result payload so the UI can display real scan counts even when zero candidates.
+        reject_counts = result.get("reject_counts") or {}
+        top_rejection_reasons = []
+        try:
+            if isinstance(reject_counts, dict):
+                top_rejection_reasons = sorted(
+                    ((str(k), int(v)) for k, v in reject_counts.items() if v is not None),
+                    key=lambda kv: kv[1],
+                    reverse=True,
+                )[:5]
+        except Exception:
+            top_rejection_reasons = []
         summary = {
             "count": int(result.get("count") or 0),
             "scanned": int(result.get("scanned") or 0),
@@ -3444,7 +3520,8 @@ def api_scan_status():
             "prefilter_counts": result.get("prefilter_counts") or {},
             "prefilter_samples": result.get("prefilter_samples") or [],
             "thresholds_used": result.get("thresholds_used") or {},
-            "reject_counts": result.get("reject_counts") or {},
+            "reject_counts": reject_counts,
+            "top_rejection_reasons": top_rejection_reasons,
             "data_failures": result.get("data_failures") or {},
             "monitor_id": result.get("monitor_id"),
             "monitor_error": result.get("monitor_error"),
@@ -3977,8 +4054,14 @@ def api_monitor_status():
 
 if __name__ == "__main__":
     import os
+    import sys
 
-    _acquire_single_instance_lock()
+    try:
+        _acquire_single_instance_lock()
+    except SingleInstanceRunning as e:
+        sys.stderr.write(f"{e}\n")
+        sys.stderr.flush()
+        raise SystemExit(0)
 
     host = os.getenv("ORB_HOST", "127.0.0.1")
     port = int(os.getenv("ORB_PORT", "8050"))

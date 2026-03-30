@@ -2132,6 +2132,12 @@ def _apply_orb_gate_state(c: Candidate, *, score_parts: dict[str, float | str | 
         'confidence_score': score_parts['confidence_score'],
         'confidence_grade': c.confidence_grade,
         'gate_passes': c.gate_passes,
+        'rank_why': list(dict.fromkeys([
+            *(discovery_reasons or []),
+            *(trade_ready_reasons or []),
+            *(['tradable_now'] if bool(c.tradable_now) else []),
+            *(['orb_retest_ready'] if bool(c.orb_retest_ready) else []),
+        ]))[:6],
     }
     return bool(discovery_ok), list(discovery_reasons or []), bool(trade_ready_ok), list(trade_ready_reasons or [])
 
@@ -3267,6 +3273,11 @@ def scan_range_reversion_symbols(
             "rr_touch_age_min": round(float(rr_touch_age_min), 2),
             "rr_chase_r": round(float(rr_chase_r), 4),
             "gate_passes": c.gate_passes,
+            "rank_why": list(dict.fromkeys([
+                *(gate_reasons or []),
+                *(["rr_actionable_now"] if bool(c.rr_actionable_now) else []),
+                *(["recent_touch"] if rr_touch_age_min is not None and float(rr_touch_age_min) <= 15.0 else []),
+            ]))[:6],
         }
 
         if c.gate_passes:

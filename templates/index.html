@@ -1542,6 +1542,7 @@ if (adj && adj.chaseR !== null){
 }
 const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons.slice(0,3) : [];
 const seedReasons = Array.isArray(c.monitor_seed_reasons) ? c.monitor_seed_reasons.slice(0,3) : [];
+const rankWhy = Array.isArray(c?.score_breakdown?.rank_why) ? c.score_breakdown.rank_why.slice(0,4) : [];
 const qualityParts = [];
 if (gradePill) qualityParts.push(gradePill);
 if (mlNum !== null) qualityParts.push(`<span class="tag">ML <b>${num(mlNum,3)}</b></span>`);
@@ -1549,6 +1550,7 @@ if (scoreNum !== null) qualityParts.push(`<span class="tag">Combo <b>${num(score
 if (adj && adj.chaseR !== null) qualityParts.push(`<span class="tag">Chase <b>${fmtR(adj.chaseR)}</b></span>`);
 if (gateReasons.length) qualityParts.push(`<span class="tag">Fail: <b>${escapeHtml(gateReasons.join(', '))}</b></span>`);
 else if (seedReasons.length) qualityParts.push(`<span class="tag">Seed: <b>${escapeHtml(seedReasons.join(', '))}</b></span>`);
+if (rankWhy.length) qualityParts.push(`<span class="tag">Why: <b>${escapeHtml(rankWhy.join(', '))}</b></span>`);
 const qualityLine = qualityParts.length ? `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${qualityParts.join('')}</div>` : '';
 
 const notesParts = [];
@@ -2511,6 +2513,7 @@ function renderLastRun(summary){
     });
 
     const thresholdParts = [
+      th.scan_preset != null ? `<span class="tag">preset <b>${esc(String(th.scan_preset))}</b></span>` : "",
       th.strategy != null ? `<span class="tag">strategy <b>${esc(String(th.strategy))}</b></span>` : "",
       th.exec_style != null ? `<span class="tag">exec <b>${esc(String(th.exec_style))}</b></span>` : "",
       th.min_price != null ? `<span class="tag">min $ <b>${Number(th.min_price).toLocaleString()}</b></span>` : "",
@@ -3003,8 +3006,14 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     if(bundle && bundle.timeframe !== timeframe){ try{ bundle.chart.remove(); }catch(e){} positionDeskCharts.delete(symbol); bundle = null; }
     if(!bundle){
       const chart = LightweightCharts.createChart(host, {height:360, layout:{background:{type:'solid', color:'#0f0e0b'}, textColor:'#e7e2d6'}, grid:{vertLines:{color:'rgba(255,255,255,0.05)'}, horzLines:{color:'rgba(255,255,255,0.05)'}}, rightPriceScale:{borderColor:'rgba(255,255,255,0.12)'}, timeScale:{borderColor:'rgba(255,255,255,0.12)', timeVisible:true, secondsVisible:false}, crosshair:{mode:1}});
-      const candle = chart.addCandlestickSeries({upColor:'#22c55e', downColor:'#ef4444', wickUpColor:'#22c55e', wickDownColor:'#ef4444', borderVisible:false});
-      const mk=(color,width=2)=>chart.addLineSeries({color,lineWidth:width, priceLineVisible:false, lastValueVisible:false});
+      const addSeries = (kind, opts) => {
+        if (typeof chart.addSeries === 'function' && LightweightCharts?.[kind]) return chart.addSeries(LightweightCharts[kind], opts);
+        if (kind === 'CandlestickSeries' && typeof chart.addCandlestickSeries === 'function') return chart.addCandlestickSeries(opts);
+        if (kind === 'LineSeries' && typeof chart.addLineSeries === 'function') return chart.addLineSeries(opts);
+        throw new Error('lightweight_charts_api_unsupported');
+      };
+      const candle = addSeries('CandlestickSeries', {upColor:'#22c55e', downColor:'#ef4444', wickUpColor:'#22c55e', wickDownColor:'#ef4444', borderVisible:false});
+      const mk=(color,width=2)=>addSeries('LineSeries', {color,lineWidth:width, priceLineVisible:false, lastValueVisible:false});
       bundle = {chart, candle, lines:{vwap:mk('#facc15',2), ema9:mk('#4ade80',2), ema20:mk('#60a5fa',2), bb_upper:mk('rgba(203,213,225,0.65)',1), bb_mid:mk('rgba(148,163,184,0.45)',1), bb_lower:mk('rgba(203,213,225,0.65)',1)}, timeframe, priceLines:[]};
       positionDeskCharts.set(symbol, bundle);
     }
@@ -4003,13 +4012,14 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const reasons = Array.isArray(a.reasons) ? a.reasons.slice(0,4).join(' • ') : '';
       const flags = Array.isArray(a.flags) ? a.flags.slice(0,4).join(' • ') : '';
       const stateTxt = `${esc2(a.from_state || '—')} → ${esc2(a.to_state || '—')}`;
+      const severity = String(a.to_state || '').toLowerCase() === 'triggered' ? 'badge-green' : (String(a.to_state || '').toLowerCase().includes('ready') ? 'badge-amber' : 'badge-gray');
       return `<div style="padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,0.03);">
-        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-          <div><b>${esc2(a.symbol || '—')}</b> <span class="tag">${esc2(a.playbook || '—')}</span> <span class="tag">${stateTxt}</span></div>
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+          <div><b>${esc2(a.symbol || '—')}</b> <span class="tag">${esc2(a.playbook || '—')}</span> <span class="badge ${severity}">${stateTxt}</span></div>
           <div class="muted">${a.event_ts ? new Date(Number(a.event_ts)*1000).toLocaleTimeString() : ''}</div>
         </div>
         <div class="muted" style="margin-top:4px;">price $${fmt2(a.price,2)} • spread ${fmt2(a.spread_pct,2)}% • chase-R ${fmt2(a.live_chase_r,2)} • catalyst ${fmt2(a.catalyst_score,2)} • context ${fmt2(a.context_score,2)}</div>
-        <div class="muted" style="margin-top:4px;">${esc2(reasons)}${flags ? ` • flags: ${esc2(flags)}` : ''}</div>
+        <div class="muted" style="margin-top:4px;">why: ${esc2(reasons || 'state transition')}${flags ? ` • flags: ${esc2(flags)}` : ''}</div>
       </div>`;
     }).join('');
   };
