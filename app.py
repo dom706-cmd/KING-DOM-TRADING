@@ -185,6 +185,12 @@ def handle_api_errors(e):
     raise e
 from universe.nasdaq_symbols import fetch_us_equity_symbols, UniverseConfig
 from scanner.orb import scan_symbols, ORBConfig
+from scanner.result_view import (
+    build_primary_fallback_view,
+    build_zero_result_diagnostics,
+    candidate_sort_score,
+    select_primary_candidates,
+)
 from core.errors import IntradayDataFailure, TrendContextFailure, EntryNowMLFailure, failure_string
 from providers.alpaca_provider import AlpacaProvider
 from providers.etrade_provider import ETradeProvider
@@ -866,6 +872,12 @@ def _new_job():
                 "failure_samples_by_code": {},
                 "data_failures": {},
                 "shortlisted": 0,
+                "candidates": [],
+                "seed_candidates": [],
+                "primary_candidates": [],
+                "primary_mode": "empty",
+                "primary_message": None,
+                "zero_result_diagnostics": {},
                 "scanned": 0,
                 "chunks": 0,
                 "end_offset": 0,
@@ -919,16 +931,7 @@ def _disable_auto_monitor(params: dict[str, Any] | None = None) -> bool:
     return _is_truthy((params or {}).get("disable_auto_monitor", default_v))
 
 def _candidate_sort_score(c: dict) -> float:
-    if not isinstance(c, dict):
-        return 0.0
-    for k in ("combined_score", "score", "ml_score"):
-        try:
-            v = c.get(k)
-            if v is not None:
-                return float(v)
-        except Exception:
-            pass
-    return 0.0
+    return candidate_sort_score(c)
 
 def _get_scan_candidates_for_monitor(job_id: str) -> list[dict]:
     job = _get_job(job_id)
@@ -2100,6 +2103,7 @@ def _scan_worker(jid: str):
         reject_sum: dict = {}
         data_fail_sum: dict = {}
         all_candidates: list = []
+        all_seed_candidates: list = []
         rejected_candidates_all: list = []
         candidates_total_est = 0
         seed_candidates_total_est = 0
@@ -2293,6 +2297,7 @@ def _scan_worker(jid: str):
 
             scanned += len(chunk)
             all_candidates.extend(out.get("candidates") or [])
+            all_seed_candidates.extend(out.get("seed_candidates") or [])
             for _rej in (out.get("rejected_candidates") or []):
                 if isinstance(_rej, dict) and len(rejected_candidates_all) < max(100, limit * 5):
                     rejected_candidates_all.append(_rej)
@@ -2376,8 +2381,13 @@ def _scan_worker(jid: str):
         except Exception:
             # If something is non-comparable, keep original order (real data only)
             pass
+        try:
+            all_seed_candidates.sort(key=_score, reverse=True)
+        except Exception:
+            pass
 
         top = all_candidates[:limit]
+        top_seed = all_seed_candidates[:limit]
 
         # Ensure candidates are JSON-serializable (Flask jsonify cannot handle dataclass objects).
         def _cand_to_dict(c):
@@ -2399,10 +2409,44 @@ def _scan_worker(jid: str):
                 return {"value": str(c)}
 
         top = [_normalize_target_rr(_cand_to_dict(c)) for c in top]
+        top_seed = [_normalize_target_rr(_cand_to_dict(c)) for c in top_seed]
         for _row in top:
             if isinstance(_row, dict):
                 _row["strategy"] = _row.get("strategy") or params.get("strategy")
                 _row["provider"] = _row.get("provider") or getattr(provider, "name", "alpaca")
+        for _row in top_seed:
+            if isinstance(_row, dict):
+                _row["strategy"] = _row.get("strategy") or params.get("strategy")
+                _row["provider"] = _row.get("provider") or getattr(provider, "name", "alpaca")
+
+        primary_candidates, primary_mode, primary_message = select_primary_candidates(
+            {
+                "candidates": top,
+                "seed_candidates": top_seed,
+                "candidates_total": candidates_total_est,
+                "trade_ready_total": candidates_total_est,
+                "seed_candidates_total": seed_candidates_total_est,
+                "rejected_total": rejected_total_est,
+                "shortlisted": shortlisted_total,
+                "prefilter_counts": prefilter_sum,
+                "reject_counts": reject_sum,
+            },
+            limit=limit,
+        )
+        zero_result_diagnostics = build_zero_result_diagnostics(
+            {
+                "candidates": top,
+                "seed_candidates": top_seed,
+                "candidates_total": candidates_total_est,
+                "trade_ready_total": candidates_total_est,
+                "seed_candidates_total": seed_candidates_total_est,
+                "rejected_total": rejected_total_est,
+                "shortlisted": shortlisted_total,
+                "prefilter_counts": prefilter_sum,
+                "reject_counts": reject_sum,
+            },
+            limit=limit,
+        )
 
         result = {
             "provider": getattr(provider, "name", "alpaca"),
@@ -2413,6 +2457,11 @@ def _scan_worker(jid: str):
             "tradable_now_total": tradable_now_total_est,
             "rejected_total": rejected_total_est,
             "candidates": top,
+            "seed_candidates": top_seed,
+            "primary_candidates": primary_candidates,
+            "primary_mode": primary_mode,
+            "primary_message": primary_message,
+            "zero_result_diagnostics": zero_result_diagnostics,
             "rejected_candidates": rejected_candidates_all[:limit],
             "prefilter_counts": prefilter_sum,
             "prefilter_samples": prefilter_samples,
@@ -2637,6 +2686,12 @@ def api_scan_start():
             "failure_samples_by_code": {},
             "data_failures": {},
             "shortlisted": 0,
+            "candidates": [],
+            "seed_candidates": [],
+            "primary_candidates": [],
+            "primary_mode": "empty",
+            "primary_message": None,
+            "zero_result_diagnostics": {},
             "scanned": 0,
             "chunks": 0,
             "end_offset": offset + max_symbols,
@@ -2905,6 +2960,27 @@ def _apply_live_state_to_candidates(rows: list[dict[str, Any]] | None) -> list[d
     symbols = [str(r.get("symbol") or "").upper() for r in prepared if str(r.get("symbol") or "").strip()]
     live_map = _batch_snapshot_live_states(symbols)
     return [_apply_live_state_to_candidate(row, live=live_map.get(str(row.get("symbol") or "").upper())) for row in prepared]
+
+
+def _scan_result_view_payload(result: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(result or {})
+    view_limit = max(
+        1,
+        _safe_int(
+            (payload.get("thresholds_used") or {}).get("limit", payload.get("count", 25)),
+            25,
+        ),
+    )
+    view = build_primary_fallback_view(payload, limit=view_limit)
+    payload["primary_candidates"] = _apply_live_state_to_candidates(view.get("primary_candidates") or [])
+    payload["primary_mode"] = view.get("primary_mode")
+    payload["primary_message"] = view.get("primary_message")
+    payload["trade_ready_candidates"] = _apply_live_state_to_candidates(view.get("trade_ready_candidates") or [])
+    payload["trade_ready_candidate_count"] = int(view.get("trade_ready_candidate_count") or 0)
+    payload["fallback_candidates"] = _apply_live_state_to_candidates(view.get("fallback_candidates") or [])
+    payload["fallback_candidate_count"] = int(view.get("fallback_candidate_count") or 0)
+    payload["zero_result_diagnostics"] = view.get("zero_result_diagnostics") or build_zero_result_diagnostics(payload)
+    return payload
 
 
 def _normalize_target_rr(row: dict[str, Any]) -> dict[str, Any]:
@@ -3479,13 +3555,14 @@ def api_scan_status():
     status = job.get("status")
     progress = job.get("progress")
     err = job.get("error")
-    result = job.get("result") if status == "done" else None
+    result = job.get("result") or job.get("partial_result") or {}
     summary = None
     next_offset = None
     if result:
+        result_view = _scan_result_view_payload(result)
         try:
-            end_offset = int(result.get("end_offset") or 0)
-            universe_size = int(result.get("universe_size") or 0)
+            end_offset = int(result_view.get("end_offset") or 0)
+            universe_size = int(result_view.get("universe_size") or 0)
             next_offset = end_offset
             if universe_size > 0 and next_offset >= universe_size:
                 next_offset = 0
@@ -3493,7 +3570,7 @@ def api_scan_status():
             next_offset = None
 
         # Return a rich result payload so the UI can display real scan counts even when zero candidates.
-        reject_counts = result.get("reject_counts") or {}
+        reject_counts = result_view.get("reject_counts") or {}
         top_rejection_reasons = []
         try:
             if isinstance(reject_counts, dict):
@@ -3505,37 +3582,64 @@ def api_scan_status():
         except Exception:
             top_rejection_reasons = []
         summary = {
-            "count": int(result.get("count") or 0),
-            "scanned": int(result.get("scanned") or 0),
-            "chunks": int(result.get("chunks") or 0),
-            "end_offset": int(result.get("end_offset") or 0),
-            "universe_size": int(result.get("universe_size") or 0),
-            "shortlisted": int(result.get("shortlisted") or 0),
-            "candidates_total": int(result.get("candidates_total") or 0),
-            "seed_candidates_total": int(result.get("seed_candidates_total") or 0),
-            "tradable_now_total": int(result.get("tradable_now_total") or 0),
-            "rejected_total": int(result.get("rejected_total") or 0),
-            "mode": result.get("mode"),
-            "provider": result.get("provider"),
-            "prefilter_counts": result.get("prefilter_counts") or {},
-            "prefilter_samples": result.get("prefilter_samples") or [],
-            "thresholds_used": result.get("thresholds_used") or {},
+            "count": int(result_view.get("count") or 0),
+            "scanned": int(result_view.get("scanned") or 0),
+            "chunks": int(result_view.get("chunks") or 0),
+            "end_offset": int(result_view.get("end_offset") or 0),
+            "universe_size": int(result_view.get("universe_size") or 0),
+            "shortlisted": int(result_view.get("shortlisted") or 0),
+            "candidates_total": int(result_view.get("candidates_total") or 0),
+            "seed_candidates_total": int(result_view.get("seed_candidates_total") or 0),
+            "tradable_now_total": int(result_view.get("tradable_now_total") or 0),
+            "rejected_total": int(result_view.get("rejected_total") or 0),
+            "mode": result_view.get("mode"),
+            "provider": result_view.get("provider"),
+            "prefilter_counts": result_view.get("prefilter_counts") or {},
+            "prefilter_samples": result_view.get("prefilter_samples") or [],
+            "thresholds_used": result_view.get("thresholds_used") or {},
             "reject_counts": reject_counts,
             "top_rejection_reasons": top_rejection_reasons,
-            "data_failures": result.get("data_failures") or {},
-            "monitor_id": result.get("monitor_id"),
-            "monitor_error": result.get("monitor_error"),
-            "seed_symbols": result.get("seed_symbols") or [],
+            "data_failures": result_view.get("data_failures") or {},
+            "monitor_id": result_view.get("monitor_id"),
+            "monitor_error": result_view.get("monitor_error"),
+            "seed_symbols": result_view.get("seed_symbols") or [],
             # include candidates so the browser can render without a full page reload
-            "candidates": _apply_live_state_to_candidates(result.get("candidates") or []),
-            "seed_candidates": _apply_live_state_to_candidates(result.get("seed_candidates") or []),
-            "rejected_candidates": result.get("rejected_candidates") or [],
+            "candidates": _apply_live_state_to_candidates(result_view.get("candidates") or []),
+            "seed_candidates": _apply_live_state_to_candidates(result_view.get("seed_candidates") or []),
+            "primary_candidates": result_view.get("primary_candidates") or [],
+            "primary_mode": result_view.get("primary_mode"),
+            "primary_message": result_view.get("primary_message"),
+            "trade_ready_candidates": result_view.get("trade_ready_candidates") or [],
+            "trade_ready_candidate_count": int(result_view.get("trade_ready_candidate_count") or 0),
+            "fallback_candidates": result_view.get("fallback_candidates") or [],
+            "fallback_candidate_count": int(result_view.get("fallback_candidate_count") or 0),
+            "zero_result_diagnostics": result_view.get("zero_result_diagnostics") or build_zero_result_diagnostics(result_view),
+            "rejected_candidates": result_view.get("rejected_candidates") or [],
         }
     if summary is not None and _is_truthy(request.args.get("debug", "")):
-        summary["debug"] = result.get("debug") or {}
+        summary["debug"] = result_view.get("debug") or {}
     return jsonify(ok=True, job_id=jid, status=status, progress=progress, error=err, result=summary, next_offset=next_offset)
 
 
+
+
+@app.get('/api/debug_job_raw')
+def api_debug_job_raw():
+    jid = (request.args.get('job_id') or '').strip()
+    if not jid:
+        return jsonify(ok=False, error='missing_job_id'), 400
+    job = _get_job(jid)
+    if not job:
+        return jsonify(ok=False, error='unknown_job_id', job_id=jid), 404
+    result = dict(job.get('result') or job.get('partial_result') or {})
+    rebuilt = _scan_result_view_payload(result)
+    return jsonify(
+        ok=True,
+        job_id=jid,
+        status=job.get('status'),
+        raw_result=result,
+        rebuilt_result=rebuilt,
+    )
 
 
 @app.get("/api/debug_last_scan")
@@ -3543,7 +3647,7 @@ def api_debug_last_scan():
     req_jid = (request.args.get("job_id") or "").strip()
 
     def _job_payload(jid: str, job: dict[str, Any]) -> dict[str, Any]:
-        result = dict((job or {}).get("result") or (job or {}).get("partial_result") or {})
+        result = _scan_result_view_payload((job or {}).get("result") or (job or {}).get("partial_result") or {})
         params = dict((job or {}).get("params") or {})
         candidates = result.get("candidates") or result.get("results") or []
         enriched_candidates = _apply_live_state_to_candidates(candidates)
@@ -3553,6 +3657,11 @@ def api_debug_last_scan():
         seed_candidates = list(result.get("seed_candidates") or [])
         if seed_candidates:
             result["seed_candidates"] = _apply_live_state_to_candidates(seed_candidates)
+
+        result["primary_candidates"] = _apply_live_state_to_candidates(result.get("primary_candidates") or [])
+        result["trade_ready_candidates"] = _apply_live_state_to_candidates(result.get("trade_ready_candidates") or [])
+        result["fallback_candidates"] = _apply_live_state_to_candidates(result.get("fallback_candidates") or [])
+        result["zero_result_diagnostics"] = result.get("zero_result_diagnostics") or build_zero_result_diagnostics(result)
 
         rejected_candidates = list(result.get("rejected_candidates") or [])
         if rejected_candidates:
@@ -3682,6 +3791,15 @@ def api_debug_last_scan():
             "data_failures": result.get("data_failures") or {},
             "debug": result.get("debug") or {},
             "candidates": enriched_candidates,
+            "seed_candidates": result.get("seed_candidates") or [],
+            "primary_candidates": result.get("primary_candidates") or [],
+            "primary_mode": result.get("primary_mode"),
+            "primary_message": result.get("primary_message"),
+            "trade_ready_candidates": result.get("trade_ready_candidates") or [],
+            "trade_ready_candidate_count": int(result.get("trade_ready_candidate_count") or 0),
+            "fallback_candidates": result.get("fallback_candidates") or [],
+            "fallback_candidate_count": int(result.get("fallback_candidate_count") or 0),
+            "zero_result_diagnostics": result.get("zero_result_diagnostics") or {},
             "rejected_candidates": rejected_candidates,
             "result": result,
         }

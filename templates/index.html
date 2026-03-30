@@ -1916,6 +1916,8 @@ const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons.sli
 const seedReasons = Array.isArray(c.monitor_seed_reasons) ? c.monitor_seed_reasons.slice(0,3) : [];
 const rankWhy = Array.isArray(c?.score_breakdown?.rank_why) ? c.score_breakdown.rank_why.slice(0,4) : [];
 const qualityParts = [];
+if (c.gate_passes) qualityParts.push(`<span class="tag">State: <b>trade-ready</b></span>`);
+else if (c.monitor_seed) qualityParts.push(`<span class="tag">State: <b>watch seed</b></span>`);
 if (gradePill) qualityParts.push(gradePill);
 if (mlNum !== null) qualityParts.push(`<span class="tag">ML <b>${num(mlNum,3)}</b></span>`);
 if (scoreNum !== null) qualityParts.push(`<span class="tag">Combo <b>${num(scoreNum,3)}</b></span>`);
@@ -2866,6 +2868,9 @@ function renderLastRun(summary){
 
     const rejected = Array.isArray(summary.rejected_candidates) ? summary.rejected_candidates : [];
     const seedCandidates = Array.isArray(summary.seed_candidates) ? summary.seed_candidates : [];
+    const primaryMode = String(summary.primary_mode || '');
+    const zeroDiag = summary.zero_result_diagnostics || {};
+    const fallbackActive = primaryMode === 'monitor_watch' || !!zeroDiag.monitor_fallback_active;
     const rejectedPreview = rejected.slice(0, 8).map((c) => {
       const sym = esc(String(c.symbol || '—'));
       const reasons = [];
@@ -2907,12 +2912,13 @@ function renderLastRun(summary){
       <div style="display:flex; flex-direction:column; gap:8px;">
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
           <span class="tag">Mode</span>
-          <span class="badge ${strictLive ? 'badge-green' : 'badge-gray'}">${strictLive ? 'STRICT LIVE' : 'LOOSE / DISCOVERY'}</span>
+          <span class="badge ${fallbackActive ? 'badge-amber' : (strictLive ? 'badge-green' : 'badge-gray')}">${fallbackActive ? 'MONITOR / WATCH FALLBACK' : (strictLive ? 'STRICT LIVE' : 'LOOSE / DISCOVERY')}</span>
           <span class="tag">Provider <b>${esc(String(summary.provider || '—'))}</b></span>
           <span class="tag">Trade-ready <b>${Number(summary.tradable_now_total ?? count)}</b></span>
           <span class="tag">Rejected <b>${Number(summary.rejected_total ?? rejected.length ?? 0)}</b></span>
           <span class="tag">Seed pool <b>${Number(summary.seed_candidates_total ?? 0)}</b></span>
         </div>
+        ${summary.primary_message ? `<div><b>Primary view:</b> ${esc(String(summary.primary_message))}</div>` : ''}
         <div>
           Last run: <b>${scanned}</b> scanned • <b>${chunks}</b> chunk(s) • end offset <b>${endOff}</b> • candidates <b>${count}</b>
         </div>
@@ -2974,13 +2980,13 @@ function renderLastRun(summary){
     return c;
   }
 
-  async function fetchCandidatesForJob(jobId){
+async function fetchCandidatesForJob(jobId){
     if (!jobId) return [];
     try {
       const r = await fetch(`/api/debug_last_scan?job_id=${encodeURIComponent(jobId)}`, {cache:'no-store'});
       if (!r.ok) return [];
       const j = await r.json();
-      const arr = j.candidates || j.results || (j.result && (j.result.candidates || j.result.results)) || [];
+      const arr = j.primary_candidates || j.candidates || j.results || (j.result && (j.result.primary_candidates || j.result.candidates || j.result.results)) || [];
       return Array.isArray(arr) ? arr.map(normalizeScanCandidate).filter(c => c.symbol) : [];
     } catch (e) {
       return [];
@@ -3074,18 +3080,25 @@ async function poll(jobId) {
     }
 
     // "count" has historically meant different things in different code paths.
-    const foundCount = (
+    const strictCount = (
       (typeof resSummary.candidates_total === 'number') ? resSummary.candidates_total :
       (Array.isArray(resSummary.candidates) ? resSummary.candidates.length :
         (typeof resSummary.count === 'number' ? resSummary.count : 0))
     );
-    const found = foundCount > 0;
+    const primaryCount = (
+      (Array.isArray(resSummary.primary_candidates) && resSummary.primary_candidates.length) ? resSummary.primary_candidates.length :
+      ((typeof resSummary.seed_candidates_total === 'number' && strictCount <= 0) ? resSummary.seed_candidates_total : strictCount)
+    );
+    const found = primaryCount > 0;
+    const fallbackMode = String(resSummary.primary_mode || '') === 'monitor_watch';
 
     // Hydrate real candidate rows for the exact finished job.
     let runCandidates = [];
-    if (Array.isArray(resSummary.candidates) && resSummary.candidates.length){
+    if (Array.isArray(resSummary.primary_candidates) && resSummary.primary_candidates.length){
+      runCandidates = resSummary.primary_candidates.map(normalizeScanCandidate).filter(c => c.symbol);
+    } else if (Array.isArray(resSummary.candidates) && resSummary.candidates.length){
       runCandidates = resSummary.candidates.map(normalizeScanCandidate).filter(c => c.symbol);
-    } else if (foundCount > 0) {
+    } else if (found) {
       runCandidates = await fetchCandidatesForJob(jobId);
     }
     if (runCandidates.length){
@@ -3129,7 +3142,7 @@ async function poll(jobId) {
     const finalEl = document.getElementById('finalCandidates');
     if (finalEl) {
       const cachedNow = (window.loadCandidatesCache || (()=>[]))();
-      const visibleCount = runCandidates.length || foundCount || cachedNow.length || 0;
+      const visibleCount = runCandidates.length || primaryCount || cachedNow.length || 0;
       finalEl.textContent = String(visibleCount);
     }
     const nextOff = (typeof j.next_offset === 'number') ? j.next_offset : (p.end_offset || 0);
@@ -3143,7 +3156,8 @@ async function poll(jobId) {
       if (info) info.textContent = `Next auto-scan in 60s (offset → ${nextOff}).`;
       if (found) {
         const cachedNow = (window.loadCandidatesCache || (()=>[]))();
-        setStatus(`Done. Found ${foundCount} candidate(s) in this run (saved total: ${cachedNow.length}). Will continue at offset ${nextOff}…`);
+        if (fallbackMode && strictCount <= 0) setStatus(`Done. No trade-ready names passed. Showing ${primaryCount} monitor/watch seed(s). Will continue at offset ${nextOff}…`);
+        else setStatus(`Done. Found ${strictCount} candidate(s) in this run (saved total: ${cachedNow.length}). Will continue at offset ${nextOff}…`);
       } else {
         setStatus(`Done. No candidates found. Will continue at offset ${nextOff}…`);
       }
@@ -3156,7 +3170,8 @@ async function poll(jobId) {
       return true;
     }
 
-    setStatus(`Done.`);
+    if (fallbackMode && strictCount <= 0 && primaryCount > 0) setStatus(`Done. No trade-ready names passed. Showing ${primaryCount} monitor/watch seed(s).`);
+    else setStatus(`Done.`);
     return true;
   }
 
