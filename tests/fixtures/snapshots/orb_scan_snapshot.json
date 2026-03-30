@@ -1,0 +1,48 @@
+{
+  "count": 1,
+  "candidates_total": 1,
+  "seed_candidates_total": 1,
+  "tradable_now_total": 0,
+  "rejected_total": 1,
+  "scan_date": "2026-03-10",
+  "prefilter_counts": {
+    "normalized_skipped": 0,
+    "daily_empty": 0,
+    "filtered_price": 0,
+    "filtered_avg20_dollar_vol": 1,
+    "avg20_calc_missing": 0,
+    "avg20_below_threshold": 1,
+    "daily_ok": 1
+  },
+  "reject_counts_nonzero": {
+    "filtered_avg20_dollar_vol": 1,
+    "avg20_below_threshold": 1,
+    "daily_ok": 1,
+    "chase_too_high": 1,
+    "orb_retest_too_extended": 1
+  },
+  "top_candidate": {
+    "symbol": "ABCD",
+    "best_side": "long",
+    "entry": 12.1121,
+    "stop": 11.8881,
+    "target_2r": 12.5601,
+    "target_3r": 12.7841,
+    "last_price": 12.54,
+    "rvol": 7.671429,
+    "today_dollar_vol": 33669900.0,
+    "avg20_dollar_vol": 4305000.0,
+    "combined_score": 0.5776,
+    "confidence_score": 86.7,
+    "confidence_grade": "A+",
+    "gate_passes": false,
+    "gate_fail_reasons": [
+      "chase_too_high",
+      "orb_retest_too_extended"
+    ],
+    "orb_retest_ready": false,
+    "orb_retest_distance_r": 1.910268,
+    "monitor_seed": true,
+    "tradable_now": false
+  }
+}

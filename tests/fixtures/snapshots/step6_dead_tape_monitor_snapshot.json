@@ -1,0 +1,22 @@
+{
+  "ready_count": 0,
+  "live_triggered_count": 0,
+  "top_live_symbol": {
+    "symbol": null,
+    "live_score": null,
+    "state": null
+  },
+  "symbol": "ABCD",
+  "monitor_state": "watch",
+  "tape_live": false,
+  "tape_live_reason": "stale_timing",
+  "spread_pct": 6.451613,
+  "live_score": -19.4224,
+  "live_confidence_grade": "D",
+  "live_confidence_score": 35.5776,
+  "live_confidence_reasons": [
+    "vwap_aligned_long"
+  ],
+  "replay_ok": true,
+  "replay_symbol_count": 1
+}

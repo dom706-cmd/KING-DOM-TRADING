@@ -3837,6 +3837,7 @@ def index():
         broker_snapshot=broker_snapshot,
         context_snapshot=_CONTEXT_ENGINE.snapshot(),
         recent_alerts=_RUNTIME_STORE.recent_alerts(limit=25),
+        recent_news=_RUNTIME_STORE.recent_news(limit=25),
         prefilter_counts=prefilter_counts,
         reject_counts=reject_counts,
         shortlisted=shortlisted,
@@ -3970,6 +3971,41 @@ def provider_info():
         "provider_name": getattr(_ALPACA_PROVIDER, "name", None),
     })
 
+
+
+@app.get('/api/scan_presets')
+def api_scan_presets():
+    return jsonify(ok=True, presets=_RUNTIME_STORE.recent_scan_presets(limit=200))
+
+
+@app.post('/api/scan_presets/save')
+def api_scan_presets_save():
+    data = request.get_json(silent=True) or request.form.to_dict(flat=True) or {}
+    name = str(data.get('name') or '').strip()
+    payload = data.get('payload') or {}
+    if not name:
+        return jsonify(ok=False, error='missing_name'), 400
+    if not isinstance(payload, dict):
+        return jsonify(ok=False, error='invalid_payload'), 400
+    _RUNTIME_STORE.save_scan_preset(name, payload)
+    return jsonify(ok=True, name=name)
+
+
+@app.post('/api/scan_presets/delete')
+def api_scan_presets_delete():
+    data = request.get_json(silent=True) or request.form.to_dict(flat=True) or {}
+    name = str(data.get('name') or '').strip()
+    if not name:
+        return jsonify(ok=False, error='missing_name'), 400
+    deleted = _RUNTIME_STORE.delete_scan_preset(name)
+    return jsonify(ok=True, deleted=bool(deleted), name=name)
+
+
+@app.get('/api/news_recent')
+def api_news_recent():
+    symbol = str(request.args.get('symbol') or '').strip().upper() or None
+    limit = _safe_int(request.args.get('limit', 25), 25)
+    return jsonify(ok=True, items=_RUNTIME_STORE.recent_news(symbol=symbol, limit=limit))
 
 
 @app.get("/api/watchlist_snapshot")

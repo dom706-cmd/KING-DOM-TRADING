@@ -1245,6 +1245,7 @@ th {
 <script id="orb_broker_snapshot_json" type="application/json">{{ (broker_snapshot or {})|tojson }}</script>
 <script id="orb_context_json" type="application/json">{{ (context_snapshot or {})|tojson }}</script>
 <script id="orb_recent_alerts_json" type="application/json">{{ (recent_alerts or [])|tojson }}</script>
+<script id="orb_recent_news_json" type="application/json">{{ (recent_news or [])|tojson }}</script>
 <script>
 // Prevent early boot failure before the later scan-status script defines the real function.
 window.refreshVisibleQuotes = window.refreshVisibleQuotes || function refreshVisibleQuotesStub(){};
@@ -4265,10 +4266,14 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       if (Array.isArray(alertSeed) && alertSeed.length) renderAlertTape(alertSeed);
     } catch(e){}
 
-    function loadSavedPresets(){
-      try { return JSON.parse(localStorage.getItem(SAVED_PRESETS_KEY) || '{}'); } catch(e){ return {}; }
+    async function fetchSavedPresetsServer(){
+      try {
+        const r = await fetch('/api/scan_presets', {cache:'no-store'});
+        if (!r.ok) return [];
+        const j = await r.json();
+        return Array.isArray(j?.presets) ? j.presets : [];
+      } catch(e){ return []; }
     }
-    function saveSavedPresets(obj){ localStorage.setItem(SAVED_PRESETS_KEY, JSON.stringify(obj || {})); }
     function currentFormSnapshot(){
       const form = document.getElementById('scanForm');
       const fd = new FormData(form);
@@ -4287,36 +4292,41 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         else el.value = String(v ?? '');
       });
     }
-    function refreshSavedPresetSelect(){
+    async function refreshSavedPresetSelect(){
       const sel = document.getElementById('savedPresetSelect');
       if (!sel) return;
-      const presets = loadSavedPresets();
-      const names = Object.keys(presets).sort();
-      sel.innerHTML = `<option value="">No saved preset</option>` + names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      const presets = await fetchSavedPresetsServer();
+      sel.innerHTML = `<option value="">No saved preset</option>` + presets.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+      window.__serverPresets = presets;
     }
-    refreshSavedPresetSelect();
+    refreshSavedPresetSelect().catch(()=>{});
 
-    document.getElementById('savePresetBtn')?.addEventListener('click', () => {
+    document.getElementById('savePresetBtn')?.addEventListener('click', async () => {
       const name = window.prompt('Save preset as:');
       if (!name) return;
-      const presets = loadSavedPresets();
-      presets[name] = currentFormSnapshot();
-      saveSavedPresets(presets);
-      refreshSavedPresetSelect();
+      await fetch('/api/scan_presets/save', {
+        method: 'POST',
+        headers: {'content-type':'application/json'},
+        body: JSON.stringify({name, payload: currentFormSnapshot()})
+      });
+      refreshSavedPresetSelect().catch(()=>{});
     });
     document.getElementById('loadSavedPresetBtn')?.addEventListener('click', () => {
       const name = document.getElementById('savedPresetSelect')?.value;
       if (!name) return;
-      const presets = loadSavedPresets();
-      applyFormSnapshot(presets[name]);
+      const presets = Array.isArray(window.__serverPresets) ? window.__serverPresets : [];
+      const hit = presets.find(p => p && p.name === name);
+      if (hit && hit.payload) applyFormSnapshot(hit.payload);
     });
-    document.getElementById('deletePresetBtn')?.addEventListener('click', () => {
+    document.getElementById('deletePresetBtn')?.addEventListener('click', async () => {
       const name = document.getElementById('savedPresetSelect')?.value;
       if (!name) return;
-      const presets = loadSavedPresets();
-      delete presets[name];
-      saveSavedPresets(presets);
-      refreshSavedPresetSelect();
+      await fetch('/api/scan_presets/delete', {
+        method: 'POST',
+        headers: {'content-type':'application/json'},
+        body: JSON.stringify({name})
+      });
+      refreshSavedPresetSelect().catch(()=>{});
     });
     document.getElementById('applyQuickPresetBtn')?.addEventListener('click', () => {
       const val = document.getElementById('quickPresetSelect')?.value || 'auto';
@@ -4353,7 +4363,9 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 
     try {
       const seedCandidates = JSON.parse(document.getElementById('orb_candidates_json')?.textContent || '[]');
-      if (Array.isArray(seedCandidates) && seedCandidates.length) renderNewsCatalystPanel(seedCandidates, []);
+      const seedNews = JSON.parse(document.getElementById('orb_recent_news_json')?.textContent || '[]');
+      if (Array.isArray(seedCandidates) && seedCandidates.length) renderNewsCatalystPanel(seedCandidates, seedNews);
+      else if (Array.isArray(seedNews) && seedNews.length) renderNewsCatalystPanel(seedNews, []);
     } catch(e){}
 
     refreshContextStatus().catch(()=>{});
@@ -4363,6 +4375,7 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         if (document.visibilityState !== 'visible') return;
         refreshContextStatus().catch(()=>{});
         refreshAlertsRecent().catch(()=>{});
+        fetch('/api/news_recent?limit=25', {cache:'no-store'}).then(r=>r.json()).then(j=>{ if (j?.ok) renderNewsCatalystPanel(loadCandidatesCache(), j.items || []); }).catch(()=>{});
         ensureAlertStream();
       }, 10000);
     }

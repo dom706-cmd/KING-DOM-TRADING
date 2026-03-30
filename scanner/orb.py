@@ -2042,13 +2042,37 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
     align_q = _alignment_score(c)
     sent_term = float(sentiment_alpha) * float(c.sentiment_score or 0.0) if c.sentiment_score is not None else 0.0
     cat_term = float(catalyst_alpha) * float(c.catalyst_score or 0.0) if c.catalyst_score is not None else 0.0
+
+    category = 'liquidity'
+    if float(c.catalyst_score or 0.0) >= 0.35 or float(c.sentiment_score or 0.0) >= 0.25:
+        category = 'news'
+    elif (c.best_side or '').lower() == 'short' or bool(c.short_triggered):
+        category = 'reversal'
+    elif float(c.rvol or 0.0) >= 2.0:
+        category = 'momentum'
+
+    weights = {
+        'ml': 0.38,
+        'rule': 0.22,
+        'tape': 0.18,
+        'align': 0.14,
+        'sent': 0.04,
+        'cat': 0.04,
+    }
+    if category == 'news':
+        weights.update({'tape': 0.15, 'align': 0.11, 'sent': 0.10, 'cat': 0.10})
+    elif category == 'momentum':
+        weights.update({'rule': 0.24, 'tape': 0.22, 'align': 0.12, 'sent': 0.02, 'cat': 0.02})
+    elif category == 'reversal':
+        weights.update({'rule': 0.24, 'tape': 0.16, 'align': 0.18, 'sent': 0.02, 'cat': 0.02})
+
     score = (
-        0.38 * ml_base +
-        0.22 * rule_norm +
-        0.18 * tape_q +
-        0.14 * align_q +
-        0.04 * sent_term +
-        0.04 * cat_term
+        weights['ml'] * ml_base +
+        weights['rule'] * rule_norm +
+        weights['tape'] * tape_q +
+        weights['align'] * align_q +
+        weights['sent'] * sent_term +
+        weights['cat'] * cat_term
     )
     c.regime_profile = str(regime_selected)
     c.regime_adjustment = float(round(score - ml_base, 6))
@@ -2079,6 +2103,7 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
         'align_q': round(align_q, 6),
         'sent_term': round(sent_term, 6),
         'cat_term': round(cat_term, 6),
+        'scan_category': category,
         'combined_score': round(float(c.combined_score or 0.0), 6),
         'confidence_score': round(float(c.confidence_score or 0.0), 2),
     }
