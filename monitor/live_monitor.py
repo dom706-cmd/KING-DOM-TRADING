@@ -15,6 +15,7 @@ from providers.base import BarsRequest
 from runtime.stream_market_data import recent_bars_df, latest_trade_payload, latest_quote_payload
 from sentiment.catalyst import CatalystService
 from core.errors import MonitorTradeRefreshFailure, MonitorQuoteRefreshFailure, failure_string
+from core.execution_plan import build_plan_state
 
 ET = ZoneInfo("America/New_York")
 
@@ -334,6 +335,15 @@ class MonitorSymbolState:
     confidence_score: float | None = None
     confidence_grade: str | None = None
     regime_profile: str | None = None
+    p_2r_30m: float | None = None
+    probability_source: str | None = None
+    gate_passes: bool | None = None
+    gate_fail_reasons: list[str] = field(default_factory=list)
+    monitor_seed: bool | None = None
+    monitor_seed_reasons: list[str] = field(default_factory=list)
+    orb_retest_ready: bool | None = None
+    tradable_now: bool | None = None
+    trade_ready_passes: bool | None = None
 
     # catalyst / news
     catalyst_score: float | None = None
@@ -392,6 +402,10 @@ class MonitorSymbolState:
     live_confidence_reasons: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    decision: str = "WAIT"
+    decision_notes: list[str] = field(default_factory=list)
+    decision_hint: str | None = None
+    rejection_reasons: list[str] = field(default_factory=list)
     promoted_by_news: bool = False
     promoted_by_monitor_transition: bool = False
 
@@ -430,6 +444,15 @@ class MonitorSymbolState:
             "confidence_score": self.confidence_score,
             "confidence_grade": self.confidence_grade,
             "regime_profile": self.regime_profile,
+            "p_2r_30m": self.p_2r_30m,
+            "probability_source": self.probability_source,
+            "gate_passes": self.gate_passes,
+            "gate_fail_reasons": list(self.gate_fail_reasons),
+            "monitor_seed": self.monitor_seed,
+            "monitor_seed_reasons": list(self.monitor_seed_reasons),
+            "orb_retest_ready": self.orb_retest_ready,
+            "tradable_now": self.tradable_now,
+            "trade_ready_passes": self.trade_ready_passes,
             "catalyst_score": self.catalyst_score,
             "catalyst_confidence": self.catalyst_confidence,
             "catalyst_article_count": self.catalyst_article_count,
@@ -470,6 +493,38 @@ class MonitorSymbolState:
             "live_confidence_reasons": list(self.live_confidence_reasons),
             "risk_flags": list(self.risk_flags),
             "diagnostics": dict(self.diagnostics),
+            "plan_state": self.decision,
+            "decision": self.decision,
+            "decision_notes": list(self.decision_notes),
+            "decision_hint": self.decision_hint,
+            "rejection_reasons": list(self.rejection_reasons),
+            "execution_plan": {
+                "side": self.best_side,
+                "entry": self.entry,
+                "current_price": self.price,
+                "stop_loss": self.stop_loss,
+                "target_2r": self.target_2r,
+                "target_3r": self.target_3r,
+                "risk_per_share": self.risk_per_share,
+                "p_2r_30m": self.p_2r_30m,
+                "probability_source": self.probability_source,
+                "tradable_now": self.tradable_now,
+                "orb_retest_ready": self.orb_retest_ready,
+                "gate_passes": self.gate_passes,
+                "gate_fail_reasons": list(self.gate_fail_reasons),
+                "monitor_seed_reasons": list(self.monitor_seed_reasons),
+            },
+            "tradeability": {
+                "tape_live": self.tape_live,
+                "tape_live_reason": self.tape_live_reason,
+                "spread_pct": self.spread_pct,
+                "quote_age_ms": self.quote_age_ms,
+                "trade_age_ms": self.trade_age_ms,
+                "near_trigger": self.near_trigger_live,
+                "trigger_side": trigger_side,
+                "market_session_state": self.market_session_state,
+                "time_of_day_bucket": self.time_of_day_bucket,
+            },
             "promoted_by_news": self.promoted_by_news,
             "promoted_by_monitor_transition": self.promoted_by_monitor_transition,
             "last_refresh_at": self.last_refresh_at,
@@ -882,6 +937,15 @@ class LiveMonitorManager:
             confidence_score=_safe_float(c.get("confidence_score")),
             confidence_grade=(str(c.get("confidence_grade")).strip().upper() if c.get("confidence_grade") is not None else None),
             regime_profile=(str(c.get("regime_profile")).strip() if c.get("regime_profile") is not None else None),
+            p_2r_30m=_safe_float(c.get("p_2r_30m") if c.get("p_2r_30m") is not None else c.get("ml_score")),
+            probability_source=("entry_now" if c.get("p_2r_30m") is not None else ("scan_ml_score" if c.get("ml_score") is not None else None)),
+            gate_passes=(bool(c.get("gate_passes")) if c.get("gate_passes") is not None else None),
+            gate_fail_reasons=list(c.get("gate_fail_reasons") or []) if isinstance(c.get("gate_fail_reasons"), (list, tuple)) else [],
+            monitor_seed=(bool(c.get("monitor_seed")) if c.get("monitor_seed") is not None else None),
+            monitor_seed_reasons=list(c.get("monitor_seed_reasons") or []) if isinstance(c.get("monitor_seed_reasons"), (list, tuple)) else [],
+            orb_retest_ready=(bool(c.get("orb_retest_ready")) if c.get("orb_retest_ready") is not None else None),
+            tradable_now=(bool(c.get("tradable_now")) if c.get("tradable_now") is not None else None),
+            trade_ready_passes=(bool(c.get("trade_ready_passes")) if c.get("trade_ready_passes") is not None else None),
             catalyst_score=_safe_float(c.get("catalyst_score")),
             catalyst_confidence=_safe_float(c.get("catalyst_confidence")),
             catalyst_article_count=_safe_int(c.get("catalyst_article_count")),
@@ -979,6 +1043,15 @@ class LiveMonitorManager:
             combined_score=50.0,
             confidence_score=50.0,
             confidence_grade="C",
+            p_2r_30m=0.50,
+            probability_source="manual_seed_default",
+            gate_passes=True,
+            gate_fail_reasons=[],
+            monitor_seed=True,
+            monitor_seed_reasons=["manual_seed"],
+            orb_retest_ready=True,
+            tradable_now=bool((side == "long" and reference_price >= entry) or (side == "short" and reference_price <= entry)),
+            trade_ready_passes=True,
         )
 
 
@@ -1410,6 +1483,31 @@ class LiveMonitorManager:
         st.risk_flags = _dedupe_keep(flags)
         st.live_confidence_score = max(0.0, min(100.0, 55.0 + st.live_score))
         st.live_confidence_grade = _grade(st.live_confidence_score)
+
+        decision, decision_notes, decision_hint = build_plan_state(
+            side=(st.best_side or "long"),
+            last_price=st.price,
+            stop=st.stop_loss,
+            target_2r=st.target_2r,
+            p_2r_30m=st.p_2r_30m,
+            chase_r=st.live_chase_r,
+            vwap_delta_pct=st.vwap_delta_pct_live,
+            trend_state=("up" if st.above_vwap_live else ("down" if st.above_vwap_live is False else None)),
+        )
+        rejection_reasons = list(st.gate_fail_reasons or [])
+        if st.monitor_seed_reasons:
+            rejection_reasons.extend([f"seed:{x}" for x in st.monitor_seed_reasons])
+        if st.tape_live_reason and st.tape_live_reason != "live":
+            rejection_reasons.append(st.tape_live_reason)
+        rejection_reasons.extend(st.risk_flags)
+        if not bool(st.orb_retest_ready):
+            rejection_reasons.append("orb_retest_not_ready")
+        if st.monitor_state in {"failed", "extended"}:
+            rejection_reasons.append(f"monitor_state:{st.monitor_state}")
+        st.decision = "GO" if (decision == "GO" and st.monitor_state in {"arming", "confirmed", "triggered"} and st.tape_live) else ("PASS" if decision == "PASS" else "WAIT")
+        st.decision_notes = _dedupe_keep(list(decision_notes) + ([f"monitor_state:{st.monitor_state}"] if st.monitor_state else []))
+        st.decision_hint = decision_hint
+        st.rejection_reasons = _dedupe_keep(rejection_reasons)
         st.diagnostics = {
             "quote_age_ms": st.quote_age_ms,
             "trade_age_ms": st.trade_age_ms,
@@ -1418,6 +1516,10 @@ class LiveMonitorManager:
             "context_score": st.context_score,
             "retest_distance_r": st.retest_distance_r,
             "catalyst_freshness_hours": st.catalyst_freshness_hours,
+            "gate_fail_reasons": list(st.gate_fail_reasons),
+            "rejection_reasons": list(st.rejection_reasons),
+            "decision": st.decision,
+            "decision_notes": list(st.decision_notes),
         }
 
         should_emit = False
