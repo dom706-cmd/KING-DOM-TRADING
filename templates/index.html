@@ -942,6 +942,7 @@ th {
             </div>
             <div id="scanStatus" style="margin-top:10px; display:none;"></div>
             <div id="scanStatusEmpty" class="muted" style="margin-top:10px; text-align:right;">Not scanning.</div>
+            <div id="dataFreshnessBar" style="display:none; margin-top:6px; padding:5px 10px; border-radius:6px; font-size:11px; font-weight:700;"></div>
           </div>
         </div>
 
@@ -1119,8 +1120,11 @@ th {
           <select id="candSortDir"><option value="desc">High → Low</option><option value="asc">Low → High</option></select>
           <span class="tag">Category</span>
           <select id="candCategoryFilter"><option value="all">All</option><option value="momentum">Momentum</option><option value="news">News</option><option value="reversal">Reversal</option><option value="liquidity">Liquidity</option></select>
+          <span class="tag">Min Grade</span>
+          <select id="candMinGradeFilter"><option value="0">All</option><option value="35">C+ (35)</option><option value="56" selected>B+ (56)</option><option value="78">A only (78)</option></select>
           <button type="button" id="addAllBPlusBtn" title="Add all B+ grade candidates to the desk watchlist" style="margin-left:12px;padding:4px 14px;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;">+ Add All B+ to Watchlist</button>
           <span id="addAllBPlusStatus" style="font-size:11px;margin-left:8px;color:#94a3b8;"></span>
+          <button type="button" id="audioAlertToggle" title="Toggle audio alerts" style="margin-left:10px;padding:4px 10px;background:rgba(99,202,183,0.1);color:#6cc7b4;border:1px solid rgba(99,202,183,0.3);border-radius:5px;cursor:pointer;font-size:13px;">🔔</button>
         </div>
 <div class="tableWrap" id="candidatesWrap"><table>
       <thead>
@@ -1671,20 +1675,27 @@ th {
 </div>
 
 <!-- Know the Trade modal -->
-<div id="knowTradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999; padding:40px 20px; overflow:auto;">
-  <div style="max-width:760px; margin:0 auto; background:var(--panel); border:1px solid rgba(99,202,183,0.35); border-radius:16px; box-shadow:var(--shadow-card); padding:20px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+<div id="knowTradeModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:9999; padding:24px 16px; overflow:auto;">
+  <div style="max-width:1180px; margin:0 auto; background:var(--panel); border:1px solid rgba(99,202,183,0.35); border-radius:16px; box-shadow:var(--shadow-card); padding:20px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <div>
         <div class="sectionLabel">Trade Intelligence</div>
         <h3 id="knowTradeTitle" style="margin:0; font-size:18px;">—</h3>
       </div>
-      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-        <button type="button" id="knowTradeClose" class="btn btn-danger" style="padding:4px 14px;">Close</button>
+      <div style="display:flex; align-items:center; gap:10px;">
         <span id="kttRefreshStamp" style="font-size:10px; color:var(--muted); white-space:nowrap;"></span>
+        <select id="kttChartTf" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;">
+          <option value="1m">1m</option><option value="5m" selected>5m</option><option value="15m">15m</option>
+        </select>
+        <button type="button" id="knowTradeClose" class="btn btn-danger" style="padding:4px 14px;">Close</button>
       </div>
     </div>
-    <div id="knowTradeBody" style="font-size:13px;">
-      <div class="muted">Loading…</div>
+    <div style="display:grid; grid-template-columns:420px 1fr; gap:16px; align-items:start;">
+      <div id="knowTradeBody" style="font-size:13px;"><div class="muted">Loading…</div></div>
+      <div>
+        <div id="kttChartMeta" style="font-size:11px;color:var(--muted);margin-bottom:6px;"></div>
+        <div id="kttChartHost" style="height:420px;border-radius:8px;overflow:hidden;background:#0a0908;"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1736,6 +1747,7 @@ window.PositionDeskSeed = [
   const CAND_FILTER_QUERY_KEY = "orb_cand_filter_query";
   const CAND_FILTER_LIMIT_KEY = "orb_cand_filter_limit";
   const CAND_FILTER_CATEGORY_KEY = "orb_cand_filter_category";
+  const CAND_FILTER_MINGRADE_KEY = "orb_cand_filter_mingrade";
   const SAVED_PRESETS_KEY = "orb_saved_presets_v1";
   const QUICK_PRESET_KEY = "orb_quick_preset";
 
@@ -1789,13 +1801,15 @@ window.PositionDeskSeed = [
     const qEl = document.getElementById("candSearchFilter");
     const limEl = document.getElementById("candShowLimit");
     const catEl = document.getElementById("candCategoryFilter");
+    const mgEl = document.getElementById("candMinGradeFilter");
 
     const side = String((sideEl && sideEl.value) || localStorage.getItem(CAND_FILTER_SIDE_KEY) || "all").toLowerCase();
     const query = String((qEl && qEl.value) || localStorage.getItem(CAND_FILTER_QUERY_KEY) || "").trim().toLowerCase();
     const limitRaw = String((limEl && limEl.value) || localStorage.getItem(CAND_FILTER_LIMIT_KEY) || "10").toLowerCase();
     const limit = (limitRaw === "all") ? "all" : (String(parseInt(limitRaw,10) || 10));
     const category = String((catEl && catEl.value) || localStorage.getItem(CAND_FILTER_CATEGORY_KEY) || "all").toLowerCase();
-    return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit, category };
+    const minGrade = parseInt((mgEl && mgEl.value) || localStorage.getItem(CAND_FILTER_MINGRADE_KEY) || "56", 10);
+    return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit, category, minGrade };
   }
 
   function applySavedCandFiltersToUI(){
@@ -1812,6 +1826,9 @@ window.PositionDeskSeed = [
       if (limEl && lim) limEl.value = lim;
       const catEl = document.getElementById("candCategoryFilter");
       if (catEl && cat) catEl.value = cat;
+      const mgEl = document.getElementById("candMinGradeFilter");
+      const mg = localStorage.getItem(CAND_FILTER_MINGRADE_KEY);
+      if (mgEl && mg != null) mgEl.value = mg;
     }catch(e){}
   }
 
@@ -1822,6 +1839,7 @@ window.PositionDeskSeed = [
       localStorage.setItem(CAND_FILTER_QUERY_KEY, (document.getElementById("candSearchFilter")?.value || ""));
       localStorage.setItem(CAND_FILTER_LIMIT_KEY, f.limit);
       localStorage.setItem(CAND_FILTER_CATEGORY_KEY, f.category || 'all');
+      localStorage.setItem(CAND_FILTER_MINGRADE_KEY, String(f.minGrade ?? 56));
     }catch(e){}
     return f;
   }
@@ -2200,6 +2218,12 @@ function gradeClass(g){
     if (f.category && f.category !== 'all'){
       filtered = filtered.filter(c => candidateCategory(c) === f.category);
     }
+    if (f.minGrade && f.minGrade > 0){
+      filtered = filtered.filter(c => {
+        const sc = c.ktt_score != null ? Number(c.ktt_score) : 0;
+        return sc >= f.minGrade;
+      });
+    }
     if (f.limit !== 'all'){
       const n = Math.max(1, Math.min(500, parseInt(f.limit,10) || 10));
       filtered = filtered.slice(0, n);
@@ -2482,27 +2506,35 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
 
   async function _fetchKttGradesForList(candidates) {
     if (!candidates || !candidates.length) return;
-    // Dedupe by symbol; skip symbols already graded by the post-scan KTT gate
+    // Dedupe by symbol — always re-fetch so grades are always live-accurate
     const seen = new Set();
     const unique = candidates.filter(c => {
       const s = String(c.symbol || '').toUpperCase();
       if (!s || seen.has(s)) return false;
       seen.add(s);
-      // Already graded server-side during scan — no need to re-fetch
-      if (c.ktt_grade && c.ktt_grade !== '?') return false;
       return true;
     });
-    if (!unique.length) return;
     try {
-      const payload = unique.map(c => ({
-        symbol: c.symbol, side: c.best_side || 'long',
-        long_entry: c.long_entry, long_stop: c.long_stop, long_2r: c.long_2r,
-        short_entry: c.short_entry, short_stop: c.short_stop, short_2r: c.short_2r,
-        ml_score: c.ml_score, news_headline: c.news_headline,
-        news_age_hours: c.news_age_hours, rvol: c.rvol,
-        long_triggered: c.long_triggered, short_triggered: c.short_triggered,
-        vwap_last: c.vwap_last, scan_ts: c.scan_ts,
-      }));
+      const now = Date.now();
+      const payload = unique.map(c => {
+        // Compute setup_age_hours client-side so batch and detail view use same value
+        let setup_age_hours = null;
+        if (c.scan_ts) {
+          try {
+            const scannedMs = new Date(c.scan_ts).getTime();
+            if (scannedMs > 0) setup_age_hours = (now - scannedMs) / 3600000;
+          } catch(e) {}
+        }
+        return {
+          symbol: c.symbol, side: c.best_side || 'long',
+          long_entry: c.long_entry, long_stop: c.long_stop, long_2r: c.long_2r,
+          short_entry: c.short_entry, short_stop: c.short_stop, short_2r: c.short_2r,
+          ml_score: c.ml_score, news_headline: c.news_headline,
+          news_age_hours: c.news_age_hours, rvol: c.rvol,
+          long_triggered: c.long_triggered, short_triggered: c.short_triggered,
+          vwap_last: c.vwap_last, setup_age_hours,
+        };
+      });
       const resp = await fetch('/api/ktt_grades_batch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -4362,9 +4394,19 @@ async function poll(jobId) {
       runCandidates = await fetchCandidatesForJob(jobId);
     }
     // Merge: existing candidates persist; new scan results update or add to them.
-    // Symbols found in the new scan get updated data; symbols not found this run stay visible.
     (window.mergeCandidatesIntoCache || window.saveCandidatesCache || (()=>{}))(runCandidates);
     if (window.renderCandidatesTable) window.renderCandidatesTable((window.loadCandidatesCache || (()=>runCandidates))());
+
+    // Audio alert: beep for highest-grade new candidate
+    try {
+      const bestGrade = runCandidates.reduce((best, c) => {
+        const g = String(c.ktt_grade || c.confidence_grade || '').toUpperCase();
+        if (g === 'A') return 'A';
+        if (g === 'B' && best !== 'A') return 'B';
+        return best;
+      }, '');
+      if (bestGrade && window._gradeBeep) window._gradeBeep(bestGrade);
+    } catch(e) {}
 
     // Populate "Passed this scan" pill row
     const passedThisRun = document.getElementById('passedThisRun');
@@ -4452,6 +4494,7 @@ async function poll(jobId) {
 
       if (fallbackMode && strictCount <= 0 && primaryCount > 0) setStatus(`Done. No trade-ready names passed. Showing ${primaryCount} monitor/watch seed(s).`);
       else setStatus(`Done.`);
+      window._lastScanTs = Date.now();
       return true;
     } finally {
       window._orbScanPollInFlight = false;
@@ -4632,8 +4675,10 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       const res=await fetch('/api/broker_snapshot'); const j=await res.json();
       if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
       const s=j.snapshot||{}; window.__brokerSnapshot=s;
-      if(sum) sum.innerHTML=`<span class="tag">Broker</span><b>${pdEsc(s.broker||'—')}</b><span class="tag">Buying power</span><b>${pdMoney(s.buying_power)}</b><span class="tag">Cash</span><b>${pdMoney(s.cash)}</b><span class="tag">Equity</span><b>${pdMoney(s.equity)}</b><span class="tag">Open positions</span><b>${pdEsc(s.position_count ?? 0)}</b>`;
-      if(cap) cap.innerHTML=`<span class="tag">Broker</span><span>${pdEsc(s.broker||'—')}</span><span class="tag">BP</span><span>${pdMoney(s.buying_power,0)}</span><span class="tag">Equity</span><span>${pdMoney(s.equity,0)}</span><span class="tag">Pos</span><span>${pdEsc(s.position_count ?? 0)}</span>`;
+      const dtCount = Number(s.daytrade_count ?? 0);
+      const pdtWarn = dtCount >= 3 ? `<span style="background:rgba(239,68,68,0.2);color:#f87171;border:1px solid rgba(239,68,68,0.5);border-radius:5px;padding:2px 8px;font-size:11px;font-weight:800;margin-left:8px;">⛔ PDT ${dtCount}/3 DAY TRADES USED</span>` : dtCount >= 2 ? `<span style="background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;">⚠ ${dtCount}/3 day trades used</span>` : '';
+      if(sum) sum.innerHTML=`<span class="tag">Broker</span><b>${pdEsc(s.broker||'—')}</b><span class="tag">Buying power</span><b>${pdMoney(s.buying_power)}</b><span class="tag">Cash</span><b>${pdMoney(s.cash)}</b><span class="tag">Equity</span><b>${pdMoney(s.equity)}</b><span class="tag">Open positions</span><b>${pdEsc(s.position_count ?? 0)}</b><span class="tag">Day trades</span><b>${dtCount}/3</b>${pdtWarn}`;
+      if(cap) cap.innerHTML=`<span class="tag">Broker</span><span>${pdEsc(s.broker||'—')}</span><span class="tag">BP</span><span>${pdMoney(s.buying_power,0)}</span><span class="tag">Equity</span><span>${pdMoney(s.equity,0)}</span><span class="tag">Pos</span><span>${pdEsc(s.position_count ?? 0)}</span>${dtCount >= 2 ? `<span class="tag" style="color:${dtCount>=3?'#f87171':'#fbbf24'};">DT ${dtCount}/3</span>` : ''}`;
       const rows=(s.positions||[]).map(p=>`<tr><td><b>${pdEsc(p.symbol||'')}</b></td><td>${pdEsc(p.side||'')}</td><td>${pdNum(p.qty,0)}</td><td>${pdMoney(p.avg_entry_price)}</td><td>${pdMoney(p.current_price)}</td><td>${pdMoney(p.market_value,0)}</td><td>${pdMoney(p.unrealized_pl,0)}</td><td>${pdNum((Number(p.unrealized_plpc)||0)*100,2)}%</td></tr>`).join('');
       if(box) box.innerHTML=`<div class="positionChartHead"><div class="denseMeta"><span class="tag">Live positions</span><span class="positionGuide">Import brings these into Position Desk with inferred stop placeholders you can edit.</span></div></div><table class="scoreTable"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg entry</th><th>Current</th><th>Value</th><th>Unreal P/L</th><th>P/L %</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No broker positions.</td></tr>'}</tbody></table>`;
       const syncOn = localStorage.getItem(LS_POSITION_BROKER_SYNC) === '1';
@@ -6402,6 +6447,25 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     }));
 
     document.getElementById('candCategoryFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
+    document.getElementById('candMinGradeFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
+
+    // Audio alert toggle
+    const audioBtn = document.getElementById('audioAlertToggle');
+    if (audioBtn) {
+      const syncAudioBtn = () => {
+        const on = window._audioEnabled !== false;
+        audioBtn.textContent = on ? '🔔' : '🔕';
+        audioBtn.title = on ? 'Audio alerts ON — click to mute' : 'Audio alerts OFF — click to enable';
+        audioBtn.style.color = on ? '#6cc7b4' : '#94a3b8';
+      };
+      syncAudioBtn();
+      audioBtn.addEventListener('click', () => {
+        window._audioEnabled = !window._audioEnabled;
+        try { localStorage.setItem('kd_audio_alerts', window._audioEnabled ? 'on' : 'off'); } catch(e){}
+        syncAudioBtn();
+        if (window._audioEnabled && window._gradeBeep) window._gradeBeep('B'); // test beep
+      });
+    }
 
     document.getElementById('addAllBPlusBtn')?.addEventListener('click', async function() {
       const btn = this;
@@ -7301,6 +7365,36 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 
   // Background refresh every 60s
   setInterval(loadDeskWatchlist, 60000);
+
+  // ── Data freshness indicator ──────────────────────────────────────────────
+  setInterval(() => {
+    const bar = document.getElementById('dataFreshnessBar');
+    if (!bar) return;
+    const ts = window._lastScanTs;
+    if (!ts) { bar.style.display = 'none'; return; }
+    const ageSec = Math.floor((Date.now() - ts) / 1000);
+    const ageMin = Math.floor(ageSec / 60);
+    const ageLabel = ageSec < 60 ? `${ageSec}s ago` : `${ageMin}m ago`;
+    if (ageSec < 120) {
+      bar.style.display = 'block';
+      bar.style.background = 'rgba(34,197,94,0.12)';
+      bar.style.color = '#4ade80';
+      bar.style.border = '1px solid rgba(34,197,94,0.3)';
+      bar.textContent = `Data fresh · scan ${ageLabel}`;
+    } else if (ageSec < 300) {
+      bar.style.display = 'block';
+      bar.style.background = 'rgba(251,191,36,0.1)';
+      bar.style.color = '#fbbf24';
+      bar.style.border = '1px solid rgba(251,191,36,0.3)';
+      bar.textContent = `⚠ Scan data ${ageLabel} — consider re-scanning`;
+    } else {
+      bar.style.display = 'block';
+      bar.style.background = 'rgba(239,68,68,0.1)';
+      bar.style.color = '#f87171';
+      bar.style.border = '1px solid rgba(239,68,68,0.3)';
+      bar.textContent = `⛔ Scan data ${ageLabel} — STALE. Re-scan now.`;
+    }
+  }, 10000);
 
   // ── Pre-market scan button ────────────────────────────────────────────────
   (function(){
@@ -8288,12 +8382,81 @@ refreshMarketEvents();
               }
             }
 
-            fetchAndRenderKtt(false);
+            // ── KTT chart ─────────────────────────────────────────────────
+            let _kttChartBundle = null;
+            async function loadKttChart(tf) {
+              const host = document.getElementById('kttChartHost');
+              const meta = document.getElementById('kttChartMeta');
+              if (!host || !window.LightweightCharts) return;
+              if (meta) meta.textContent = 'Loading chart…';
+              try {
+                const res = await fetch('/api/position_chart', {
+                  method: 'POST', headers: {'Content-Type':'application/json'},
+                  body: JSON.stringify({
+                    symbol: sym,
+                    entry:  kttBtn.dataset.entry  || '',
+                    stop:   kttBtn.dataset.stop   || '',
+                    target: kttBtn.dataset.target || '',
+                    side:   kttBtn.dataset.side   || 'long',
+                    timeframe: tf || '5m',
+                  })
+                });
+                const j = await res.json();
+                if (!res.ok || j?.ok === false) throw new Error(j?.error || `chart_failed`);
+                if (_kttChartBundle) { try { _kttChartBundle.chart.remove(); } catch(e){} }
+                host.innerHTML = '';
+                const chart = LightweightCharts.createChart(host, {
+                  height: 420,
+                  layout: {background:{type:'solid',color:'#0a0908'}, textColor:'#e7e2d6'},
+                  grid: {vertLines:{color:'rgba(255,255,255,0.04)'}, horzLines:{color:'rgba(255,255,255,0.04)'}},
+                  rightPriceScale: {borderColor:'rgba(255,255,255,0.12)'},
+                  timeScale: {borderColor:'rgba(255,255,255,0.12)', timeVisible:true, secondsVisible:false},
+                  crosshair: {mode:1},
+                });
+                const addSeries = (kind, opts) => {
+                  if (typeof chart.addSeries === 'function' && LightweightCharts?.[kind]) return chart.addSeries(LightweightCharts[kind], opts);
+                  if (kind === 'CandlestickSeries' && typeof chart.addCandlestickSeries === 'function') return chart.addCandlestickSeries(opts);
+                  if (kind === 'LineSeries'        && typeof chart.addLineSeries         === 'function') return chart.addLineSeries(opts);
+                  throw new Error('unsupported_lwc_api');
+                };
+                const candle = addSeries('CandlestickSeries', {upColor:'#22c55e', downColor:'#ef4444', wickUpColor:'#22c55e', wickDownColor:'#ef4444', borderVisible:false});
+                const mkLine = (color, w=1) => addSeries('LineSeries', {color, lineWidth:w, priceLineVisible:false, lastValueVisible:false});
+                const vwapL  = mkLine('#facc15', 2);
+                const ema9L  = mkLine('#4ade80', 1);
+                const ema20L = mkLine('#60a5fa', 1);
+                candle.setData(j.bars || []);
+                vwapL.setData(j.overlays?.vwap  || []);
+                ema9L.setData(j.overlays?.ema9   || []);
+                ema20L.setData(j.overlays?.ema20 || []);
+                const priceLines = [];
+                Object.entries(j.levels || {}).forEach(([k, v]) => {
+                  if (v == null || isNaN(Number(v))) return;
+                  const color = (k === 'stop' || k === 'or_low') ? '#ef4444'
+                              : k === 'entry' ? '#fbbf24'
+                              : (k.startsWith('r') || k === 'target' || k === 'or_high') ? '#22c55e'
+                              : '#a78bfa';
+                  priceLines.push(candle.createPriceLine({price:Number(v), color, lineWidth: (k==='entry'||k==='stop')?2:1, lineStyle:(k==='entry'||k==='stop')?0:2, axisLabelVisible:true, title:k.toUpperCase()}));
+                });
+                chart.timeScale().fitContent();
+                _kttChartBundle = {chart, priceLines};
+                if (meta) meta.textContent = `${sym} · ${tf || '5m'} · VWAP (gold) · EMA9 (green) · EMA20 (blue)`;
+              } catch(e) {
+                if (meta) meta.textContent = `Chart unavailable: ${e.message}`;
+              }
+            }
+
+            const kttTfSel = document.getElementById('kttChartTf');
+            if (kttTfSel) {
+              kttTfSel.onchange = () => loadKttChart(kttTfSel.value);
+            }
+
+            fetchAndRenderKtt(false).then(() => loadKttChart(kttTfSel?.value || '5m'));
 
             // Auto-refresh every 90s while modal is open
             window._kttRefreshTimer = setInterval(() => {
               if (document.getElementById('knowTradeModal')?.style.display !== 'none') {
                 fetchAndRenderKtt(true);
+                loadKttChart(document.getElementById('kttChartTf')?.value || '5m');
               } else {
                 clearInterval(window._kttRefreshTimer);
                 window._kttRefreshTimer = null;
@@ -8411,7 +8574,7 @@ refreshMarketEvents();
         vwap_last:        null,
         long_triggered:   side !== 'short' && b.dataset.status === 'triggered',
         short_triggered:  side === 'short' && b.dataset.status === 'triggered',
-        scan_ts:          null,
+        setup_age_hours:  b.dataset.setup_age ? (parseFloat(b.dataset.setup_age) || null) : null,
       };
     });
 
@@ -9383,19 +9546,57 @@ refreshMarketEvents();
     } catch(e){}
   }
 
-  // SSE connection for real-time push
+  // ── Audio alert engine ────────────────────────────────────────────────────
+  let _audioCtx = null;
+  let _audioEnabled = (() => { try { return localStorage.getItem('kd_audio_alerts') !== 'off'; } catch(e){ return true; } })();
+  function _beep(freq=880, dur=0.18, vol=0.35, type='sine') {
+    if (!_audioEnabled) return;
+    try {
+      if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+      const osc = _audioCtx.createOscillator();
+      const gain = _audioCtx.createGain();
+      osc.connect(gain); gain.connect(_audioCtx.destination);
+      osc.type = type; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(vol, _audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + dur);
+      osc.start(); osc.stop(_audioCtx.currentTime + dur);
+    } catch(e){}
+  }
+  // A-grade double-beep, B-grade single beep
+  function _gradeBeep(grade) {
+    if (grade === 'A') { _beep(1047, 0.12, 0.4); setTimeout(() => _beep(1319, 0.15, 0.4), 140); }
+    else if (grade === 'B') { _beep(880, 0.18, 0.3); }
+  }
+  // Sniper alert gets a distinct tone
+  function _sniperBeep() { _beep(660, 0.08, 0.3); setTimeout(() => _beep(880, 0.12, 0.35), 90); }
+
+  window._gradeBeep  = _gradeBeep;
+  window._sniperBeep = _sniperBeep;
+
+  // ── SSE connection with exponential backoff ───────────────────────────────
+  let _sseRetryDelay = 3000;
+  let _sseRetryTimer = null;
   function _connectSniperStream() {
     if (_sniperSource) return;
     if (typeof EventSource === 'undefined') return;
     _sniperSource = new EventSource('/api/news_sniper/stream?since=0');
     _sniperSource.addEventListener('sniper', (evt) => {
+      _sseRetryDelay = 3000; // reset backoff on success
       try {
         const alert = JSON.parse(evt.data);
         _processSniperAlerts([alert]);
+        _sniperBeep();
       } catch(e){}
     });
     _sniperSource.addEventListener('error', () => {
-      _sniperSource = null;   // will reconnect on next poll cycle
+      try { _sniperSource.close(); } catch(e){}
+      _sniperSource = null;
+      if (_sseRetryTimer) clearTimeout(_sseRetryTimer);
+      _sseRetryTimer = setTimeout(() => {
+        _sseRetryDelay = Math.min(_sseRetryDelay * 2, 60000);
+        _connectSniperStream();
+      }, _sseRetryDelay);
     });
   }
 
@@ -9405,8 +9606,7 @@ refreshMarketEvents();
     _pollSpreadAlerts();
     _connectSniperStream();
     setInterval(_pollSniper,        15000);
-    setInterval(_pollSpreadAlerts,   5000);   // spread checks are lightweight
-    setInterval(() => { if (!_sniperSource) _connectSniperStream(); }, 30000);
+    setInterval(_pollSpreadAlerts,   5000);
   });
 })();
 </script>

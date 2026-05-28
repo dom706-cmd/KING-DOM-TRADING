@@ -1481,8 +1481,11 @@ def api_analyze():
 
 
 def _entry_now_request_values() -> tuple[str, str, bool, bool]:
-    symbol, side_req, include_prepost, want_sent = _entry_now_request_values()
-
+    data = request.get_json(silent=True) or {}
+    symbol      = str(data.get("symbol") or request.args.get("symbol") or "").strip().upper()
+    side_req    = str(data.get("side")   or request.args.get("side")   or "long").strip().lower()
+    include_prepost = str(data.get("include_prepost") or request.args.get("include_prepost") or "0").lower() in ("1","true","yes")
+    want_sent   = str(data.get("sentiment") or request.args.get("sentiment") or "0").lower() in ("1","true","yes")
     return symbol, side_req, include_prepost, want_sent
 
 
@@ -4790,17 +4793,21 @@ def api_ktt_grades_batch():
             entry  = _safe_float(c.get('long_entry') if side == 'long' else c.get('short_entry'))
             stop   = _safe_float(c.get('long_stop')  if side == 'long' else c.get('short_stop'))
             target = _safe_float(c.get('long_2r')    if side == 'long' else c.get('short_2r'))
-            setup_age_hours = None
-            try:
-                scan_ts_raw = c.get('scan_ts')
-                if scan_ts_raw:
-                    import dateutil.parser as _dp
-                    scanned_at = _dp.parse(str(scan_ts_raw))
-                    if scanned_at.tzinfo is None:
-                        scanned_at = scanned_at.replace(tzinfo=timezone.utc)
-                    setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
-            except Exception:
-                pass
+            # Accept setup_age_hours directly (from detail view data-setup_age),
+            # or compute it from scan_ts if provided. This ensures batch and detail
+            # view use identical time-decay values.
+            setup_age_hours = _safe_float(c.get('setup_age_hours'))
+            if setup_age_hours is None:
+                try:
+                    scan_ts_raw = c.get('scan_ts')
+                    if scan_ts_raw:
+                        import dateutil.parser as _dp
+                        scanned_at = _dp.parse(str(scan_ts_raw))
+                        if scanned_at.tzinfo is None:
+                            scanned_at = scanned_at.replace(tzinfo=timezone.utc)
+                        setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+                except Exception:
+                    pass
             setup_status = 'triggered' if (
                 (side == 'long' and c.get('long_triggered')) or
                 (side == 'short' and c.get('short_triggered'))
@@ -6318,6 +6325,7 @@ def api_pt_validate_status():
 # ── Live News Sentiment Feed ──────────────────────────────────────────────────
 
 _NEWS_SEEN_IDS: set[str] = set()
+_NEWS_SEEN_IDS_MAX = 5000  # evict oldest half when full
 _NEWS_FEED_LOCK = threading.Lock()
 _NEWS_POLL_INTERVAL = 15  # seconds — fast poll; WS stream requires Algo Trader Plus
 _NEWS_REFRESH_EVENT = threading.Event()  # set() to wake the news thread immediately
@@ -6326,6 +6334,7 @@ _MARKET_EVENTS_EVENT = threading.Event()  # set() to wake market-events SSE list
 # ── News Sniper — fires the instant a NEW catalyst headline drops ─────────────
 _SNIPER_ALERTS: deque = deque(maxlen=50)
 _SNIPER_LOCK = threading.Lock()
+_SNIPER_WL_COOLDOWN: dict[str, float] = {}  # sym → last watchlist-add timestamp
 
 # Catalyst tags that warrant an immediate sniper alert
 _SNIPER_CATALYST_TAGS = frozenset({
@@ -6363,21 +6372,25 @@ def _emit_sniper_alert(sym: str, article: dict, bundle, price: float | None, *, 
         _SNIPER_ALERTS.appendleft(alert)
     _NEWS_REFRESH_EVENT.set()   # wake any SSE listeners
 
-    # Auto-add to desk watchlist with full entry/stop/target for directional alerts
+    # Auto-add to desk watchlist — 5-minute cooldown per symbol to prevent flip-flopping
     direction = alert['direction']
     if direction in ('LONG', 'SHORT') and alert['confidence'] >= _SNIPER_MIN_CONFIDENCE:
         side = direction.lower()
-        try:
-            _RUNTIME_STORE.desk_watchlist_set(
-                sym,
-                side=side,
-                trigger_price=_plan.get('entry'),
-                stop_price=_plan.get('stop'),
-                target_price=_plan.get('target_2r'),
-                notes=f"\U0001f4f0 {alert['headline'][:120]}",
-            )
-        except Exception:
-            pass
+        _now_ts = time.time()
+        _last_add = _SNIPER_WL_COOLDOWN.get(sym, 0)
+        if _now_ts - _last_add >= 300:  # 5-minute gate per symbol
+            _SNIPER_WL_COOLDOWN[sym] = _now_ts
+            try:
+                _RUNTIME_STORE.desk_watchlist_set(
+                    sym,
+                    side=side,
+                    trigger_price=_plan.get('entry'),
+                    stop_price=_plan.get('stop'),
+                    target_price=_plan.get('target_2r'),
+                    notes=f"\U0001f4f0 {alert['headline'][:120]}",
+                )
+            except Exception:
+                pass
 
         def _bg_grade(a=alert, s=side, h=alert['headline'], px=price):
             import logging as _log
@@ -6816,6 +6829,8 @@ def _news_feed_loop() -> None:
                     # ── News Sniper: fire on first sight of a catalyst headline ──
                     is_new_article = news_id not in _NEWS_SEEN_IDS
                     if is_new_article:
+                        if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
+                            _NEWS_SEEN_IDS.clear()
                         _NEWS_SEEN_IDS.add(news_id)
                         has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
                         strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
@@ -6909,6 +6924,8 @@ def _process_news_article(sym: str, art: dict) -> None:
                 plan = {}
         is_new = news_id not in _NEWS_SEEN_IDS
         if is_new:
+            if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
+                _NEWS_SEEN_IDS.clear()
             _NEWS_SEEN_IDS.add(news_id)
             has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
             strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
