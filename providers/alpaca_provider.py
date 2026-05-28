@@ -257,8 +257,13 @@ class AlpacaProvider(MarketDataProvider):
         to_d: date,
         include_prepost: bool = False,
         timeout_s: int | None = None,
+        feed: str | None = None,
     ) -> pd.DataFrame:
-        """Fetch bars for a concrete date range (inclusive), aligned to US regular session by default."""
+        """Fetch bars for a concrete date range (inclusive), aligned to US regular session by default.
+
+        feed: override the configured data feed. Use 'sip' when include_prepost=True —
+        IEX does not provide premarket bars and will return empty for any premarket request.
+        """
         from alpaca.data.requests import StockBarsRequest
 
         sym_raw = (symbol or "").strip().upper()
@@ -287,13 +292,15 @@ class AlpacaProvider(MarketDataProvider):
         start_utc = start_et.astimezone(timezone.utc)
         end_utc = end_et.astimezone(timezone.utc)
 
+        _feed = (feed or self.cfg.data_feed or "iex").strip().lower()
+
         def _do():
             r = StockBarsRequest(
                 symbol_or_symbols=sym,
                 timeframe=tf,
                 start=start_utc,
                 end=end_utc,
-                feed=self.cfg.data_feed,
+                feed=_feed,
             )
             bars = self._hist.get_stock_bars(r)
             df = getattr(bars, "df", None)

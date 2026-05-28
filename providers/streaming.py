@@ -55,6 +55,36 @@ class AlpacaStreamCache:
         self._last_quote: Dict[str, Dict[str, Any]] = {}
         self._bars_1m: Dict[str, Deque[Dict[str, Any]]] = defaultdict(lambda: deque(maxlen=600))
 
+        # Halt / trading-status tracking
+        self._last_halt_status: Dict[str, Dict[str, Any]] = {}        # symbol → latest status payload
+        self._halt_events: Deque[Dict[str, Any]] = deque(maxlen=500)  # ring buffer of all status events
+
+        # LULD price band tracking
+        self._luld_bands: Dict[str, Dict[str, Any]] = {}
+        self._luld_events: Deque[Dict[str, Any]] = deque(maxlen=200)
+        self._on_luld_cb = None
+
+        # Order imbalance tracking (auction imbalances during halts)
+        self._imbalances: Dict[str, Dict[str, Any]] = {}
+        self._imbalance_events: Deque[Dict[str, Any]] = deque(maxlen=100)
+        self._on_imbalance_cb = None
+
+        # Optional hook called on any halt/LULD event — set by app.py to wake SSE listeners
+        self._market_event_hook = None
+
+        # Spread history for pre-halt explosion detection
+        # symbol → deque of (received_at_float, spread_pct, mid_price)
+        self._quote_spreads: Dict[str, Deque] = defaultdict(lambda: deque(maxlen=120))
+
+        # Level 2 order book: symbol → {"bids": [(price, size), ...], "asks": [(price, size), ...], "ts": float}
+        # Bids sorted descending (best bid first). Asks sorted ascending (best ask first).
+        self._orderbook: Dict[str, Dict[str, Any]] = {}
+        # alpaca-py 0.43.x does not implement subscribe_orderbooks — L2 unavailable via SDK
+        self._orderbook_supported: bool = False
+
+        # Time & Sales: symbol → deque of trade dicts (newest last, maxlen=200)
+        self._trade_history: Dict[str, Deque] = defaultdict(lambda: deque(maxlen=200))
+
         self._connected = False
         self._started_at: float | None = None
         self._last_event_at: float | None = None
@@ -70,6 +100,8 @@ class AlpacaStreamCache:
         self._on_trade_cb = None
         self._on_quote_cb = None
         self._on_bar_cb = None
+        self._on_status_cb = None
+        self._on_orderbook_cb = None
 
     # ---------------- public API ----------------
 
@@ -153,6 +185,165 @@ class AlpacaStreamCache:
             v = self._last_quote.get(sym, {})
             return dict(v) if isinstance(v, dict) else {}
 
+    def latest_halt_status(self, symbol: str) -> dict | None:
+        """Return the most recent TradingStatus event for this symbol, or None."""
+        sym = str(symbol).strip().upper()
+        with self._lock:
+            v = self._last_halt_status.get(sym)
+            return dict(v) if isinstance(v, dict) else None
+
+    def spread_explosion_check(self, symbol: str) -> dict:
+        """Detect bid-ask spread blowing out — the pre-halt signature.
+
+        Compares the baseline spread (quotes 30–120s ago) against the recent
+        spread (last 10 quotes). A 3x expansion with spread > 1.5% of price
+        is the pre-halt fingerprint seen 30–90s before most LULD halts.
+
+        Returns dict with keys:
+            is_exploding   – True if pre-halt pattern detected
+            current_spread – current spread % of mid price
+            baseline_spread– baseline spread % (recent calm)
+            ratio          – current / baseline
+            mid_price      – latest mid price
+            data_points    – number of quotes in window
+        """
+        sym = str(symbol).upper()
+        result: dict = {
+            "is_exploding": False, "current_spread": None,
+            "baseline_spread": None, "ratio": None,
+            "mid_price": None, "data_points": 0,
+        }
+        try:
+            with self._lock:
+                history = list(self._quote_spreads.get(sym) or [])
+            if len(history) < 15:
+                result["data_points"] = len(history)
+                return result
+
+            result["data_points"] = len(history)
+            now_t = time.time()
+
+            # Baseline: quotes between 30s and 120s ago
+            baseline = [s for (t, s, _m) in history if 30 <= (now_t - t) <= 120]
+            # Recent: last 10 quotes (within ~10-15s at normal quote rate)
+            recent_window = history[-10:]
+            recent  = [s for (_t, s, _m) in recent_window]
+            mid     = recent_window[-1][2] if recent_window else None
+
+            if not baseline or not recent:
+                return result
+
+            # Use median to be robust against outliers
+            def _median(lst):
+                s = sorted(lst)
+                n = len(s)
+                return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+            baseline_spread = _median(baseline)
+            current_spread  = _median(recent)
+            result["baseline_spread"] = round(baseline_spread, 4)
+            result["current_spread"]  = round(current_spread, 4)
+            result["mid_price"]       = round(mid, 4) if mid else None
+
+            if baseline_spread > 0:
+                ratio = current_spread / baseline_spread
+                result["ratio"] = round(ratio, 2)
+                if ratio >= 3.0 and current_spread >= 1.5:
+                    result["is_exploding"] = True
+        except Exception:
+            pass
+        return result
+
+    def latest_orderbook(self, symbol: str, *, levels: int = 10) -> dict:
+        """Return current L2 book for symbol with wall detection.
+
+        Returns dict with:
+          bids / asks  — top N levels, each {"price": float, "size": int, "is_wall": bool}
+          bid_wall     — nearest bid wall price or None
+          ask_wall     — nearest ask wall price or None
+          pressure     — float 0-1; 1.0 = all depth is on bid side (bullish)
+          ts           — epoch float of last book update
+          supported    — whether orderbook subscription succeeded
+        """
+        sym = str(symbol).strip().upper()
+        with self._lock:
+            book = self._orderbook.get(sym)
+            supported = self._orderbook_supported
+        if not book:
+            return {"bids": [], "asks": [], "bid_wall": None, "ask_wall": None,
+                    "pressure": None, "ts": None, "supported": supported}
+        return self._annotate_book(book, levels=levels, supported=supported)
+
+    @staticmethod
+    def _annotate_book(book: dict, *, levels: int = 10, supported: bool = True) -> dict:
+        bids_raw = book.get("bids") or []   # [(price, size), ...] descending
+        asks_raw = book.get("asks") or []   # [(price, size), ...] ascending
+        ts = book.get("ts")
+
+        def _walls(levels_data: list) -> list:
+            sizes = [s for (_, s) in levels_data if s > 0]
+            if len(sizes) < 2:
+                return [False] * len(levels_data)
+            sizes_sorted = sorted(sizes)
+            median = sizes_sorted[len(sizes_sorted) // 2]
+            threshold = max(median * 3.0, 200)   # must be 3x median AND at least 200 shares
+            return [s >= threshold for (_, s) in levels_data]
+
+        top_bids = bids_raw[:levels]
+        top_asks = asks_raw[:levels]
+        bid_walls = _walls(top_bids)
+        ask_walls = _walls(top_asks)
+
+        bid_wall_price = next((p for (p, _), w in zip(top_bids, bid_walls) if w), None)
+        ask_wall_price = next((p for (p, _), w in zip(top_asks, ask_walls) if w), None)
+
+        total_bid = sum(s for (_, s) in top_bids)
+        total_ask = sum(s for (_, s) in top_asks)
+        total = total_bid + total_ask
+        pressure = round(total_bid / total, 3) if total > 0 else None
+
+        return {
+            "bids": [{"price": round(p, 4), "size": s, "is_wall": w}
+                     for (p, s), w in zip(top_bids, bid_walls)],
+            "asks": [{"price": round(p, 4), "size": s, "is_wall": w}
+                     for (p, s), w in zip(top_asks, ask_walls)],
+            "bid_wall": round(bid_wall_price, 4) if bid_wall_price is not None else None,
+            "ask_wall": round(ask_wall_price, 4) if ask_wall_price is not None else None,
+            "pressure": pressure,
+            "ts": ts,
+            "supported": supported,
+        }
+
+    def recent_trades(self, symbol: str, *, limit: int = 50) -> list[dict]:
+        """Return recent trade prints for Time & Sales, newest last."""
+        sym = str(symbol).strip().upper()
+        with self._lock:
+            return list(self._trade_history.get(sym, []))[-limit:]
+
+    def recent_halt_resume_events(self, *, max_age_sec: float = 1800.0) -> list[dict]:
+        """Return halt/resume events from the last max_age_sec seconds (default 30 min)."""
+        cutoff = time.time() - float(max_age_sec)
+        with self._lock:
+            return [dict(e) for e in self._halt_events if float(e.get("received_at", 0)) >= cutoff]
+
+    def latest_luld(self, symbol: str) -> dict | None:
+        """Return the most recent LULD band for a symbol, or None."""
+        sym = str(symbol).strip().upper()
+        with self._lock:
+            return dict(self._luld_bands[sym]) if sym in self._luld_bands else None
+
+    def recent_luld_events(self, *, max_age_sec: float = 3600.0) -> list[dict]:
+        """Return all LULD events from the last max_age_sec seconds (default 1 hr)."""
+        cutoff = time.time() - float(max_age_sec)
+        with self._lock:
+            return [dict(e) for e in self._luld_events if e.get('received_at', 0) >= cutoff]
+
+    def recent_imbalances(self, *, max_age_sec: float = 1800.0) -> list[dict]:
+        """Return all imbalance events from the last max_age_sec seconds (default 30 min)."""
+        cutoff = time.time() - float(max_age_sec)
+        with self._lock:
+            return [dict(e) for e in self._imbalance_events if e.get('received_at', 0) >= cutoff]
+
     # ---------------- internal ----------------
 
     def _set_error(self, msg: str) -> None:
@@ -184,6 +375,29 @@ class AlpacaStreamCache:
             stream.subscribe_trades(self._on_trade_cb, *pending)
             stream.subscribe_quotes(self._on_quote_cb, *pending)
             stream.subscribe_bars(self._on_bar_cb, *pending)
+            if self._on_status_cb is not None:
+                try:
+                    stream.subscribe_trading_statuses(self._on_status_cb, *pending)
+                except Exception:
+                    pass
+            if self._on_luld_cb is not None:
+                try:
+                    stream._subscribe(self._on_luld_cb, pending, stream._handlers["lulds"])
+                except Exception:
+                    pass
+            if self._on_imbalance_cb is not None:
+                try:
+                    stream.subscribe_imbalances(self._on_imbalance_cb, *pending)
+                except Exception:
+                    pass
+            if self._on_orderbook_cb is not None and self._orderbook_supported:
+                try:
+                    stream.subscribe_orderbooks(self._on_orderbook_cb, *pending)
+                except Exception as _ob_err:
+                    _msg = f"{type(_ob_err).__name__}: {_ob_err}".lower()
+                    if any(m in _msg for m in ("not entitled", "insufficient", "not authorized",
+                                               "forbidden", "subscription", "attribute")):
+                        self._orderbook_supported = False
             with self._lock:
                 self._subscribed_actual |= set(pending)
                 self._last_subscribe_at = time.time()
@@ -245,12 +459,37 @@ class AlpacaStreamCache:
                     "exchange": str(getattr(trade, "exchange")) if getattr(trade, "exchange", None) is not None else None,
                     "conditions": list(getattr(trade, "conditions")) if getattr(trade, "conditions", None) is not None else None,
                     "timestamp": getattr(trade, "timestamp").isoformat() if getattr(trade, "timestamp", None) else None,
+                    "received_at": time.time(),
                 }
             except Exception:
                 return
-            self._mark_event("trade", str(sym))
+            s0 = str(sym).upper()
+            self._mark_event("trade", s0)
             with self._lock:
-                self._last_trade[str(sym).upper()] = payload
+                self._last_trade[s0] = payload
+                self._trade_history[s0].append(payload)
+
+        async def _on_orderbook(ob):
+            sym = getattr(ob, "symbol", None)
+            if not sym:
+                return
+            s0 = str(sym).upper()
+            try:
+                raw_bids = getattr(ob, "bids", None) or []
+                raw_asks = getattr(ob, "asks", None) or []
+                bids = sorted(
+                    [(float(getattr(lvl, "price", 0)), int(getattr(lvl, "size", 0))) for lvl in raw_bids],
+                    key=lambda x: -x[0],  # best bid first (descending price)
+                )
+                asks = sorted(
+                    [(float(getattr(lvl, "price", 0)), int(getattr(lvl, "size", 0))) for lvl in raw_asks],
+                    key=lambda x: x[0],   # best ask first (ascending price)
+                )
+            except Exception:
+                return
+            self._mark_event("orderbook", s0)
+            with self._lock:
+                self._orderbook[s0] = {"bids": bids, "asks": asks, "ts": time.time()}
 
         async def _on_quote(q):
             sym = getattr(q, "symbol", None)
@@ -270,6 +509,15 @@ class AlpacaStreamCache:
             self._mark_event("quote", s0)
             with self._lock:
                 self._last_quote[s0] = payload
+                try:
+                    bid = payload["bid_price"]
+                    ask = payload["ask_price"]
+                    if bid > 0 and ask > bid:
+                        mid = (bid + ask) / 2.0
+                        spread_pct = (ask - bid) / mid * 100.0
+                        self._quote_spreads[s0].append((time.time(), spread_pct, mid))
+                except Exception:
+                    pass
 
         async def _on_bar(bar):
             sym = getattr(bar, "symbol", None)
@@ -293,9 +541,79 @@ class AlpacaStreamCache:
             with self._lock:
                 self._bars_1m[s0].append(row)
 
+        async def _on_status(status):
+            sym = getattr(status, "symbol", None)
+            if not sym:
+                return
+            s0 = str(sym).upper()
+            try:
+                payload = {
+                    "symbol":         s0,
+                    "status_code":    str(getattr(status, "status_code",    "") or ""),
+                    "status_message": str(getattr(status, "status_message", "") or ""),
+                    "reason_code":    str(getattr(status, "reason_code",    "") or ""),
+                    "reason_message": str(getattr(status, "reason_message", "") or ""),
+                    "tape":           str(getattr(status, "tape",           "") or ""),
+                    "timestamp":      getattr(status, "timestamp").isoformat() if getattr(status, "timestamp", None) else None,
+                    "received_at":    time.time(),
+                }
+            except Exception:
+                return
+            self._mark_event("status", s0)
+            with self._lock:
+                self._last_halt_status[s0] = payload
+                self._halt_events.append(payload)
+            hook = self._market_event_hook
+            if hook:
+                try: hook()
+                except Exception: pass
+
+        async def _on_luld(luld) -> None:
+            raw = luld if isinstance(luld, dict) else luld.__dict__
+            sym = str(raw.get('symbol', '') or raw.get('S', '')).upper().strip()
+            if not sym:
+                return
+            data = {
+                'symbol':       sym,
+                'limit_up':     float(raw.get('limit_up',   raw.get('u', 0)) or 0),
+                'limit_down':   float(raw.get('limit_down', raw.get('d', 0)) or 0),
+                'indicator':    str(raw.get('indicator',    raw.get('i', ''))),
+                'ts':           str(raw.get('timestamp',    raw.get('t', ''))),
+                'received_at':  time.time(),
+            }
+            with self._lock:
+                self._luld_bands[sym] = data
+                self._luld_events.append(data)
+            self._mark_event('luld', sym)
+            hook = self._market_event_hook
+            if hook:
+                try: hook()
+                except Exception: pass
+
+        async def _on_imbalance(imb) -> None:
+            raw = imb if isinstance(imb, dict) else imb.__dict__
+            sym = str(raw.get('symbol', '') or raw.get('S', '')).upper().strip()
+            if not sym:
+                return
+            data = {
+                'symbol':      sym,
+                'price':       float(raw.get('price', raw.get('p', 0)) or 0),
+                'tape':        str(raw.get('tape',  raw.get('z', ''))),
+                'ts':          str(raw.get('timestamp', raw.get('t', ''))),
+                'received_at': time.time(),
+            }
+            with self._lock:
+                self._imbalances[sym] = data
+                self._imbalance_events.append(data)
+            self._mark_event('imbalance', sym)
+
         self._on_trade_cb = _on_trade
         self._on_quote_cb = _on_quote
         self._on_bar_cb = _on_bar
+        self._on_status_cb = _on_status
+        self._on_orderbook_cb = _on_orderbook
+        self._on_luld_cb = _on_luld
+        self._on_imbalance_cb = _on_imbalance
 
         attempt = 0
         while not self._stop.is_set() and not self._fatal_stop.is_set():
@@ -320,6 +638,27 @@ class AlpacaStreamCache:
                     stream.subscribe_trades(_on_trade, *syms)
                     stream.subscribe_quotes(_on_quote, *syms)
                     stream.subscribe_bars(_on_bar, *syms)
+                    try:
+                        stream.subscribe_trading_statuses(_on_status, *syms)
+                    except Exception:
+                        pass
+                    try:
+                        stream._subscribe(_on_luld, syms, stream._handlers["lulds"])
+                    except Exception:
+                        pass
+                    try:
+                        stream.subscribe_imbalances(_on_imbalance, *syms)
+                    except Exception:
+                        pass
+                    try:
+                        if self._orderbook_supported:
+                            stream.subscribe_orderbooks(_on_orderbook, *syms)
+                    except Exception as _ob_err:
+                        _msg = f"{type(_ob_err).__name__}: {_ob_err}".lower()
+                        if any(m in _msg for m in ("not entitled", "insufficient", "not authorized",
+                                                    "forbidden", "subscription", "attribute")):
+                            with self._lock:
+                                self._orderbook_supported = False
                     with self._lock:
                         self._subscribed_actual |= set(syms)
                         self._last_subscribe_at = time.time()

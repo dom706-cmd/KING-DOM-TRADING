@@ -29,7 +29,7 @@ _ET = ET
 @dataclass(frozen=True)
 class ORBConfig:
     min_price: float = 1.0
-    max_price: float = 20.0
+    max_price: float = 30.0
 
     # Liquidity / activity
     min_today_dollar_vol: float = 2_000_000.0
@@ -163,7 +163,49 @@ class Candidate:
     prev_day_change_pct: float | None = None
     dist_above_prev_day_high_pct: float | None = None
     dist_above_20d_high_pct: float | None = None
+    projected_rvol: float | None = None  # full-day RVOL projection normalized for time-of-day
+    extended_gap_warning: bool = False   # True when gap >50% and long grade capped at C
+    news_headline: str | None = None
+    news_age_hours: float | None = None
 
+
+@dataclass
+class ScanCandidate:
+    """Lightweight candidate produced by non-ORB scan strategies (atr_expansion, float_rotation, halt_resume, 52wk_pullback, eod_momentum)."""
+    symbol: str
+    last_price: float
+    best_direction: str          # "LONG" or "SHORT"
+    risk_per_share: float
+    strategy: str
+    scan_ts: str
+    pct_change: float | None = None
+    rvol: float | None = None
+    dollar_volume: float | None = None
+    avg20_dollar_vol: float | None = None
+    or_high: float | None = None
+    or_low: float | None = None
+    or_pct: float | None = None
+    long_trigger: float | None = None
+    short_trigger: float | None = None
+    long_stop: float | None = None
+    short_stop: float | None = None
+    long_target_2r: float | None = None
+    short_target_2r: float | None = None
+    long_shares: int | None = None
+    short_shares: int | None = None
+    long_notional: float | None = None
+    short_notional: float | None = None
+    ml_score: float | None = None
+    combined_score: float | None = None
+    sentiment_score: float | None = None
+    catalyst_score: float | None = None
+    confidence_score: float | None = None
+    confidence_grade: str | None = None
+    tradable_now: bool = True
+    chase_r: float = 0.0
+    notes: str = ""
+    news_headline: str | None = None
+    news_age_hours: float | None = None
 
 
 def _stream_confidence_grade(score_0_100: float | None) -> str | None:
@@ -376,7 +418,7 @@ def _stream_rr_candidate(
     entry = float(close_s.iloc[i])
     stop = float(entry - max(si * float(stop_sigma_mult), 0.01))
     risk = float(entry - stop)
-    if not (cfg.min_risk_per_share <= risk <= max(cfg.max_risk_per_share, risk)):
+    if not (cfg.min_risk_per_share <= risk <= cfg.max_risk_per_share):
         raise ValueError("risk_out_of_bounds")
 
     shares = int(math.floor(cfg.risk_dollars / max(risk, 1e-9)))
@@ -722,6 +764,14 @@ def _classify_intraday_exception(exc: Exception | str) -> tuple[str, str]:
         "position_sizing_invalid",
         "rr_sigma_vwap_invalid",
         "rr_not_enough_rth_bars",
+        "rt_not_above_vwap",
+        "rt_range_too_narrow",
+        "rt_range_too_wide",
+        "rt_range_not_flat",
+        "rt_insufficient_floor_touches",
+        "rt_insufficient_ceiling_touches",
+        "rt_not_in_entry_zone",
+        "rt_poor_risk_reward",
     }
     if msg in exact_codes:
         return msg, msg
@@ -1042,7 +1092,7 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
     or_mid = (or_high + or_low) / 2.0
     or_range_pct = (or_high - or_low) / or_mid * 100.0 if or_mid > 0 else 999.0
     if not (cfg.min_or_range_pct <= or_range_pct <= cfg.max_or_range_pct):
-        soft_fail_reasons.append("filtered_or_range")
+        raise ValueError("filtered_or_range")
 
     try:
         vw = vwap(intraday)
@@ -1071,11 +1121,24 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
     today_vol = float(intraday["Volume"].astype(float).sum())
     today_dollar_vol = today_vol * last_price
     if today_dollar_vol < cfg.min_today_dollar_vol:
-        soft_fail_reasons.append("filtered_today_dollar_vol")
+        raise ValueError("filtered_today_dollar_vol")
 
     rvol = today_vol / float(avg20_vol)
-    if rvol < cfg.min_rvol:
-        soft_fail_reasons.append("filtered_rvol")
+
+    # Projected full-day RVOL: normalizes raw RVOL for time elapsed in session.
+    # At 10am (30/390 = 7.7% of day), a stock at 2× raw RVOL is tracking ~26× pace.
+    # This is how Trade-Ideas, TC2000, and professional scanners report RVOL intraday.
+    # Filter on projected RVOL so early-session high-momentum names are not excluded.
+    _last_bar_et = intraday.index[-1]
+    if hasattr(_last_bar_et, "tz_convert"):
+        _last_bar_et = _last_bar_et.tz_convert(ET)
+    _session_open_et = datetime.combine(session_date, dtime(9, 30), tzinfo=ET)
+    _elapsed_min = max(1.0, (_last_bar_et - _session_open_et).total_seconds() / 60.0)
+    _pct_of_session = min(1.0, _elapsed_min / 390.0)
+    projected_rvol = (today_vol / _pct_of_session) / float(avg20_vol)
+
+    if projected_rvol < cfg.min_rvol:
+        raise ValueError("filtered_rvol")
 
     daily_ctx = daily.copy()
     daily_ctx["day"] = daily_ctx.index.date
@@ -1138,6 +1201,9 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
     if not long_seed_valid and not short_seed_valid:
         raise ValueError("filtered_no_valid_plan")
     if not long_valid and not short_valid:
+        # Both sides have a valid OR spread but risk/share is outside cfg bounds
+        if long_seed_valid or short_seed_valid:
+            raise ValueError("filtered_risk_per_share")
         soft_fail_reasons.append("filtered_no_valid_plan")
 
     # Choose best side (simple heuristic: prefer side with larger RVOL alignment)
@@ -1274,6 +1340,7 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
         last_price=last_price,
         pct_change=pct_change,
         rvol=rvol,
+        projected_rvol=projected_rvol,
         today_dollar_vol=today_dollar_vol,
         avg20_dollar_vol=avg20_dollar_vol,
         or_high=or_high,
@@ -1741,8 +1808,6 @@ def _passes_final_orb_rank_gate(c: Candidate, *, min_combined: float = 0.55, min
     grade_order = {'A+': 5, 'A': 4, 'B': 3, 'C': 2, 'D': 1, 'F': 0}
     if float(c.combined_score or 0.0) < float(min_combined):
         return False, 'combined_too_low'
-    if float(c.confidence_score or 0.0) < 72.0:
-        return False, 'confidence_too_low'
     if grade_order.get(c.confidence_grade or 'F', 0) < grade_order.get(str(min_grade).upper(), 3):
         return False, 'grade_too_low'
     return True, None
@@ -1868,7 +1933,7 @@ def _rr_rule_score(c: Candidate, feats: dict[str, float]) -> float:
     vol_score = _clip((relvol5 + relvol15) / 4.0, 0.0, 1.0)
     reclaim_score = _clip((vwap_delta + 2.0) / 3.0, 0.0, 1.0)
     slope_score = _clip((slope + 0.05) / 0.50, 0.0, 1.0)
-    proximity_score = _clip(1.0 - dist_entry / 1.5, 0.0, 1.0)
+    proximity_score = 1.0 / (1.0 + (dist_entry / 0.5) ** 2)
     trend_score = {
         'reclaim_vwap': 1.00,
         'up': 0.80,
@@ -1919,11 +1984,12 @@ def _passes_rr_actionable_long_gate(c: Candidate, feats: dict[str, float]) -> tu
 
 
 def _grade_for_confidence(score: float) -> str:
-    if score >= 85:
+    # Raised thresholds — A/A+ should be rare, representing genuine edge
+    if score >= 90:
         return 'A+'
-    if score >= 78:
+    if score >= 82:
         return 'A'
-    if score >= 70:
+    if score >= 72:
         return 'B'
     if score >= 62:
         return 'C'
@@ -1938,8 +2004,10 @@ def _orb_base_score(c: Candidate) -> float:
     s += min(30.0, (c.rvol or 0.0) / 8.0 * 30.0)
     if c.above_vwap is True:
         s += 10.0
-    s += max(0.0, 20.0 - abs(c.or_range_pct - 2.5) * 6.0)
-    dist = (c.entry - c.last_price) / c.entry * 100.0
+    # Only penalize WIDE OR ranges — tight coil (< 3%) is ideal for ORB, not a penalty
+    _or = float(c.or_range_pct or 0.0)
+    s += max(0.0, 20.0 - max(0.0, _or - 3.0) * 5.0)
+    dist = abs(c.entry - c.last_price) / c.entry * 100.0
     s += 10.0 if dist <= 1.5 else (5.0 if dist <= 3.0 else 0.0)
     return s
 
@@ -2020,9 +2088,12 @@ def _apply_orb_enrichment_to_candidate(c: Candidate, *, sentiment_map: dict[str,
     c.sentiment_score = sentiment_map.get(c.symbol)
     cb = catalyst_map.get(c.symbol) if isinstance(catalyst_map, dict) else None
     if cb is not None:
-        c.catalyst_score = float(getattr(cb, 'score', 0.0) or 0.0)
-        c.catalyst_confidence = float(getattr(cb, 'confidence', 0.0) or 0.0)
-        c.catalyst_strength = float(getattr(cb, 'strength', 0.0) or 0.0)
+        _cs = getattr(cb, 'score', None)
+        _cc = getattr(cb, 'confidence', None)
+        _cst = getattr(cb, 'strength', None)
+        c.catalyst_score = float(_cs) if _cs is not None else None
+        c.catalyst_confidence = float(_cc) if _cc is not None else None
+        c.catalyst_strength = float(_cst) if _cst is not None else None
         c.catalyst_article_count = int(getattr(cb, 'article_count', 0) or 0)
         c.catalyst_freshness_hours = getattr(cb, 'freshness_hours', None)
         c.catalyst_tags = list(getattr(cb, 'tags', []) or [])
@@ -2040,11 +2111,12 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
     rule_norm = _candidate_setup_rule_score(c)
     tape_q = _tape_proxy_score(c)
     align_q = _alignment_score(c)
-    sent_term = float(sentiment_alpha) * float(c.sentiment_score or 0.0) if c.sentiment_score is not None else 0.0
-    cat_term = float(catalyst_alpha) * float(c.catalyst_score or 0.0) if c.catalyst_score is not None else 0.0
+    sent_term = float(sentiment_alpha) * float(c.sentiment_score) if (c.sentiment_score is not None and math.isfinite(c.sentiment_score)) else 0.0
+    cat_term = float(catalyst_alpha) * float(c.catalyst_score) if (c.catalyst_score is not None and math.isfinite(c.catalyst_score)) else 0.0
 
     category = 'liquidity'
-    if float(c.catalyst_score or 0.0) >= 0.35 or float(c.sentiment_score or 0.0) >= 0.25:
+    if (c.catalyst_score is not None and math.isfinite(c.catalyst_score) and c.catalyst_score >= 0.35) or \
+            (c.sentiment_score is not None and math.isfinite(c.sentiment_score) and c.sentiment_score >= 0.25):
         category = 'news'
     elif (c.best_side or '').lower() == 'short' or bool(c.short_triggered):
         category = 'reversal'
@@ -2078,23 +2150,38 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
     c.regime_adjustment = float(round(score - ml_base, 6))
     c.combined_score = float(round(score, 6))
 
-    cat_q = _clip(float(c.catalyst_confidence or 0.0) / 100.0, 0.0, 1.0)
+    _cconf = c.catalyst_confidence
+    cat_q = _clip(float(_cconf) / 100.0, 0.0, 1.0) if (_cconf is not None and math.isfinite(float(_cconf))) else 0.0
     conf = 100.0 * (
         0.30 * rule_norm +
         0.30 * tape_q +
         0.25 * align_q +
         0.15 * cat_q
     )
-    if c.sentiment_score is not None and c.catalyst_score is not None:
-        if (c.sentiment_score >= 0 and c.catalyst_score >= 0) or (c.sentiment_score <= 0 and c.catalyst_score <= 0):
-            conf += 3.0
+    if (c.sentiment_score is not None and math.isfinite(c.sentiment_score) and
+            c.catalyst_score is not None and math.isfinite(c.catalyst_score)):
+        magnitude = abs(c.sentiment_score) * abs(c.catalyst_score)
+        if (c.sentiment_score >= 0) == (c.catalyst_score >= 0):
+            conf += 5.0 * magnitude
         else:
-            conf -= 3.0
+            # Opposing catalyst is a hard signal against the trade — penalize aggressively
+            conf -= 20.0 * magnitude
     if (c.best_side == 'long' and c.long_triggered) or (c.best_side == 'short' and c.short_triggered):
         conf += 2.0
     conf = _clip(conf, 0.0, 100.0)
     c.confidence_score = float(round(conf, 2))
     c.confidence_grade = _grade_for_confidence(conf)
+
+    # Extended gap penalty: if long side and stock is >50% above prior close,
+    # institutions already distributed in AH — cap long grade at C and flag warning.
+    gap_pct = float(c.dist_from_prev_close_pct or 0.0)
+    if c.best_side == 'long' and gap_pct >= 50.0:
+        c.extended_gap_warning = True
+        grade_cap = {'A+': 'C', 'A': 'C', 'B': 'C'}
+        if c.confidence_grade in grade_cap:
+            c.confidence_grade = grade_cap[c.confidence_grade]
+    else:
+        c.extended_gap_warning = False
 
     return {
         'ml_base': round(ml_base, 6),
@@ -2124,9 +2211,9 @@ def _apply_orb_gate_state(c: Candidate, *, score_parts: dict[str, float | str | 
         c,
         exec_style=exec_style,
         min_minutes_after_open=orb_min_minutes_after_open_value,
-        breakout_now_min_ml_score=orb_breakout_now_min_ml_value,
+        breakout_now_min_ml_score=orb_breakout_now_min_ml_value if use_ml else 0.0,
         breakout_now_max_chase_r=orb_breakout_now_max_chase_r_value,
-        retest_min_ml_score=orb_retest_min_ml_value,
+        retest_min_ml_score=orb_retest_min_ml_value if use_ml else 0.0,
         retest_max_chase_r=orb_retest_max_chase_r_value,
         directional_max_chase_r=orb_max_chase_r_value,
     )
@@ -2273,6 +2360,35 @@ def scan_symbols(
     strategy = str(kwargs.get('strategy') or kwargs.get('scan_strategy') or 'orb').strip().lower() or 'orb'
     if strategy in {'range_reversion','rr','range'}:
         return scan_range_reversion_symbols(symbols, cfg, limit=limit, **kwargs)
+    if strategy in {'range_trap','rt','trap'}:
+        return scan_range_trap_symbols(symbols, cfg, limit=limit, **kwargs)
+    if strategy in {'gap_and_go','gg','gap','gap-and-go'}:
+        return scan_gap_and_go_symbols(symbols, cfg, limit=limit, **kwargs)
+    if strategy in {'float_rotation','float','fr'}:
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_float_rotation_symbols(symbols, _prov, session_date=None, limit=limit, **_kw)
+    if strategy in {'halt_resume','halt','resume','hr'}:
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_halt_resume_symbols(symbols, _prov, session_date=None, limit=limit, **_kw)
+    if strategy in {'52wk_pullback','52wk','wk52','pullback'}:
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_52wk_pullback_symbols(symbols, _prov, session_date=None, limit=limit, **_kw)
+    if strategy in {'atr_expansion','atr','expansion'}:
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_atr_expansion_symbols(symbols, _prov, session_date=None, limit=limit, **_kw)
+    if strategy in {'eod_momentum','eod','friday_close','saturday_prep','weekend'}:
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_eod_momentum_symbols(symbols, _prov, session_date=None, limit=limit, **_kw)
+    if strategy in {'parabolic','para','parabolic_watch'}:
+        from scanner.parabolic import scan_parabolic_symbols
+        _prov = kwargs.get("provider") or AlpacaProvider()
+        _kw = {k: v for k, v in kwargs.items() if k not in ('provider', 'session_date')}
+        return scan_parabolic_symbols(symbols, cfg, limit=limit, provider=_prov, **_kw)
 
     stream_cache = kwargs.get("stream_cache")
     streaming_only = bool(kwargs.get("streaming_only", False) or kwargs.get("runtime_streaming_only", False))
@@ -2562,6 +2678,7 @@ def scan_symbols(
     regime = _pick_regime_profile(regime_profile, candidates)
 
     long_only_flag = bool(kwargs.get("long_only", True))
+    short_only_flag = bool(kwargs.get("short_only", False))
     min_grade_enabled = bool(kwargs.get("min_grade_enabled", True))
     min_grade_value = str(kwargs.get("min_grade", "B")).strip().upper() or "B"
     min_combined_enabled = bool(kwargs.get("min_combined_enabled", True))
@@ -2587,6 +2704,8 @@ def scan_symbols(
         if not monitor_first_mode:
             return False
         if long_only_flag and str(c.best_side or "").lower() != "long":
+            return False
+        if short_only_flag and str(c.best_side or "").lower() != "short":
             return False
         if float(c.last_price or 0.0) <= 0.0:
             return False
@@ -2835,7 +2954,7 @@ def build_range_reversion_plan(
 
     # Pick most recent strict touch, then fall back to a near-touch if price tagged the lower band zone.
     now_ts = df.index[-1]
-    touch_lookback_effective = max(int(touch_lookback_min), min(int(range_window_min), 45))
+    touch_lookback_effective = max(int(touch_lookback_min), int(range_window_min))
     cutoff = now_ts - timedelta(minutes=touch_lookback_effective)
 
     low_s = df["Low"].astype(float)
@@ -2868,6 +2987,8 @@ def build_range_reversion_plan(
     li = float(lower.iloc[i])
     ui = float(upper.iloc[i])
     if not (si > 1e-9 and vi > 0):
+        raise ValueError("rr_sigma_vwap_invalid")
+    if si / vi < 0.001:  # sigma < 0.1% of VWAP — bands have collapsed, not tradeable
         raise ValueError("rr_sigma_vwap_invalid")
 
     entry = li
@@ -2920,10 +3041,22 @@ def build_range_reversion_plan(
     pct_change = ((last_price - prev_close) / prev_close * 100.0) if (prev_close and prev_close > 0) else None
 
     avg20_vol = ctx.get("avg20_vol")
-    rvol = (float(df["Volume"].astype(float).sum()) / float(avg20_vol)) if (avg20_vol and avg20_vol > 0) else None
-
     today_vol = float(df["Volume"].astype(float).sum())
+    rvol = (today_vol / float(avg20_vol)) if (avg20_vol and avg20_vol > 0) else None
+
+    _last_bar_et = df.index[-1]
+    if hasattr(_last_bar_et, "tz_convert"):
+        _last_bar_et = _last_bar_et.tz_convert(ET)
+    _session_open_et = datetime.combine(session_date, dtime(9, 30), tzinfo=ET)
+    _elapsed_min = max(1.0, (_last_bar_et - _session_open_et).total_seconds() / 60.0)
+    _pct_of_session = min(1.0, _elapsed_min / 390.0)
+    projected_rvol = (today_vol / _pct_of_session) / float(avg20_vol) if (avg20_vol and avg20_vol > 0) else None
+
     today_dollar_vol = float(today_vol * last_price)
+    if today_dollar_vol < cfg.min_today_dollar_vol:
+        raise ValueError("filtered_today_dollar_vol")
+    if projected_rvol is not None and projected_rvol < cfg.min_rvol:
+        raise ValueError("filtered_rvol")
 
     # vwap + trend (existing helpers)
     vw = vwap(df)
@@ -2935,6 +3068,7 @@ def build_range_reversion_plan(
         last_price=last_price,
         pct_change=pct_change,
         rvol=rvol,
+        projected_rvol=projected_rvol,
         today_dollar_vol=today_dollar_vol,
         avg20_dollar_vol=float(ctx.get("avg20_dollar_vol")) if ctx.get("avg20_dollar_vol") is not None else None,
 
@@ -3095,7 +3229,7 @@ def scan_range_reversion_symbols(
     feat_rows: List[dict] = []
     feat_by_symbol: Dict[str, dict] = {}
     data_failures = list(daily_errors)
-    reject_counts = {"no_recent_touch": 0, "risk_out_of_bounds": 0, "position_sizing_invalid": 0, "intraday_error": 0}
+    reject_counts = {"no_recent_touch": 0, "risk_out_of_bounds": 0, "position_sizing_invalid": 0, "filtered_today_dollar_vol": 0, "filtered_rvol": 0, "intraday_error": 0}
     failure_samples_by_code: dict[str, list[dict[str, Any]]] = {}
 
     def _one(sym: str):
@@ -3114,7 +3248,7 @@ def scan_range_reversion_symbols(
         except Exception as e:
             return sym, None, None, f"{type(e).__name__}: {e}"
 
-    workers = int(kwargs.get("workers", os.getenv("ORB_WORKERS", 10)))
+    workers = max(1, int(kwargs.get("workers", os.getenv("ORB_WORKERS", 10))))
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(_one, s) for s in shortlisted]
         for fut in as_completed(futs):
@@ -3132,6 +3266,10 @@ def scan_range_reversion_symbols(
                     reject_counts["risk_out_of_bounds"] += 1
                 elif code == "position_sizing_invalid":
                     reject_counts["position_sizing_invalid"] += 1
+                elif code == "filtered_today_dollar_vol":
+                    reject_counts["filtered_today_dollar_vol"] += 1
+                elif code == "filtered_rvol":
+                    reject_counts["filtered_rvol"] += 1
                 else:
                     reject_counts["intraday_error"] += 1
                 fail_item = {"symbol": sym, "stage": "rr_plan", "error": detail, "code": code}
@@ -3166,7 +3304,8 @@ def scan_range_reversion_symbols(
         s = 0.0
         s += min(30.0, (c.today_dollar_vol or 0.0) / 25_000_000.0 * 30.0)
         s += min(30.0, (c.rvol or 0.0) / 8.0 * 30.0)
-        s += max(0.0, 20.0 - abs(c.or_range_pct - 4.0) * 4.0)
+        _or = float(c.or_range_pct or 0.0)
+        s += max(0.0, 20.0 - max(0.0, _or - 3.0) * 5.0)
         return float(s)
 
     sentiment_map: Dict[str, float] = {}
@@ -3213,6 +3352,8 @@ def scan_range_reversion_symbols(
     # while still allowing explicit overrides from kwargs/env-driven callers.
     rr_min_ml_value = float(kwargs.get("rr_min_ml_score", 0.35)) if use_ml else 0.0
     rr_min_confidence_value = float(kwargs.get("rr_min_confidence", 45.0))
+    long_only_flag = bool(kwargs.get("long_only", True))
+    short_only_flag = bool(kwargs.get("short_only", False))
     admissible: list[Candidate] = []
     rejected_candidates: list[Candidate] = []
 
@@ -3222,7 +3363,8 @@ def scan_range_reversion_symbols(
 
         cb = catalyst_map.get(c.symbol) if isinstance(catalyst_map, dict) else None
         if cb is not None:
-            c.catalyst_score = float(getattr(cb, "score", 0.0) or 0.0)
+            _cs = getattr(cb, "score", None)
+            c.catalyst_score = float(_cs) if _cs is not None else None
             c.catalyst_article_count = int(getattr(cb, "article_count", 0) or 0)
             c.catalyst_freshness_hours = getattr(cb, "freshness_hours", None)
             c.catalyst_tags = list(getattr(cb, "tags", []) or [])
@@ -3319,6 +3461,45 @@ def scan_range_reversion_symbols(
                 "reason": "daily_ok",
             })
 
+    seed_candidates: list[Candidate] = []
+    for c in candidates:
+        reasons = [str(r) for r in (getattr(c, "monitor_seed_reasons", None) or []) if str(r)]
+        gate_reasons = [str(r) for r in (getattr(c, "gate_fail_reasons", None) or []) if str(r)]
+        merged_reasons = list(dict.fromkeys([*reasons, *gate_reasons]))
+        if long_only_flag and str(c.best_side or "").lower() != "long":
+            continue
+        if short_only_flag and str(c.best_side or "").lower() != "short":
+            continue
+        if float(c.last_price or 0.0) <= 0.0:
+            continue
+        if c in admissible:
+            c.monitor_seed = True
+            c.tradable_now = True
+            if not c.monitor_seed_reasons:
+                c.monitor_seed_reasons = ["trade_ready"]
+            seed_candidates.append(c)
+            continue
+        if float(c.entry or 0.0) > 0.0 and float(c.stop or 0.0) > 0.0:
+            c.monitor_seed = True
+            c.tradable_now = False
+            c.monitor_seed_reasons = merged_reasons or ["rr_near_setup"]
+            seed_candidates.append(c)
+            continue
+        vwap_last = float(getattr(c, "vwap_last", 0.0) or 0.0)
+        last_price = float(c.last_price or 0.0)
+        if vwap_last > 0.0 and last_price > 0.0:
+            vwap_gap_pct = abs((last_price - vwap_last) / vwap_last) * 100.0
+            if vwap_gap_pct <= 1.5:
+                c.monitor_seed = True
+                c.tradable_now = False
+                c.monitor_seed_reasons = merged_reasons or ["rr_near_vwap"]
+                seed_candidates.append(c)
+
+    try:
+        seed_candidates.sort(key=lambda x: (float(x.combined_score or 0.0), float(x.ml_score or 0.0), float(x.today_dollar_vol or 0.0)), reverse=True)
+    except Exception:
+        pass
+
     admissible.sort(key=lambda x: (float(x.combined_score or 0.0), float(x.ml_score or 0.0)), reverse=True)
     top = admissible[: int(limit)]
 
@@ -3341,6 +3522,8 @@ def scan_range_reversion_symbols(
         "candidates_total": len(admissible),
         "rejected_total": len(rejected_candidates),
         "candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in top],
+        "seed_candidates_total": len(seed_candidates),
+        "seed_candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in seed_candidates[: int(limit)]],
         "rejected_candidates": [({**asdict(c), "price": float(c.last_price or 0.0), "scan_date": session_date.isoformat(), "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}) for c in rejected_candidates[: int(limit)]],
         "prefilter_counts": pre_counts,
         "prefilter_samples": prefilter_samples,
@@ -3358,3 +3541,2578 @@ def _grade(x: float) -> str:
     if x >= 55: return "C"
     if x >= 40: return "D"
     return "F"
+
+
+# ==================== Range Trap (Consolidation Above VWAP) ====================
+#
+# Finds stocks trading above VWAP that are oscillating predictably between a
+# proven horizontal floor and ceiling.  Entry is at the range floor, target is
+# the ceiling, stop is below the floor.
+#
+# Pro-trader quality checks:
+#   • Price must be meaningfully above cumulative VWAP (bullish bias confirmed)
+#   • Range must be horizontal: |linear-regression slope| < rt_slope_threshold
+#   • Floor and ceiling each need ≥ rt_min_touches confirmed touches
+#   • Range width must be tradeable (0.5 % – 4.0 %)
+#   • Entry zone: price must be in the lower 35 % of the range (near support)
+#   • Minimum R:R of 1.5× (natural target = ceiling)
+#   • Stop placed below the floor by 0.5 × ATR (beyond proven support)
+#   • Skips the first 15 min of the session (noise elimination)
+#   • Volume-at-floor ratio captured as accumulation signal for scoring
+# ==============================================================================
+
+def _rt_setup_rule_score(c: "Candidate", feats: dict) -> float:
+    """Rule-based quality score [0, 1] for a range-trap candidate."""
+    # Touch quality: more touches = better established range
+    ft = float(feats.get("floor_touches", 0))
+    ct = float(feats.get("ceiling_touches", 0))
+    touch_score = _clip((min(ft, ct) - 2.0) / 4.0, 0.0, 1.0)
+
+    # Flatness: lower absolute slope = more horizontal range
+    slope = abs(float(feats.get("slope_pct_per_bar", 0.05)))
+    flat_score = _clip(1.0 - slope / 0.05, 0.0, 1.0)
+
+    # Volume at floor (accumulation): > average at lows is bullish
+    vol_ratio = float(feats.get("vol_at_floor_ratio", 1.0))
+    vol_score = _clip((vol_ratio - 0.8) / 1.5, 0.0, 1.0)
+
+    # VWAP gap: above VWAP but not over-extended
+    vwap_gap = float(feats.get("vwap_gap_pct", 0.0))
+    vwap_score = (_clip((vwap_gap - 0.3) / 2.0, 0.0, 1.0) *
+                  _clip(1.0 - (vwap_gap - 2.5) / 3.0, 0.0, 1.0))
+
+    # R:R quality
+    rr = float(feats.get("rr_ratio", 0.0))
+    rr_score = _clip((rr - 1.5) / 2.5, 0.0, 1.0)
+
+    # Entry proximity to floor (lower = cleaner entry)
+    pct_in_range = float(feats.get("pct_in_range", 0.5))
+    zone_score = _clip(1.0 - pct_in_range / 0.35, 0.0, 1.0)
+
+    return float(
+        0.25 * touch_score +
+        0.20 * flat_score +
+        0.15 * vol_score +
+        0.15 * vwap_score +
+        0.15 * rr_score +
+        0.10 * zone_score
+    )
+
+
+def _rt_alignment_score(c: "Candidate") -> float:
+    """Trend + VWAP alignment for a range-trap candidate [0, 1]."""
+    trend = (c.trend_state or "").lower()
+    score = 0.0
+    # Trend should be flat or mildly bullish — strong downtrend disqualifies
+    if trend in ("flat", "neutral", "ranging"):
+        score += 0.5
+    elif "bull" in trend or "up" in trend:
+        score += 0.7
+    elif "bear" in trend or "down" in trend:
+        score += 0.1
+    else:
+        score += 0.3
+    # Already confirmed above VWAP so give full credit
+    if c.above_vwap:
+        score = min(1.0, score + 0.3)
+    return float(_clip(score, 0.0, 1.0))
+
+
+def _passes_rt_actionable_gate(c: "Candidate", feats: dict) -> tuple[bool, str | None]:
+    """
+    Final actionability gate: is this range-trap candidate ready to trade now?
+    Returns (passes, reason_if_blocked).
+    """
+    if not c.above_vwap:
+        return False, "rt_not_above_vwap"
+
+    pct_in_range = float(feats.get("pct_in_range", 1.0))
+    if pct_in_range > 0.40:
+        return False, "rt_price_above_entry_zone"
+
+    trend = (c.trend_state or "").lower()
+    if "bear" in trend or "strong down" in trend:
+        return False, "rt_trend_bearish"
+
+    return True, None
+
+
+def build_range_trap_plan(
+    provider: "AlpacaProvider",
+    symbol: str,
+    cfg: "ORBConfig",
+    *,
+    session_date: "date",
+    rt_lookback_min: int = 45,
+    rt_min_touches: int = 2,
+    rt_entry_zone_pct: float = 0.35,
+    rt_stop_atr_mult: float = 0.50,
+    rt_min_rr: float = 1.5,
+    rt_min_range_pct: float = 0.50,
+    rt_max_range_pct: float = 4.0,
+    rt_slope_threshold: float = 0.05,
+    rt_vwap_min_gap_pct: float = 0.30,
+) -> "tuple[Candidate, dict]":
+    """
+    Build a range-trap plan for one symbol.
+
+    Raises ValueError with a stable code on any rejection.
+    Returns (Candidate, feature_dict) on success.
+    """
+    import numpy as _np
+
+    # ── 1. Intraday bars ──────────────────────────────────────────────────────
+    if hasattr(provider, "get_bars_range"):
+        intraday = provider.get_bars_range(
+            symbol=symbol, interval="1m",
+            from_d=session_date, to_d=session_date, include_prepost=False,
+        )
+    else:
+        intraday = provider.get_bars(
+            BarsRequest(symbol=symbol, interval="1m", period="5d", include_prepost=False)
+        )
+        intraday = intraday[intraday.index.date == session_date]
+
+    if intraday is None or intraday.empty:
+        raise RuntimeError("Provider returned empty intraday bars")
+
+    df = intraday.sort_index().copy()
+    if getattr(df.index, "tz", None) is None:
+        df = df.tz_localize("UTC")
+    df = df.tz_convert(ET).between_time("09:30", "16:00")
+
+    if df.empty or len(df) < max(45, rt_lookback_min):
+        raise ValueError("rr_not_enough_rth_bars")
+
+    # ── 2. Skip first 15 min (noise elimination) ─────────────────────────────
+    noise_cutoff = df.index[0].replace(hour=9, minute=45, second=0, microsecond=0)
+    df_stable = df[df.index >= noise_cutoff]
+    if len(df_stable) < max(30, rt_lookback_min):
+        raise ValueError("rr_not_enough_rth_bars")
+
+    # ── 3. Cumulative session VWAP ────────────────────────────────────────────
+    tp_full = (df["High"].astype(float) + df["Low"].astype(float) + df["Close"].astype(float)) / 3.0
+    vol_full = df["Volume"].astype(float)
+    vwap_cum_full = (tp_full * vol_full).cumsum() / (vol_full.cumsum() + 1e-12)
+
+    last_vwap = float(vwap_cum_full.iloc[-1])
+    last_price = float(df["Close"].astype(float).iloc[-1])
+
+    if last_vwap <= 0:
+        raise ValueError("rr_sigma_vwap_invalid")
+
+    # ── 4. Confirm above VWAP (bullish positioning) ───────────────────────────
+    vwap_gap_pct = (last_price - last_vwap) / last_vwap * 100.0
+    if vwap_gap_pct < rt_vwap_min_gap_pct:
+        raise ValueError("rt_not_above_vwap")
+
+    # ── 5. Lookback window for range detection ────────────────────────────────
+    n_lookback = min(int(rt_lookback_min), len(df_stable))
+    win = df_stable.iloc[-n_lookback:]
+
+    high_s  = win["High"].astype(float)
+    low_s   = win["Low"].astype(float)
+    close_s = win["Close"].astype(float)
+    vol_s   = win["Volume"].astype(float)
+
+    ceiling = float(high_s.max())
+    floor   = float(low_s.min())
+    mid_price = float(close_s.mean())
+
+    if mid_price <= 0 or ceiling <= floor:
+        raise ValueError("rr_sigma_vwap_invalid")
+
+    range_abs = ceiling - floor
+    range_pct = range_abs / mid_price * 100.0
+
+    # ── 6. Range width check ──────────────────────────────────────────────────
+    if range_pct < rt_min_range_pct:
+        raise ValueError("rt_range_too_narrow")
+    if range_pct > rt_max_range_pct:
+        raise ValueError("rt_range_too_wide")
+
+    # ── 7. Flatness: linear regression slope of close over window ─────────────
+    x_arr = _np.arange(len(close_s), dtype=float)
+    slope_raw = float(_np.polyfit(x_arr, close_s.to_numpy(), 1)[0])
+    slope_pct_per_bar = slope_raw / mid_price * 100.0
+    if abs(slope_pct_per_bar) > rt_slope_threshold:
+        raise ValueError("rt_range_not_flat")
+
+    # ── 8. ATR (average 1-bar true range over lookback) ──────────────────────
+    # Computed here so touch tolerance scales with actual volatility (TC2000/TS approach).
+    atr_1bar = float((high_s - low_s).mean())
+    if atr_1bar <= 0:
+        raise ValueError("rr_sigma_vwap_invalid")
+
+    # ── 9. Touch counting (ATR-scaled tolerance) ─────────────────────────────
+    # ATR × 0.25 adapts to volatility: tight on calm stocks, wider on volatile ones.
+    # This replaces the fixed 0.15% of price which over-accepted on high-priced stocks
+    # and under-accepted on low-priced/volatile stocks.
+    touch_tol = atr_1bar * 0.25
+    floor_touch_mask   = low_s  <= (floor   + touch_tol)
+    ceiling_touch_mask = high_s >= (ceiling - touch_tol)
+
+    floor_touches   = int(floor_touch_mask.sum())
+    ceiling_touches = int(ceiling_touch_mask.sum())
+
+    if floor_touches < rt_min_touches:
+        raise ValueError("rt_insufficient_floor_touches")
+    if ceiling_touches < rt_min_touches:
+        raise ValueError("rt_insufficient_ceiling_touches")
+
+    # ── 10. Entry zone: price must be in the lower 35 % of the range ─────────
+    if last_price > floor + rt_entry_zone_pct * range_abs:
+        raise ValueError("rt_not_in_entry_zone")
+
+    # ── 11. Entry / stop / target ─────────────────────────────────────────────
+    buffer = max(cfg.buffer_min_dollars, float(floor) * cfg.buffer_pct)
+    entry  = float(floor) + buffer
+    stop   = float(floor) - float(rt_stop_atr_mult) * atr_1bar
+
+    risk   = entry - stop
+    if not (risk > 0 and cfg.min_risk_per_share <= risk <= cfg.max_risk_per_share):
+        raise ValueError("risk_out_of_bounds")
+
+    reward   = ceiling - entry
+    rr_ratio = reward / risk if risk > 0 else 0.0
+    if rr_ratio < rt_min_rr:
+        raise ValueError("rt_poor_risk_reward")
+
+    t_2r = entry + 2.0 * risk
+    t_3r = entry + 3.0 * risk
+
+    shares   = int(math.floor(cfg.risk_dollars / risk)) if risk > 0 else 0
+    notional = float(shares) * float(entry)
+    if shares < cfg.min_shares or notional > cfg.max_notional:
+        raise ValueError("position_sizing_invalid")
+
+    # ── 12. Feature extraction ────────────────────────────────────────────────
+    # Volume accumulation at the floor (bullish signal)
+    floor_vol_bars    = vol_s[floor_touch_mask]
+    floor_vol_avg     = float(floor_vol_bars.mean()) if not floor_vol_bars.empty else 0.0
+    overall_vol_avg   = float(vol_s.mean()) + 1e-12
+    vol_at_floor_ratio = floor_vol_avg / overall_vol_avg
+
+    # VWAP crosses over lookback
+    vwap_win  = vwap_cum_full.loc[win.index]
+    above_arr = (close_s.to_numpy() > vwap_win.to_numpy()).astype(int)
+    vwap_crosses = float((above_arr[1:] != above_arr[:-1]).sum()) if above_arr.size >= 2 else 0.0
+
+    vol_now   = float(vol_s.iloc[-1])
+    relvol5   = vol_now / (float(vol_s.tail(5).mean())  + 1e-12)
+    relvol15  = vol_now / (float(vol_s.tail(15).mean()) + 1e-12)
+
+    last_bar_et = win.index[-1].tz_convert(ET) if hasattr(win.index[-1], "tz_convert") else win.index[-1]
+    tod_min = float((last_bar_et.hour * 60 + last_bar_et.minute) - (9 * 60 + 30))
+
+    pct_in_range = float((last_price - floor) / (range_abs + 1e-12))
+    trades = float(win["Trades"].astype(float).iloc[-1]) if "Trades" in win.columns else 0.0
+
+    session_open_price = float(df["Open"].astype(float).iloc[0])
+    ctx = _rr_daily_context(provider, symbol, session_date=session_date, session_open=session_open_price)
+
+    prev_close = ctx.get("prev_close")
+    pct_change = ((last_price - prev_close) / prev_close * 100.0) if (prev_close and prev_close > 0) else None
+    avg20_vol  = ctx.get("avg20_vol")
+    today_vol  = float(df["Volume"].astype(float).sum())
+    rvol       = (today_vol / float(avg20_vol)) if (avg20_vol and avg20_vol > 0) else None
+    today_dollar_vol = float(today_vol * last_price)
+
+    _last_bar_et_rt = df.index[-1]
+    if hasattr(_last_bar_et_rt, "tz_convert"):
+        _last_bar_et_rt = _last_bar_et_rt.tz_convert(ET)
+    _session_open_et_rt = datetime.combine(session_date, dtime(9, 30), tzinfo=ET)
+    _elapsed_min_rt = max(1.0, (_last_bar_et_rt - _session_open_et_rt).total_seconds() / 60.0)
+    _pct_of_session_rt = min(1.0, _elapsed_min_rt / 390.0)
+    projected_rvol = (today_vol / _pct_of_session_rt) / float(avg20_vol) if (avg20_vol and avg20_vol > 0) else None
+
+    if today_dollar_vol < cfg.min_today_dollar_vol:
+        raise ValueError("filtered_today_dollar_vol")
+    if projected_rvol is not None and projected_rvol < cfg.min_rvol:
+        raise ValueError("filtered_rvol")
+
+    vw     = vwap(df)
+    tstate = trend_state_1m(df, vw=vw, lookback=15)
+
+    # ── 13. Build Candidate ───────────────────────────────────────────────────
+    c = Candidate(
+        symbol=symbol,
+        data_date=str(session_date.isoformat()),
+        last_price=last_price,
+        pct_change=pct_change,
+        rvol=rvol,
+        projected_rvol=projected_rvol,
+        today_dollar_vol=today_dollar_vol,
+        avg20_dollar_vol=(float(ctx["avg20_dollar_vol"]) if ctx.get("avg20_dollar_vol") is not None else None),
+
+        # Reuse OR fields to carry range levels — floor = or_low, ceiling = or_high
+        or_high=ceiling,
+        or_low=floor,
+        or_range_pct=range_pct,
+
+        above_vwap=True,           # guaranteed by gate above
+        vwap_last=last_vwap,
+        vwap_delta_pct=vwap_gap_pct,
+        trend_state=str(tstate.get("state")) if tstate else None,
+        trend_slope_pct=(float(tstate["slope_pct_lookback"]) if tstate and tstate.get("slope_pct_lookback") is not None else None),
+
+        best_side="long",
+        entry=float(entry),
+        stop=float(stop),
+        target_2r=float(t_2r),
+        target_3r=float(ceiling),  # ceiling = natural first target
+        risk_per_share=float(risk),
+        shares=int(shares),
+        notional=float(notional),
+
+        long_entry=float(entry),
+        long_stop=float(stop),
+        long_2r=float(t_2r),
+        long_3r=float(ceiling),
+        long_risk_per_share=float(risk),
+        long_shares=int(shares),
+        long_notional=float(notional),
+
+        short_entry=None,
+        short_stop=None,
+        short_2r=None,
+        short_3r=None,
+        short_risk_per_share=None,
+        short_shares=None,
+        short_notional=None,
+
+        notes=(
+            f"RT | floor={floor:.4f} ceil={ceiling:.4f} range={range_pct:.2f}% "
+            f"| touches F{floor_touches}/C{ceiling_touches} "
+            f"| VWAP+{vwap_gap_pct:.2f}% RR={rr_ratio:.2f}x "
+            f"| slope={slope_pct_per_bar:.4f}%/bar"
+        ),
+        stop_loss=float(stop),
+        take_profit=float(ceiling),
+        strategy="range_trap",
+        scan_ts=datetime.now(timezone.utc).isoformat(),
+        prior_session_touch=False,
+    )
+
+    feats = {
+        "range_pct":          float(range_pct),
+        "range_abs":          float(range_abs),
+        "floor_touches":      float(floor_touches),
+        "ceiling_touches":    float(ceiling_touches),
+        "slope_pct_per_bar":  float(slope_pct_per_bar),
+        "pct_in_range":       float(pct_in_range),
+        "vwap_gap_pct":       float(vwap_gap_pct),
+        "vwap_crosses":       float(vwap_crosses),
+        "vol_at_floor_ratio": float(vol_at_floor_ratio),
+        "rr_ratio":           float(rr_ratio),
+        "atr_1bar":           float(atr_1bar),
+        "relvol5":            float(relvol5),
+        "relvol15":           float(relvol15),
+        "tod_min":            float(tod_min),
+        "transactions":       float(trades),
+        "volume":             float(vol_now),
+        "trend_20_50":        float(ctx.get("trend_20_50", float("nan"))),
+        "vol20":              float(ctx.get("vol20",         float("nan"))),
+        "avg20_dollar_vol":   float(ctx.get("avg20_dollar_vol", float("nan"))),
+        "mom5":               float(ctx.get("mom5",          float("nan"))),
+        "mom20":              float(ctx.get("mom20",         float("nan"))),
+        "gap_pct":            float(ctx.get("gap_pct",       float("nan"))),
+        "atr14_pct":          float(ctx.get("atr14_pct",     float("nan"))),
+    }
+    return c, feats
+
+
+def scan_range_trap_symbols(
+    symbols: List[str],
+    cfg: "ORBConfig",
+    limit: int = 25,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Scan symbols for range-trap setups (consolidation above VWAP).
+    Mirrors scan_range_reversion_symbols structure for full pipeline compatibility.
+    """
+    stream_cache    = kwargs.get("stream_cache")
+    streaming_only  = bool(kwargs.get("streaming_only", False) or kwargs.get("runtime_streaming_only", False))
+    if stream_cache is not None and streaming_only:
+        return _scan_symbols_streaming_only(
+            symbols, cfg, limit=limit, stream_cache=stream_cache,
+            strategy="range_trap", exec_style="range_trap",
+            use_ml=bool(kwargs.get("use_ml", False)),
+            range_window_min=int(kwargs.get("rt_lookback_min", 45)),
+            band_k=2.0,
+            stop_sigma_mult=float(kwargs.get("rt_stop_atr_mult", 0.50)),
+            touch_lookback_min=int(kwargs.get("rt_lookback_min", 45)),
+        )
+
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    use_ml:             bool  = bool(kwargs.get("use_ml", False))
+    use_sentiment:      bool  = bool(kwargs.get("use_sentiment", False))
+    sentiment_provider: str   = str(kwargs.get("sentiment_provider", "auto"))
+    sentiment_alpha:    float = float(kwargs.get("sentiment_alpha", 0.15))
+    use_catalyst:       bool  = bool(kwargs.get("use_catalyst", str(os.getenv("ORB_USE_CATALYST", "0")).lower() in {"1","true","yes","on"}))
+    catalyst_alpha:     float = float(kwargs.get("catalyst_alpha", os.getenv("ORB_CATALYST_ALPHA", 0.08)))
+    catalyst_topn               = kwargs.get("catalyst_topn", None)
+    catalyst_lookback_hours: int = int(kwargs.get("catalyst_lookback_hours", os.getenv("ORB_CATALYST_LOOKBACK_HOURS", 72)))
+    regime_profile:     str   = str(kwargs.get("regime_profile", os.getenv("ORB_REGIME_PROFILE", "auto"))).strip().lower() or "auto"
+
+    rt_lookback_min       = int(kwargs.get("rt_lookback_min", 45))
+    rt_min_touches        = int(kwargs.get("rt_min_touches", 2))
+    rt_entry_zone_pct     = float(kwargs.get("rt_entry_zone_pct", 0.35))
+    rt_stop_atr_mult      = float(kwargs.get("rt_stop_atr_mult", 0.50))
+    rt_min_rr             = float(kwargs.get("rt_min_rr", 1.5))
+    rt_min_range_pct      = float(kwargs.get("rt_min_range_pct", 0.50))
+    rt_max_range_pct      = float(kwargs.get("rt_max_range_pct", 4.0))
+    rt_slope_threshold    = float(kwargs.get("rt_slope_threshold", 0.05))
+    rt_vwap_min_gap_pct   = float(kwargs.get("rt_vwap_min_gap_pct", 0.30))
+
+    base_provider = kwargs.get("provider") or AlpacaProvider()
+
+    class _CachedProvider:
+        def __init__(self, inner):
+            self._p = inner
+            self.name = getattr(inner, "name", "alpaca")
+            self._bars_cache  = {}
+            self._daily_cache = {}
+
+        def get_bars(self, req, timeout_s=None):
+            k = (req.symbol, req.interval, req.period, bool(req.include_prepost))
+            if k not in self._bars_cache:
+                self._bars_cache[k] = self._p.get_bars(req, timeout_s=timeout_s)
+            return self._bars_cache[k]
+
+        def get_bars_range(self, *, symbol, interval, from_d, to_d, include_prepost=False, timeout_s=None):
+            k = ("range", symbol, interval, from_d.isoformat(), to_d.isoformat(), bool(include_prepost))
+            if k not in self._bars_cache:
+                self._bars_cache[k] = self._p.get_bars_range(
+                    symbol=symbol, interval=interval, from_d=from_d, to_d=to_d,
+                    include_prepost=include_prepost, timeout_s=timeout_s,
+                )
+            return self._bars_cache[k]
+
+        def get_daily_history(self, symbol, period="6mo", timeout_s=None):
+            k = (symbol, period)
+            if k not in self._daily_cache:
+                self._daily_cache[k] = self._p.get_daily_history(symbol, period=period, timeout_s=timeout_s)
+            return self._daily_cache[k]
+
+        def __getattr__(self, item):
+            return getattr(self._p, item)
+
+    provider     = _CachedProvider(base_provider)
+    session_date = resolve_session_date(base_provider)
+
+    shortlisted, pre_counts, daily_errors, prefilter_samples, thresholds_used = _prefilter_daily(
+        base_provider, symbols, cfg
+    )
+
+    candidates:    List[Candidate]          = []
+    feat_rows:     List[dict]               = []
+    feat_by_symbol: Dict[str, dict]         = {}
+    data_failures                           = list(daily_errors)
+    reject_counts = {
+        "rt_not_above_vwap":            0,
+        "rt_range_too_narrow":          0,
+        "rt_range_too_wide":            0,
+        "rt_range_not_flat":            0,
+        "rt_insufficient_floor_touches": 0,
+        "rt_insufficient_ceiling_touches": 0,
+        "rt_not_in_entry_zone":         0,
+        "rt_poor_risk_reward":          0,
+        "risk_out_of_bounds":           0,
+        "position_sizing_invalid":      0,
+        "filtered_today_dollar_vol":    0,
+        "filtered_rvol":                0,
+        "intraday_error":               0,
+    }
+    failure_samples_by_code: dict[str, list[dict[str, Any]]] = {}
+
+    _RT_NAMED_REJECTS = set(reject_counts.keys()) - {"intraday_error"}
+
+    def _one(sym: str):
+        try:
+            c, feats = build_range_trap_plan(
+                provider, sym, cfg,
+                session_date=session_date,
+                rt_lookback_min=rt_lookback_min,
+                rt_min_touches=rt_min_touches,
+                rt_entry_zone_pct=rt_entry_zone_pct,
+                rt_stop_atr_mult=rt_stop_atr_mult,
+                rt_min_rr=rt_min_rr,
+                rt_min_range_pct=rt_min_range_pct,
+                rt_max_range_pct=rt_max_range_pct,
+                rt_slope_threshold=rt_slope_threshold,
+                rt_vwap_min_gap_pct=rt_vwap_min_gap_pct,
+            )
+            return sym, c, feats, None
+        except ValueError as e:
+            return sym, None, None, str(e)
+        except Exception as e:
+            return sym, None, None, f"{type(e).__name__}: {e}"
+
+    workers = max(1, int(kwargs.get("workers", os.getenv("ORB_WORKERS", 10))))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_one, s) for s in shortlisted]
+        for fut in as_completed(futs):
+            sym, c, feats, err = fut.result()
+            if c is not None:
+                candidates.append(c)
+                feat_rows.append(feats)
+                feat_by_symbol[c.symbol] = feats
+            else:
+                raw_err = err or "rt_plan_unknown"
+                code, detail = _classify_intraday_exception(raw_err)
+                # map exact RT rejection codes; everything else → intraday_error
+                bucket = code if code in _RT_NAMED_REJECTS else "intraday_error"
+                reject_counts[bucket] = reject_counts.get(bucket, 0) + 1
+                fail_item = {"symbol": sym, "stage": "rt_plan", "error": detail, "code": code}
+                data_failures.append(fail_item)
+                _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)
+
+    # ── Scoring (rule-based; ML model can be swapped in later) ────────────────
+    def _base_score(c: Candidate) -> float:
+        s = 0.0
+        s += min(30.0, (c.today_dollar_vol or 0.0) / 25_000_000.0 * 30.0)
+        s += min(30.0, (c.rvol            or 0.0) / 8.0           * 30.0)
+        _or = float(c.or_range_pct or 0.0)
+        s += max(0.0, 20.0 - max(0.0, _or - 3.0) * 5.0)
+        return float(s)
+
+    # ML: attempt to reuse RR gold model as a proxy scorer; graceful fallback
+    if use_ml and candidates:
+        try:
+            model_path = Path(_PROJECT_ROOT) / "models" / "range_reversion_gold.pkl"
+            scorer = RangeReversionGoldScorer(model_path)
+            # Build a feat df that aligns with the RR model's expected columns
+            _rr_compat_cols = [
+                "zscore", "band_width_pct", "vwap_crosses", "slope", "atr_proxy",
+                "sigma", "relvol5", "relvol15", "tod_min", "transactions", "volume",
+                "trend_20_50", "vol20", "avg20_dollar_vol", "mom5", "mom20",
+                "gap_pct", "atr14_pct", "dist_to_entry_sig", "dist_to_stop_sig",
+            ]
+            compat_rows = []
+            for c, f in zip(candidates, feat_rows):
+                row = {
+                    "zscore":            float(f.get("vwap_gap_pct", 0.0)),
+                    "band_width_pct":    float(f.get("range_pct", 0.0)) / 100.0,
+                    "vwap_crosses":      float(f.get("vwap_crosses", 0.0)),
+                    "slope":             float(f.get("slope_pct_per_bar", 0.0)),
+                    "atr_proxy":         float(f.get("atr_1bar", 0.0)),
+                    "sigma":             float(f.get("atr_1bar", 0.0)),
+                    "relvol5":           float(f.get("relvol5", 1.0)),
+                    "relvol15":          float(f.get("relvol15", 1.0)),
+                    "tod_min":           float(f.get("tod_min", 0.0)),
+                    "transactions":      float(f.get("transactions", 0.0)),
+                    "volume":            float(f.get("volume", 0.0)),
+                    "trend_20_50":       float(f.get("trend_20_50", float("nan"))),
+                    "vol20":             float(f.get("vol20",         float("nan"))),
+                    "avg20_dollar_vol":  float(f.get("avg20_dollar_vol", float("nan"))),
+                    "mom5":              float(f.get("mom5",          float("nan"))),
+                    "mom20":             float(f.get("mom20",         float("nan"))),
+                    "gap_pct":           float(f.get("gap_pct",       float("nan"))),
+                    "atr14_pct":         float(f.get("atr14_pct",     float("nan"))),
+                    "dist_to_entry_sig": float(f.get("pct_in_range",  0.0)),
+                    "dist_to_stop_sig":  float(f.get("rr_ratio",      0.0)),
+                }
+                compat_rows.append(row)
+            df_feats = pd.DataFrame(compat_rows)
+            probs = scorer.predict_proba(df_feats)
+            for c, p in zip(candidates, probs):
+                c.ml_score = float(p)
+        except Exception as e:
+            data_failures.append({"symbol": "__all__", "stage": "rt_ml", "error": f"{type(e).__name__}: {e}"})
+            for c in candidates:
+                c.ml_score = None
+    else:
+        for c in candidates:
+            c.ml_score = None
+
+    # ── Sentiment + catalyst (same pipeline as RR) ────────────────────────────
+    sentiment_map: Dict[str, float] = {}
+    if use_sentiment and candidates:
+        pre_sorted = sorted(candidates, key=lambda x: (float(x.ml_score or 0.0), _base_score(x)), reverse=True)
+        topn = int(os.getenv("ORB_SENTIMENT_TOPN", max(50, int(limit) * 3)))
+        target_syms = [c.symbol for c in pre_sorted[: min(topn, len(pre_sorted))]]
+        try:
+            svc = SentimentService(provider=sentiment_provider)
+            def _sent_one(sym: str):
+                try:
+                    b = svc.fetch(sym, limit=6)
+                    return sym, float(b.score), None
+                except Exception as e:
+                    return sym, None, str(e)
+            with ThreadPoolExecutor(max_workers=int(os.getenv("ORB_SENTIMENT_WORKERS", 8))) as ex:
+                futs = [ex.submit(_sent_one, s) for s in target_syms]
+                for fut in as_completed(futs):
+                    sym, sc, err2 = fut.result()
+                    if sc is not None:
+                        sentiment_map[sym] = sc
+                    else:
+                        data_failures.append({"symbol": sym, "stage": "sentiment", "error": err2 or "unknown"})
+        except Exception as e:
+            data_failures.append({"symbol": "__all__", "stage": "sentiment_init", "error": str(e)})
+
+    catalyst_map: dict = {}
+    if use_catalyst and candidates:
+        pre_sorted2 = sorted(candidates, key=lambda x: (float(x.ml_score or 0.0), _base_score(x)), reverse=True)
+        ctopn = int(catalyst_topn or os.getenv("ORB_CATALYST_TOPN", max(25, int(limit) * 2)))
+        target_syms = [c.symbol for c in pre_sorted2[: min(ctopn, len(pre_sorted2))]]
+        try:
+            csvc = CatalystService(provider=provider)
+            catalyst_map = csvc.fetch_batch(target_syms, per_symbol_limit=6, lookback_hours=int(catalyst_lookback_hours))
+            for sym, bundle in catalyst_map.items():
+                if getattr(bundle, "error", None):
+                    data_failures.append({"symbol": sym, "stage": "catalyst", "error": str(bundle.error)})
+        except Exception as e:
+            data_failures.append({"symbol": "__all__", "stage": "catalyst_init", "error": f"{type(e).__name__}: {e}"})
+            catalyst_map = {}
+
+    regime = _pick_regime_profile(regime_profile, candidates)
+
+    admissible:         list[Candidate] = []
+    rejected_candidates: list[Candidate] = []
+
+    for c in candidates:
+        c.sentiment_score = sentiment_map.get(c.symbol)
+        feats = feat_by_symbol.get(c.symbol) or {}
+
+        cb = catalyst_map.get(c.symbol) if isinstance(catalyst_map, dict) else None
+        if cb is not None:
+            _cs = getattr(cb, "score", None)
+            c.catalyst_score          = float(_cs) if _cs is not None else None
+            c.catalyst_article_count  = int(getattr(cb,   "article_count",   0)   or 0)
+            c.catalyst_freshness_hours = getattr(cb,      "freshness_hours", None)
+            c.catalyst_tags           = list(getattr(cb,  "tags",            []) or [])
+        else:
+            c.catalyst_score = c.catalyst_article_count = c.catalyst_freshness_hours = c.catalyst_tags = None
+
+        ml_base   = float(c.ml_score or 0.0) if use_ml else 0.0
+        rule_norm = _rt_setup_rule_score(c, feats)
+        sent_term = float(sentiment_alpha) * float(c.sentiment_score) if (c.sentiment_score is not None and math.isfinite(c.sentiment_score)) else 0.0
+        cat_term  = float(catalyst_alpha)  * float(c.catalyst_score)  if (c.catalyst_score  is not None and math.isfinite(c.catalyst_score))  else 0.0
+
+        sw    = regime.get("score_weights", {})
+        score = (
+            float(sw.get("ml",        1.0)) * ml_base   +
+            float(sw.get("sentiment", 1.0)) * sent_term +
+            float(sw.get("catalyst",  1.0)) * cat_term  +
+            float(sw.get("rule",      0.0)) * rule_norm +
+            float(regime.get("bias",  0.0))
+        )
+        # When no ML, promote rule score as primary ranking signal
+        if not use_ml:
+            score = rule_norm + sent_term + cat_term + float(regime.get("bias", 0.0))
+
+        c.regime_profile    = str(regime.get("selected"))
+        c.regime_adjustment = float(round(score - (ml_base + sent_term + cat_term), 6))
+        c.combined_score    = float(score)
+
+        # Confidence: setup quality × tape × alignment × catalyst
+        setup_q = rule_norm
+        align_q = _rt_alignment_score(c)
+        cw      = regime.get("confidence_weights", {})
+        conf    = (
+            float(cw.get("setup",      0.40)) * setup_q +
+            float(cw.get("alignment",  0.35)) * align_q +
+            float(cw.get("catalyst",   0.25)) * (float(c.catalyst_score) if (c.catalyst_score is not None and math.isfinite(c.catalyst_score)) else 0.0)
+        ) * 100.0
+        c.confidence_score = float(round(conf, 2))
+        c.confidence_grade = _grade(conf)
+
+        actionable, block_reason = _passes_rt_actionable_gate(c, feats)
+        gate_reasons: list[str] = []
+        if not actionable and block_reason:
+            gate_reasons.append(block_reason)
+
+        c.gate_passes       = not gate_reasons
+        c.gate_fail_reasons = gate_reasons
+        c.score_breakdown   = {
+            "strategy":         "range_trap",
+            "ml_score":         round(float(c.ml_score      or 0.0), 6),
+            "rule_score":       round(rule_norm,                      6),
+            "alignment_score":  round(align_q,                        6),
+            "sentiment_term":   round(sent_term,                      6),
+            "catalyst_term":    round(cat_term,                       6),
+            "combined_score":   round(float(c.combined_score or 0.0), 6),
+            "confidence_score": round(float(c.confidence_score or 0.0), 2),
+            "confidence_grade": c.confidence_grade,
+            "floor_touches":    int(feats.get("floor_touches",    0)),
+            "ceiling_touches":  int(feats.get("ceiling_touches",  0)),
+            "range_pct":        round(float(feats.get("range_pct",  0.0)), 4),
+            "slope_pct_per_bar": round(float(feats.get("slope_pct_per_bar", 0.0)), 6),
+            "vwap_gap_pct":     round(float(feats.get("vwap_gap_pct", 0.0)), 4),
+            "rr_ratio":         round(float(feats.get("rr_ratio",     0.0)), 3),
+            "vol_at_floor_ratio": round(float(feats.get("vol_at_floor_ratio", 1.0)), 3),
+            "gate_passes":      c.gate_passes,
+            "rank_why":         list(dict.fromkeys([
+                *(gate_reasons or []),
+                *(["rt_actionable_now"] if actionable else []),
+                *(["vol_accumulation"] if float(feats.get("vol_at_floor_ratio", 0)) > 1.2 else []),
+                *(["flat_range"]       if abs(float(feats.get("slope_pct_per_bar", 1))) < 0.02 else []),
+            ]))[:6],
+        }
+
+        if c.gate_passes:
+            admissible.append(c)
+        else:
+            rejected_candidates.append(c)
+
+    if not prefilter_samples:
+        for sym in shortlisted[:10]:
+            prefilter_samples.append({"symbol": sym, "passed": True, "reason": "daily_ok"})
+
+    # ── Seed candidates (near-setup or watch names) ───────────────────────────
+    seed_candidates: list[Candidate] = []
+    for c in candidates:
+        gate_reasons = [str(r) for r in (getattr(c, "gate_fail_reasons", None) or []) if str(r)]
+        if float(c.last_price or 0.0) <= 0.0:
+            continue
+        if c in admissible:
+            c.monitor_seed         = True
+            c.tradable_now         = True
+            c.monitor_seed_reasons = c.monitor_seed_reasons or ["trade_ready"]
+            seed_candidates.append(c)
+            continue
+        if float(c.entry or 0.0) > 0.0 and float(c.stop or 0.0) > 0.0:
+            c.monitor_seed         = True
+            c.tradable_now         = False
+            c.monitor_seed_reasons = gate_reasons or ["rt_near_setup"]
+            seed_candidates.append(c)
+            continue
+        vwap_last  = float(getattr(c, "vwap_last", 0.0) or 0.0)
+        last_price = float(c.last_price or 0.0)
+        if vwap_last > 0 and last_price > 0:
+            vwap_gap = (last_price - vwap_last) / vwap_last * 100.0
+            if 0.0 < vwap_gap <= 3.0:
+                c.monitor_seed         = True
+                c.tradable_now         = False
+                c.monitor_seed_reasons = gate_reasons or ["rt_above_vwap"]
+                seed_candidates.append(c)
+
+    try:
+        seed_candidates.sort(
+            key=lambda x: (float(x.combined_score or 0.0), float(x.ml_score or 0.0), float(x.today_dollar_vol or 0.0)),
+            reverse=True,
+        )
+    except Exception:
+        pass
+
+    admissible.sort(key=lambda x: (float(x.combined_score or 0.0), float(x.ml_score or 0.0)), reverse=True)
+    top = admissible[: int(limit)]
+
+    for _code, _items in _build_failure_samples_by_code(data_failures, limit_per_code=5).items():
+        bucket = failure_samples_by_code.setdefault(_code, [])
+        for _it in _items:
+            if len(bucket) < 5:
+                bucket.append(_it)
+
+    return {
+        "provider":             provider.name,
+        "scan_date":            session_date.isoformat(),
+        "regime":               regime,
+        "debug": {
+            "session_date_used":       session_date.isoformat(),
+            "failure_samples":         data_failures[:10],
+            "failure_samples_by_code": failure_samples_by_code,
+        },
+        "count":                  len(top),
+        "candidates_total":       len(admissible),
+        "rejected_total":         len(rejected_candidates),
+        "candidates":             [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in top
+        ],
+        "seed_candidates_total": len(seed_candidates),
+        "seed_candidates":       [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in seed_candidates[: int(limit)]
+        ],
+        "rejected_candidates":   [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in rejected_candidates[: int(limit)]
+        ],
+        "prefilter_counts":      pre_counts,
+        "prefilter_samples":     prefilter_samples,
+        "thresholds_used":       thresholds_used,
+        "reject_counts":         reject_counts,
+        "data_failures":         data_failures,
+        "shortlisted":           len(shortlisted),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GAP-AND-GO SCANNER
+# Strategy: pre-market gap (abs ≥ gap_min_pct%) confirmed by volume.
+# Entry = pre-market high + buf (gap-up LONG) or pre-market low − buf (gap-down SHORT).
+# Stop  = previous session close (gap fill = stopped out).
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_gap_and_go_candidate(
+    provider,
+    symbol: str,
+    cfg: "ORBConfig",
+    *,
+    session_date: "date",
+    gap_min_pct:            float = 3.0,
+    gap_max_pct:            float = 40.0,
+    gap_premarket_min_vol:  int   = 30_000,
+    gap_premarket_min_dvol: float = 50_000.0,
+) -> "Candidate":
+    """Build a single Gap-and-Go candidate.  Raises ValueError/RuntimeError on any filter failure."""
+    import math as _math
+
+    # ── 1. Daily history ─────────────────────────────────────────────────────
+    daily = provider.get_daily_history(symbol, period="3mo")
+    if daily is None or daily.empty:
+        raise ValueError("daily_empty")
+    daily = daily.sort_index()
+
+    # previous session close & high
+    daily_d = daily.copy()
+    daily_d.index = pd.to_datetime(daily_d.index)
+    try:
+        prev_rows = daily_d[daily_d.index.date < session_date]
+    except Exception:
+        prev_rows = pd.DataFrame()
+    if prev_rows.empty:
+        raise ValueError("no_prev_session")
+    prev_close    = float(prev_rows["Close"].astype(float).iloc[-1])
+    prev_day_high = float(prev_rows["High"].astype(float).iloc[-1]) if "High" in prev_rows.columns else prev_close
+    if prev_close <= 0:
+        raise ValueError("invalid_prev_close")
+
+    # avg20 dollar vol (for pre-filter consistency with other strategies)
+    avg20_vol = avg_daily_volume(daily, window=20)
+    if avg20_vol is None or avg20_vol <= 0:
+        raise ValueError("filtered_avg20_dollar_vol")
+    avg20_dollar_vol = float(avg20_vol) * float(daily["Close"].astype(float).iloc[-1])
+    if avg20_dollar_vol < float(cfg.min_avg20_dollar_vol):
+        raise ValueError("filtered_avg20_dollar_vol")
+    avg20_trade_count = (
+        float(daily["Trades"].dropna().tail(20).mean())
+        if "Trades" in daily.columns and not daily["Trades"].dropna().empty
+        else 0.0
+    )
+    historical_avg_trade_size = float(avg20_vol) / max(1.0, avg20_trade_count) if avg20_trade_count > 0 else 0.0
+
+    # ── 2. Pre-market bars (4am–9:29 ET) ────────────────────────────────────
+    all_bars = provider.get_bars_range(
+        symbol=symbol, interval="1m",
+        from_d=session_date, to_d=session_date,
+        include_prepost=True,
+        feed="sip",          # IEX has no premarket data
+    )
+    if all_bars is None or all_bars.empty:
+        raise ValueError("no_premarket_bars")
+
+    idx = pd.to_datetime(all_bars.index)
+    try:
+        idx_et = idx.tz_convert(ET) if idx.tz is not None else idx.tz_localize("UTC").tz_convert(ET)
+    except Exception:
+        idx_et = idx
+
+    market_open_dt = datetime.combine(session_date, dtime(9, 30), tzinfo=ET)
+    pm_mask = idx_et < market_open_dt
+    pm_bars = all_bars[pm_mask]
+    if pm_bars.empty:
+        raise ValueError("no_premarket_bars_before_930")
+
+    pm_open   = float(pm_bars["Open"].astype(float).iloc[0])
+    pm_last   = float(pm_bars["Close"].astype(float).iloc[-1])
+    pm_high   = float(pm_bars["High"].astype(float).max())
+    pm_low    = float(pm_bars["Low"].astype(float).min())
+    pm_volume = float(pm_bars["Volume"].astype(float).sum())
+    pm_trades_total   = int(pm_bars["Trades"].astype(float).sum()) if "Trades" in pm_bars.columns else 0
+    pm_avg_trade_size = pm_volume / max(1, pm_trades_total) if pm_trades_total > 0 else 0.0
+
+    # ── 3. Gap filter ────────────────────────────────────────────────────────
+    if prev_close <= 0:
+        raise ValueError("invalid_prev_close")
+    gap_pct = (pm_open - prev_close) / prev_close * 100.0
+    if abs(gap_pct) < gap_min_pct:
+        raise ValueError("filtered_gap_pct_too_small")
+    if abs(gap_pct) > gap_max_pct:
+        raise ValueError("filtered_gap_pct_too_large")
+
+    # Price sanity
+    if not (cfg.min_price <= pm_last <= cfg.max_price):
+        raise ValueError("filtered_price")
+
+    # Pre-market volume / dollar volume
+    pm_dvol = pm_volume * pm_last
+    if pm_volume < gap_premarket_min_vol:
+        raise ValueError("filtered_premarket_volume")
+    if pm_dvol < gap_premarket_min_dvol:
+        raise ValueError("filtered_premarket_dvol")
+
+    # ── 4. Direction & plan ──────────────────────────────────────────────────
+    is_gap_up = gap_pct > 0
+    side      = "long" if is_gap_up else "short"
+    buf       = _buffer(pm_last, cfg)
+
+    if is_gap_up:
+        entry = pm_high + buf
+        stop  = prev_close          # gap fills back → stopped
+    else:
+        entry = pm_low - buf
+        stop  = prev_close          # gap fills back → stopped
+
+    risk = abs(entry - stop)
+    if risk < cfg.min_risk_per_share:
+        raise ValueError("filtered_risk_too_small")
+    if risk > cfg.max_risk_per_share:
+        raise ValueError("filtered_risk_too_large")
+
+    shares   = max(cfg.min_shares, min(int(cfg.risk_dollars / risk), int(cfg.max_notional / max(entry, 0.01))))
+    notional = shares * entry
+
+    target_2r = (entry + 2 * risk) if is_gap_up else (entry - 2 * risk)
+    target_3r = (entry + 3 * risk) if is_gap_up else (entry - 3 * risk)
+
+    # ── 5. Live price (RTH bars if open, else last premarket) ───────────────
+    rth_mask = idx_et >= market_open_dt
+    rth_bars = all_bars[rth_mask]
+    if not rth_bars.empty:
+        last_price = float(rth_bars["Close"].astype(float).iloc[-1])
+        today_vol  = float(rth_bars["Volume"].astype(float).sum())
+    else:
+        last_price = pm_last
+        today_vol  = pm_volume
+
+    today_dollar_vol = today_vol * last_price
+    rvol = float(today_vol / avg20_vol) if avg20_vol > 0 else None
+    if rvol is not None and rvol < cfg.min_rvol:
+        raise ValueError("filtered_rvol")
+
+    # VWAP (RTH only, best effort)
+    vwap_last_val: float | None = None
+    above_vwap:    bool | None  = None
+    vwap_delta_pct_val: float | None = None
+    if not rth_bars.empty and len(rth_bars) >= 3:
+        try:
+            vw = vwap(rth_bars)
+            vwap_last_val = float(vw.iloc[-1])
+            above_vwap    = bool(last_price >= vwap_last_val)
+            vwap_delta_pct_val = ((last_price - vwap_last_val) / vwap_last_val * 100.0) if vwap_last_val > 0 else None
+        except Exception:
+            pass
+
+    tradable_now = bool(
+        (side == "long"  and last_price >= entry) or
+        (side == "short" and last_price <= entry)
+    )
+
+    # ── 6. Candidate ────────────────────────────────────────────────────────
+    long_valid  = (side == "long")
+    short_valid = (side == "short")
+    c = Candidate(
+        symbol=symbol,
+        data_date=session_date.isoformat(),
+        last_price=last_price,
+        pct_change=gap_pct,
+        rvol=rvol,
+        today_dollar_vol=today_dollar_vol,
+        avg20_dollar_vol=avg20_dollar_vol,
+        or_high=pm_high,        # pre-market high stored as OR high for UI compatibility
+        or_low=pm_low,
+        or_range_pct=abs(gap_pct),
+        above_vwap=above_vwap,
+        vwap_last=vwap_last_val,
+        vwap_delta_pct=vwap_delta_pct_val,
+        trend_state=None,
+        trend_slope_pct=None,
+        best_side=side,
+        entry=entry,
+        stop=stop,
+        target_2r=target_2r,
+        target_3r=target_3r,
+        risk_per_share=risk,
+        shares=shares,
+        notional=notional,
+        long_entry  =entry       if long_valid  else None,
+        long_stop   =stop        if long_valid  else None,
+        long_2r     =target_2r   if long_valid  else None,
+        long_3r     =target_3r   if long_valid  else None,
+        long_risk_per_share=risk if long_valid  else None,
+        long_shares =shares      if long_valid  else None,
+        long_notional=notional   if long_valid  else None,
+        short_entry =entry       if short_valid else None,
+        short_stop  =stop        if short_valid else None,
+        short_2r    =target_2r   if short_valid else None,
+        short_3r    =target_3r   if short_valid else None,
+        short_risk_per_share=risk if short_valid else None,
+        short_shares=shares      if short_valid else None,
+        short_notional=notional  if short_valid else None,
+        strategy="gap_and_go",
+        exec_style="gap_and_go",
+        tradable_now=tradable_now,
+        trade_ready_passes=tradable_now,
+        prev_close=prev_close,
+        prev_day_high=prev_day_high,
+        dist_from_prev_close_pct=gap_pct,
+        scan_ts=datetime.now(timezone.utc).isoformat(),
+        live_price=last_price,
+        notes=(
+            f"gap {gap_pct:+.1f}% vs prev_close {prev_close:.2f}  pm_vol={int(pm_volume):,}"
+            + (f"  avg_trade_sz={pm_avg_trade_size:.0f}sh" if pm_avg_trade_size > 0 else "")
+        ),
+    )
+    # Institutional footprint score (multiplied into combined_score in post-processing)
+    _inst_ratio = (pm_avg_trade_size / max(1.0, historical_avg_trade_size)) if historical_avg_trade_size > 0 and pm_avg_trade_size > 0 else 1.0
+    c._gap_inst_factor       = min(2.0, max(1.0, 1.0 + (_inst_ratio - 1.0) * 0.5))
+    c._gap_pm_avg_trade_sz   = pm_avg_trade_size
+    c._gap_hist_avg_trd_sz   = historical_avg_trade_size
+    c._gap_pm_trades         = pm_trades_total
+    return c
+
+
+def scan_gap_and_go_symbols(
+    symbols: "List[str]",
+    cfg: "ORBConfig",
+    limit: int = 25,
+    **kwargs,
+) -> "Dict[str, Any]":
+    """
+    Gap-and-Go scan.
+    Finds stocks that have gapped ≥ gap_min_pct% from the previous close in pre-market.
+    Entry above the pre-market high (gap up) or below the pre-market low (gap down).
+    Stop = previous close (gap fill = trade invalid).
+    ML and sentiment enrichment follow the same pipeline as ORB.
+    """
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    gap_min_pct:            float = float(kwargs.get("gap_min_pct", 3.0))
+    gap_max_pct:            float = float(kwargs.get("gap_max_pct", 40.0))
+    gap_premarket_min_vol:  int   = int(  kwargs.get("gap_premarket_min_vol", 30_000))
+    gap_premarket_min_dvol: float = float(kwargs.get("gap_premarket_min_dvol", 50_000.0))
+
+    use_ml:             bool  = bool(kwargs.get("use_ml", False))
+    use_sentiment:      bool  = bool(kwargs.get("use_sentiment", False))
+    sentiment_provider: str   = str(kwargs.get("sentiment_provider", "auto"))
+    sentiment_alpha:    float = float(kwargs.get("sentiment_alpha", 0.15))
+    use_catalyst:       bool  = bool(kwargs.get("use_catalyst", str(os.getenv("ORB_USE_CATALYST", "0")).lower() in {"1","true","yes","on"}))
+    catalyst_alpha:     float = float(kwargs.get("catalyst_alpha", os.getenv("ORB_CATALYST_ALPHA", 0.08)))
+    catalyst_topn               = kwargs.get("catalyst_topn", None)
+    catalyst_lookback_hours:int = int(kwargs.get("catalyst_lookback_hours", os.getenv("ORB_CATALYST_LOOKBACK_HOURS", 72)))
+    regime_profile:     str   = str(kwargs.get("regime_profile", os.getenv("ORB_REGIME_PROFILE", "auto"))).strip().lower() or "auto"
+
+    base_provider = kwargs.get("provider") or AlpacaProvider()
+
+    class _CachedProvider:
+        def __init__(self, inner):
+            self._p = inner
+            self.name = getattr(inner, "name", "alpaca")
+            self._cache: dict = {}
+
+        def get_bars_range(self, *, symbol, interval, from_d, to_d, include_prepost=False, feed=None, timeout_s=None):
+            k = ("range", symbol, interval, from_d.isoformat(), to_d.isoformat(), bool(include_prepost))
+            if k not in self._cache:
+                self._cache[k] = self._p.get_bars_range(
+                    symbol=symbol, interval=interval, from_d=from_d, to_d=to_d,
+                    include_prepost=include_prepost, feed=feed, timeout_s=timeout_s,
+                )
+            return self._cache[k]
+
+        def get_daily_history(self, symbol, period="3mo", timeout_s=None):
+            k = (symbol, period)
+            if k not in self._cache:
+                self._cache[k] = self._p.get_daily_history(symbol, period=period, timeout_s=timeout_s)
+            return self._cache[k]
+
+        def download_daily_batch(self, syms, period="3mo", timeout_s=None):
+            return self._p.download_daily_batch(syms, period=period, timeout_s=timeout_s)
+
+        def __getattr__(self, item):
+            return getattr(self._p, item)
+
+    provider     = _CachedProvider(base_provider)
+    session_date = resolve_session_date(base_provider)
+
+    # Auto-seed from market movers when no symbols provided
+    if not symbols:
+        gainers, losers = _screener_market_movers(base_provider, top=25)
+        symbols = gainers + losers
+
+    # Pre-filter: normalize symbols, skip tickers with dots
+    shortlisted: list[str] = []
+    for s in symbols:
+        y = to_provider_symbol(s)
+        if y and "." not in y:
+            shortlisted.append(y)
+
+    candidates:    list[Candidate] = []
+    data_failures: list[dict]      = []
+    reject_counts: dict[str, int]  = {
+        "filtered_gap_pct_too_small":   0,
+        "filtered_gap_pct_too_large":   0,
+        "filtered_premarket_volume":    0,
+        "filtered_premarket_dvol":      0,
+        "filtered_price":               0,
+        "filtered_risk_too_small":      0,
+        "filtered_risk_too_large":      0,
+        "filtered_avg20_dollar_vol":    0,
+        "filtered_rvol":                0,
+        "no_premarket_bars":            0,
+        "no_prev_session":              0,
+        "intraday_error":               0,
+    }
+
+    def _one(sym: str):
+        try:
+            c = _build_gap_and_go_candidate(
+                provider, sym, cfg,
+                session_date=session_date,
+                gap_min_pct=gap_min_pct,
+                gap_max_pct=gap_max_pct,
+                gap_premarket_min_vol=gap_premarket_min_vol,
+                gap_premarket_min_dvol=gap_premarket_min_dvol,
+            )
+            return ("ok", sym, c)
+        except (ValueError, RuntimeError) as exc:
+            code = str(exc) or "unknown"
+            return ("fail", sym, code)
+        except Exception as exc:
+            return ("fail", sym, f"exception:{type(exc).__name__}:{exc}")
+
+    workers = min(len(shortlisted), int(os.getenv("ORB_SCAN_WORKERS", 8)))
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futs = {pool.submit(_one, sym): sym for sym in shortlisted}
+        for fut in as_completed(futs):
+            status, sym, payload = fut.result()
+            if status == "ok":
+                candidates.append(payload)
+            else:
+                code = str(payload)
+                reject_counts[code] = reject_counts.get(code, 0) + 1
+                data_failures.append({"symbol": sym, "stage": "gap", "error": code, "code": code})
+
+    # ── ML / sentiment enrichment (same pipeline as ORB) ────────────────────
+    feat_rows:    list[dict] = []
+    feat_by_sym:  dict[str, dict] = {}
+
+    if use_ml and candidates:
+        try:
+            from ml.orb_model_service import score_orb_candidates as _score
+            result = _score(candidates, provider=base_provider)
+            ml_scores = result.get("scores", {})
+            for orig in candidates:
+                orig.ml_score = ml_scores.get(orig.symbol.upper())
+        except Exception:
+            pass
+
+    if use_sentiment and candidates:
+        syms_for_sent = [c.symbol for c in candidates]
+        try:
+            svc = SentimentService(provider=sentiment_provider)
+            sent_map = svc.score_symbols(syms_for_sent) or {}
+            for c in candidates:
+                rec = sent_map.get(c.symbol.upper()) or {}
+                c.sentiment_score = float(rec.get("score") or 0.0) or None
+        except Exception:
+            pass
+
+    if use_catalyst and candidates:
+        syms_for_cat = [c.symbol for c in candidates]
+        try:
+            cat_svc = CatalystService()
+            topn_val = int(catalyst_topn) if catalyst_topn is not None else None
+            cat_map  = cat_svc.score_symbols(
+                syms_for_cat,
+                lookback_hours=catalyst_lookback_hours,
+                topn=topn_val,
+            ) or {}
+            for c in candidates:
+                rec = cat_map.get(c.symbol.upper()) or {}
+                c.catalyst_score      = float(rec.get("score") or 0.0) or None
+                c.catalyst_confidence = float(rec.get("confidence") or 0.0) or None
+                c.catalyst_strength   = float(rec.get("strength") or 0.0) or None
+                c.catalyst_article_count   = rec.get("article_count")
+                c.catalyst_freshness_hours = rec.get("freshness_hours")
+                c.catalyst_tags            = rec.get("tags")
+        except Exception:
+            pass
+
+    # ── Regime adjustment + combined score ──────────────────────────────────
+    try:
+        from scanner.orb import _select_regime as _sr
+        regime = _sr(regime_profile, None)
+    except Exception:
+        regime = {"selected": "neutral", "bias": 0.0, "score_weights": {}, "confidence_weights": {}}
+
+    for c in candidates:
+        ml_base   = float(c.ml_score or 0.0)
+        sent_term = float(sentiment_alpha) * float(c.sentiment_score or 0.0) if c.sentiment_score else 0.0
+        cat_term  = float(catalyst_alpha)  * float(c.catalyst_score  or 0.0) if c.catalyst_score  else 0.0
+        sw        = regime.get("score_weights", {})
+        if use_ml:
+            score = (
+                float(sw.get("ml",        1.0)) * ml_base +
+                float(sw.get("sentiment", 1.0)) * sent_term +
+                float(sw.get("catalyst",  1.0)) * cat_term +
+                float(regime.get("bias",  0.0))
+            )
+        else:
+            # Rule-based: gap % strength as primary signal (normalized 0-1)
+            gap_strength = min(1.0, abs(float(c.pct_change or 0.0)) / 10.0)
+            rvol_strength = min(1.0, float(c.rvol or 1.0) / 5.0)
+            score = 0.5 * gap_strength + 0.3 * rvol_strength + sent_term + cat_term + float(regime.get("bias", 0.0))
+        # Apply institutional footprint boost
+        inst_factor = float(getattr(c, "_gap_inst_factor", 1.0))
+        score = score * inst_factor
+        c.regime_profile    = str(regime.get("selected", "neutral"))
+        c.regime_adjustment = 0.0
+        c.combined_score    = float(score)
+        c.confidence_score  = min(100.0, float(score) * 100.0)
+        c.confidence_grade  = _stream_confidence_grade(c.confidence_score)
+        c.gate_passes       = bool(c.tradable_now)
+        c.gate_fail_reasons = [] if c.tradable_now else ["gap_not_yet_triggered"]
+
+    # ── News enrichment ───────────────────────────────────────────────────────
+    if candidates:
+        news_map = _fetch_alpaca_news_batch([c.symbol for c in candidates], base_provider)
+        for c in candidates:
+            if c.symbol in news_map:
+                c.news_headline, c.news_age_hours = news_map[c.symbol]
+
+    # ── Opening auction confirmation (post-9:30am only) ───────────────────────
+    if candidates:
+        try:
+            auction_map = _fetch_opening_auction([c.symbol for c in candidates], base_provider, session_date)
+            for c in candidates:
+                rec = auction_map.get(c.symbol.upper())
+                if rec:
+                    ap = rec["auction_price"]
+                    c.auction_gap_pct = round((ap - float(c.last_price or ap)) / max(0.01, float(c.last_price or ap)) * 100.0, 2)
+                    c.auction_price   = ap
+                    c.auction_volume  = rec["auction_volume"]
+        except Exception:
+            pass
+
+    # ── Sort & trim ──────────────────────────────────────────────────────────
+    candidates.sort(
+        key=lambda c: (float(c.tradable_now or 0), float(c.combined_score or 0), float(c.today_dollar_vol or 0)),
+        reverse=True,
+    )
+    top = candidates[: int(limit)]
+
+    def _gcdict(c):
+        d = asdict(c)
+        d["price"] = float(c.last_price or 0.0)
+        d["scan_date"] = session_date.isoformat()
+        d["scan_ts"] = c.scan_ts or datetime.now(timezone.utc).isoformat()
+        for attr in ("_gap_inst_factor", "_gap_pm_avg_trade_sz", "_gap_hist_avg_trd_sz",
+                     "_gap_pm_trades",
+                     "auction_gap_pct", "auction_price", "auction_volume"):
+            v = getattr(c, attr, None)
+            if v is not None:
+                d[attr.lstrip("_")] = v
+        return d
+
+    return {
+        "provider":              provider.name,
+        "scan_date":             session_date.isoformat(),
+        "regime":                regime,
+        "debug": {
+            "session_date_used": session_date.isoformat(),
+            "failure_samples":   data_failures[:10],
+            "failure_samples_by_code": {},
+        },
+        "count":                 len(top),
+        "candidates_total":      len(candidates),
+        "rejected_total":        len(data_failures),
+        "tradable_now_total":    sum(1 for c in candidates if c.tradable_now),
+        "trade_ready_total":     sum(1 for c in candidates if c.trade_ready_passes),
+        "candidates": [_gcdict(c) for c in top],
+        "seed_candidates_total": len(candidates),
+        "seed_candidates":       [_gcdict(c) for c in candidates[: int(limit)]],
+        "rejected_candidates":   [],
+        "prefilter_counts":      {"shortlisted": len(shortlisted)},
+        "prefilter_samples":     [],
+        "thresholds_used":       {
+            "gap_min_pct": gap_min_pct, "gap_max_pct": gap_max_pct,
+            "gap_premarket_min_vol": gap_premarket_min_vol,
+        },
+        "reject_counts":         reject_counts,
+        "data_failures":         data_failures,
+        "shortlisted":           len(shortlisted),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Float Rotation Scanner
+# ---------------------------------------------------------------------------
+
+def _fetch_float_shares(symbol: str, store) -> float | None:
+    """Return float shares for symbol, using 24-hour SQLite cache via store."""
+    cached = store.get_cached_float(symbol) if store is not None else None
+    if cached is not None:
+        return float(cached.get("float_shares") or 0) or None
+    try:
+        import yfinance as yf  # type: ignore
+        info = yf.Ticker(symbol).fast_info
+        float_sh = getattr(info, "shares", None)
+        if float_sh and float(float_sh) > 0:
+            float_sh = float(float_sh)
+            if store is not None:
+                store.save_float_cache(symbol, float_sh, float_sh)
+            return float_sh
+    except Exception:
+        pass
+    return None
+
+
+def _build_float_rotation_candidate(
+    symbol: str,
+    provider,
+    session_date,
+    risk_dollars: float,
+    float_max_shares: float,
+    turnover_min_pct: float,
+) -> "ScanCandidate | None":
+    from datetime import datetime, timezone
+    bars = provider.get_bars_range(symbol=symbol, interval="1m",
+                                   from_d=session_date, to_d=session_date)
+    if bars is None or len(bars) < 5:
+        return None
+    bars = bars.copy(); bars.columns = [c.lower() for c in bars.columns]
+    float_sh = _fetch_float_shares(symbol, getattr(provider, "_store", None))
+    if float_sh is None or float_sh > float_max_shares:
+        return None
+    total_vol = float(bars["volume"].sum())
+    turnover_pct = total_vol / float_sh * 100.0
+    if turnover_pct < turnover_min_pct:
+        return None
+    last_bar = bars.iloc[-1]
+    last_price = float(last_bar["close"])
+    vwap = float((bars["close"] * bars["volume"]).sum() / max(1, bars["volume"].sum()))
+    direction = "LONG" if last_price > vwap else "SHORT"
+    entry = round(last_price * 1.002 if direction == "LONG" else last_price * 0.998, 4)
+    # Structure stop: low/high of last 5 bars (recent price support/resistance)
+    _recent = bars.iloc[-5:] if len(bars) >= 5 else bars
+    if direction == "LONG":
+        stop = round(float(_recent["low"].min()) * 0.998, 4)   # just below recent support
+    else:
+        stop = round(float(_recent["high"].max()) * 1.002, 4)  # just above recent resistance
+    risk_per_share = abs(entry - stop)
+    shares = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
+    target_2r = entry + 2 * risk_per_share if direction == "LONG" else entry - 2 * risk_per_share
+    prev_close = float(bars.iloc[0]["open"])
+    pct_chg = (last_price - prev_close) / prev_close * 100.0 if prev_close else 0.0
+    daily_vol = int(bars["volume"].sum())
+    return ScanCandidate(
+        symbol=symbol,
+        last_price=last_price,
+        pct_change=round(pct_chg, 2),
+        rvol=round(turnover_pct / 100.0, 2),
+        dollar_volume=round(last_price * daily_vol, 0),
+        or_high=None, or_low=None, or_pct=None,
+        best_direction=direction,
+        long_trigger=entry if direction == "LONG" else None,
+        short_trigger=entry if direction == "SHORT" else None,
+        long_stop=stop if direction == "LONG" else None,
+        short_stop=stop if direction == "SHORT" else None,
+        long_target_2r=target_2r if direction == "LONG" else None,
+        short_target_2r=target_2r if direction == "SHORT" else None,
+        long_shares=shares if direction == "LONG" else None,
+        short_shares=shares if direction == "SHORT" else None,
+        long_notional=round(entry * shares, 0) if direction == "LONG" else None,
+        short_notional=round(entry * shares, 0) if direction == "SHORT" else None,
+        risk_per_share=round(risk_per_share, 4),
+        ml_score=None, combined_score=None, sentiment_score=None,
+        tradable_now=True, chase_r=0.0,
+        notes=f"float_rotation turnover={turnover_pct:.0f}% float={float_sh/1e6:.1f}M",
+        strategy="float_rotation",
+        scan_ts=datetime.now(timezone.utc).isoformat(),
+        confidence_score=None, confidence_grade=None,
+    )
+
+
+def scan_float_rotation_symbols(
+    symbols: list,
+    provider,
+    session_date=None,
+    risk_dollars: float = 50.0,
+    float_max_shares: float = 10_000_000.0,
+    turnover_min_pct: float = 100.0,
+    limit: int = 50,
+    min_price: float = 1.0,
+    max_price: float = 500.0,
+    min_rvol: float = 0.0,
+    **_kwargs,
+) -> dict:
+    from datetime import datetime, timezone
+    if session_date is None:
+        session_date = resolve_session_date(provider)
+
+    class _CachedProvider:
+        def __init__(self, p):
+            self._p = p
+            self._cache: dict = {}
+            self._store = getattr(p, "_store", None)
+        def get_bars_range(self, symbol, **kw):
+            key = (symbol, kw.get("interval", "1m"))
+            if key not in self._cache:
+                self._cache[key] = self._p.get_bars_range(symbol=symbol, **kw)
+            return self._cache[key]
+
+    cp = _CachedProvider(provider)
+    candidates, shortlisted, reject_counts, data_failures = [], [], {}, {}
+
+    def _fetch_one(sym):
+        try:
+            return sym, _build_float_rotation_candidate(
+                sym, cp, session_date, risk_dollars, float_max_shares, turnover_min_pct)
+        except Exception:
+            return sym, "error"
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    max_workers = min(16, max(1, len(symbols)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_one, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            sym, c = fut.result()
+            if c == "error":
+                data_failures["symbol_error"] = data_failures.get("symbol_error", 0) + 1
+            elif c is not None:
+                if not (min_price <= c.last_price <= max_price):
+                    reject_counts["filtered_price"] = reject_counts.get("filtered_price", 0) + 1
+                    continue
+                if min_rvol > 0 and (c.rvol or 0.0) < min_rvol:
+                    reject_counts["filtered_rvol"] = reject_counts.get("filtered_rvol", 0) + 1
+                    continue
+                candidates.append(c)
+                shortlisted.append(sym)
+    candidates.sort(key=lambda c: -(c.rvol or 0))
+    return {
+        "session_date": session_date.isoformat() if hasattr(session_date, "isoformat") else str(session_date),
+        "strategy": "float_rotation",
+        "candidates_total": len(candidates),
+        "candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates[:int(limit)]
+        ],
+        "rejected_candidates": [],
+        "prefilter_counts": {"shortlisted": len(shortlisted)},
+        "prefilter_samples": [],
+        "thresholds_used": {
+            "float_max_shares": float_max_shares,
+            "turnover_min_pct": turnover_min_pct,
+        },
+        "reject_counts": reject_counts,
+        "data_failures": data_failures,
+        "shortlisted": len(shortlisted),
+        "seed_candidates_total": len(candidates),
+        "seed_candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates[:int(limit)]
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Halt-and-Resume Scanner
+# ---------------------------------------------------------------------------
+
+_HALT_CODES   = {"H", "D", "P", "U", "M"}
+_RESUME_CODES = {"T", "R", "Q", "X", "I"}
+
+
+def scan_halt_resume_symbols(
+    symbols: list,
+    provider,
+    session_date=None,
+    stream_cache=None,
+    lookback_sec: float = 1800.0,
+    limit: int = 50,
+    min_price: float = 1.0,
+    max_price: float = 500.0,
+    **_kwargs,
+) -> dict:
+    from datetime import datetime, timezone
+    import time as _time
+    if session_date is None:
+        session_date = resolve_session_date(provider)
+
+    # Pull halt/resume events from the live stream cache
+    events: list[dict] = []
+    if stream_cache is not None and hasattr(stream_cache, "recent_halt_resume_events"):
+        events = stream_cache.recent_halt_resume_events(max_age_sec=lookback_sec)
+
+    # Group by symbol → keep most recent event per symbol
+    sym_events: dict[str, dict] = {}
+    for ev in events:
+        s = str(ev.get("symbol", "")).upper()
+        if s not in sym_events or float(ev.get("received_at", 0)) > float(sym_events[s].get("received_at", 0)):
+            sym_events[s] = ev
+
+    # Filter to only symbols that resumed (status_code in RESUME_CODES)
+    # and were previously halted — order by most recent
+    candidates_raw = []
+    for sym, ev in sym_events.items():
+        code = str(ev.get("status_code", "")).upper()
+        if code in _RESUME_CODES:
+            # Also filter to requested symbols list if non-empty
+            if symbols and sym not in {s.upper() for s in symbols}:
+                continue
+            candidates_raw.append(ev)
+
+    candidates_raw.sort(key=lambda e: float(e.get("received_at", 0)), reverse=True)
+
+    # Build ScanCandidate objects
+    candidates: list = []
+    now = _time.time()
+    for ev in candidates_raw[:int(limit)]:
+        sym = str(ev.get("symbol", "")).upper()
+        # Fetch 1-min bars for both price fallback and structural stops
+        bars_hr = None
+        try:
+            bars_hr = provider.get_bars_range(symbol=sym, interval="1m",
+                                              from_d=session_date, to_d=session_date)
+        except Exception:
+            pass
+        # Try live price first, fall back to last bar close
+        last_price: float | None = None
+        if stream_cache is not None and hasattr(stream_cache, "latest_trade_price"):
+            last_price = stream_cache.latest_trade_price(sym)
+        if last_price is None and bars_hr is not None and len(bars_hr) > 0:
+            last_price = float(bars_hr.iloc[-1]["close"])
+        if last_price is None:
+            continue
+        if not (min_price <= last_price <= max_price):
+            continue
+        # Structural stops from recent 5-bar range
+        _hr_recent = bars_hr.iloc[-5:] if bars_hr is not None and len(bars_hr) >= 5 else bars_hr
+        if _hr_recent is not None and len(_hr_recent) > 0:
+            _hr_cols = [c.lower() for c in _hr_recent.columns]
+            _hr_recent = _hr_recent.copy(); _hr_recent.columns = _hr_cols
+            long_stop_hr = round(float(_hr_recent["low"].min()) * 0.998, 4)
+            short_stop_hr = round(float(_hr_recent["high"].max()) * 1.002, 4)
+        else:
+            long_stop_hr = round(last_price * 0.97, 4)
+            short_stop_hr = round(last_price * 1.03, 4)
+        long_entry_hr = round(last_price * 1.002, 4)
+        short_entry_hr = round(last_price * 0.998, 4)
+        long_risk = abs(long_entry_hr - long_stop_hr)
+        short_risk = abs(short_entry_hr - short_stop_hr)
+        age_min = round((now - float(ev.get("received_at", now))) / 60.0, 1)
+        c = ScanCandidate(
+            symbol=sym,
+            last_price=last_price,
+            pct_change=None,
+            rvol=None,
+            dollar_volume=None,
+            or_high=None, or_low=None, or_pct=None,
+            best_direction="LONG",
+            long_trigger=long_entry_hr,
+            short_trigger=short_entry_hr,
+            long_stop=long_stop_hr,
+            short_stop=short_stop_hr,
+            long_target_2r=round(long_entry_hr + 2 * long_risk, 4),
+            short_target_2r=round(short_entry_hr - 2 * short_risk, 4),
+            long_shares=None, short_shares=None,
+            long_notional=None, short_notional=None,
+            risk_per_share=round(long_risk, 4),
+            ml_score=None, combined_score=None, sentiment_score=None,
+            tradable_now=True, chase_r=0.0,
+            notes=(f"halt_resume code={ev.get('status_code','')} "
+                   f"msg={ev.get('status_message','')[:40]} age={age_min}min"),
+            strategy="halt_resume",
+            scan_ts=datetime.now(timezone.utc).isoformat(),
+            confidence_score=None, confidence_grade=None,
+        )
+        candidates.append(c)
+
+    shortlisted = [c.symbol for c in candidates]
+    return {
+        "session_date": session_date.isoformat() if hasattr(session_date, "isoformat") else str(session_date),
+        "strategy": "halt_resume",
+        "candidates_total": len(candidates),
+        "candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates
+        ],
+        "rejected_candidates": [],
+        "prefilter_counts": {"shortlisted": len(shortlisted)},
+        "prefilter_samples": [],
+        "thresholds_used": {"lookback_sec": lookback_sec},
+        "reject_counts": {},
+        "data_failures": 0,
+        "shortlisted": len(shortlisted),
+        "seed_candidates_total": len(candidates),
+        "seed_candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 52-Week High Breakout + Pullback Scanner
+# ---------------------------------------------------------------------------
+
+def _build_52wk_pullback_candidate(
+    symbol: str,
+    provider,
+    session_date,
+    risk_dollars: float,
+    touch_lookback_days: int,
+    pullback_min_pct: float,
+    pullback_max_pct: float,
+    rvol_min: float,
+) -> "ScanCandidate | None":
+    from datetime import timedelta, datetime, timezone
+    # Fetch ~260 trading days of daily bars
+    hist_from = session_date - timedelta(days=380)
+    daily = provider.get_bars_range(symbol=symbol, interval="1d",
+                                    from_d=hist_from, to_d=session_date)
+    if daily is None or len(daily) < 50:
+        return None
+    daily = daily.copy(); daily.columns = [c.lower() for c in daily.columns]
+    highs = daily["high"].values.astype(float)
+    lows = daily["low"].values.astype(float)
+    closes = daily["close"].values.astype(float)
+    vols = daily["volume"].values.astype(float)
+    # 52wk high = max over last 252 bars (or all if fewer)
+    window_52 = min(252, len(highs))
+    high_52 = float(highs[-window_52:].max())
+    # Did price touch the 52wk high within the last `touch_lookback_days` bars?
+    recent_window = min(touch_lookback_days, len(highs))
+    recent_high = float(highs[-recent_window:].max())
+    if recent_high < high_52 * 0.99:
+        return None  # never touched 52wk high recently
+    # Current price and pullback
+    last_close = float(closes[-1])
+    pullback_pct = (high_52 - last_close) / high_52 * 100.0
+    if not (pullback_min_pct <= pullback_pct <= pullback_max_pct):
+        return None
+    # RVOL: today's volume vs 20-day avg
+    avg_vol_20 = float(vols[-21:-1].mean()) if len(vols) > 21 else float(vols.mean())
+    today_vol = float(vols[-1])
+    rvol = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
+    if rvol < rvol_min:
+        return None
+    # Entry just above the 52wk high (breakout confirmation)
+    entry = high_52 * 1.002
+    # Structure-based stop: 5-day low gives support level; 0.2% buffer below
+    _recent_low = float(lows[-5:].min()) if len(lows) >= 5 else float(lows.min())
+    stop = round(_recent_low * 0.998, 4)
+    risk_per_share = abs(entry - stop)
+    shares = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
+    target_2r = entry + 2 * risk_per_share
+    return ScanCandidate(
+        symbol=symbol,
+        last_price=last_close,
+        pct_change=round(-pullback_pct, 2),
+        rvol=round(rvol, 2),
+        dollar_volume=round(last_close * today_vol, 0),
+        or_high=None, or_low=None, or_pct=None,
+        best_direction="LONG",
+        long_trigger=round(entry, 4),
+        short_trigger=None,
+        long_stop=round(stop, 4),
+        short_stop=None,
+        long_target_2r=round(target_2r, 4),
+        short_target_2r=None,
+        long_shares=shares,
+        short_shares=None,
+        long_notional=round(entry * shares, 0),
+        short_notional=None,
+        risk_per_share=round(risk_per_share, 4),
+        ml_score=None, combined_score=None, sentiment_score=None,
+        tradable_now=(last_close >= entry * 0.9975),
+        chase_r=0.0,
+        notes=(f"52wk_pullback high={high_52:.2f} pullback={pullback_pct:.1f}% rvol={rvol:.1f}x"),
+        strategy="52wk_pullback",
+        scan_ts=datetime.now(timezone.utc).isoformat(),
+        confidence_score=None, confidence_grade=None,
+    )
+
+
+def scan_52wk_pullback_symbols(
+    symbols: list,
+    provider,
+    session_date=None,
+    risk_dollars: float = 50.0,
+    touch_lookback_days: int = 10,
+    pullback_min_pct: float = 2.0,
+    pullback_max_pct: float = 15.0,
+    min_rvol: float = 1.5,
+    limit: int = 50,
+    min_price: float = 1.0,
+    max_price: float = 500.0,
+    **_kwargs,
+) -> dict:
+    from datetime import datetime, timezone
+    if session_date is None:
+        session_date = resolve_session_date(provider)
+
+    class _CachedProvider:
+        def __init__(self, p):
+            self._p = p
+            self._cache: dict = {}
+        def get_bars_range(self, symbol, **kw):
+            key = (symbol, kw.get("interval", "1d"))
+            if key not in self._cache:
+                self._cache[key] = self._p.get_bars_range(symbol=symbol, **kw)
+            return self._cache[key]
+
+    cp = _CachedProvider(provider)
+    candidates, shortlisted, data_failures = [], [], {}
+
+    def _fetch_one(sym):
+        try:
+            return sym, _build_52wk_pullback_candidate(
+                sym, cp, session_date, risk_dollars,
+                touch_lookback_days, pullback_min_pct, pullback_max_pct, min_rvol), False
+        except Exception:
+            return sym, None, True
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    max_workers = min(16, max(1, len(symbols)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_one, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            sym, c, is_err = fut.result()
+            if is_err:
+                data_failures["symbol_error"] = data_failures.get("symbol_error", 0) + 1
+            elif c is not None:
+                if not (min_price <= c.last_price <= max_price):
+                    data_failures["filtered_price"] = data_failures.get("filtered_price", 0) + 1
+                    continue
+                candidates.append(c)
+                shortlisted.append(sym)
+    candidates.sort(key=lambda c: -(c.rvol or 0))
+    return {
+        "session_date": session_date.isoformat() if hasattr(session_date, "isoformat") else str(session_date),
+        "strategy": "52wk_pullback",
+        "candidates_total": len(candidates),
+        "candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates[:int(limit)]
+        ],
+        "rejected_candidates": [],
+        "prefilter_counts": {"shortlisted": len(shortlisted)},
+        "prefilter_samples": [],
+        "thresholds_used": {
+            "touch_lookback_days": touch_lookback_days,
+            "pullback_min_pct": pullback_min_pct,
+            "pullback_max_pct": pullback_max_pct,
+            "min_rvol": min_rvol,
+        },
+        "reject_counts": {},
+        "data_failures": data_failures,
+        "shortlisted": len(shortlisted),
+        "seed_candidates_total": len(candidates),
+        "seed_candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date.isoformat(),
+             "scan_ts": (c.scan_ts or datetime.now(timezone.utc).isoformat())}
+            for c in candidates[:int(limit)]
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# ATR Expansion Bar Scanner
+# ---------------------------------------------------------------------------
+
+def _build_atr_expansion_candidate(
+    symbol: str,
+    provider,
+    session_date,
+    risk_dollars: float,
+    expansion_min: float,
+    atr_lookback: int,
+) -> "ScanCandidate | None":
+    """Daily-bar ATR expansion scanner.
+
+    Finds stocks whose most recent daily range is >= expansion_min * their
+    20-day ATR — a signal that a new volatility regime is starting, often
+    the first day of a multi-day trend. Works pre-market and on weekends
+    because it uses daily bars only (no intraday feed required).
+    """
+    from datetime import datetime, timezone, timedelta
+    import numpy as np
+
+    hist_from = session_date - timedelta(days=120)
+    daily = provider.get_bars_range(symbol=symbol, interval="1d",
+                                    from_d=hist_from, to_d=session_date)
+    if daily is None or len(daily) < atr_lookback + 2:
+        return None
+    daily = daily.copy(); daily.columns = [c.lower() for c in daily.columns]
+
+    highs  = daily["high"].values.astype(float)
+    lows   = daily["low"].values.astype(float)
+    closes = daily["close"].values.astype(float)
+    opens  = daily["open"].values.astype(float)
+    vols   = daily["volume"].values.astype(float)
+
+    # True Range: max(H-L, |H-prevC|, |L-prevC|)
+    tr = np.maximum(highs[1:] - lows[1:],
+         np.maximum(np.abs(highs[1:] - closes[:-1]),
+                    np.abs(lows[1:]  - closes[:-1])))
+
+    # Most recent day's TR vs the atr_lookback-day avg TR preceding it
+    if len(tr) < atr_lookback + 1:
+        return None
+    today_tr  = float(tr[-1])
+    avg_tr    = float(tr[-(atr_lookback + 1):-1].mean())
+    if avg_tr <= 0:
+        return None
+    expansion = today_tr / avg_tr
+    if expansion < expansion_min:
+        return None
+
+    # Direction: close above open = bullish expansion (long), else short
+    last_close = float(closes[-1])
+    last_open  = float(opens[-1])
+    last_high  = float(highs[-1])
+    last_low   = float(lows[-1])
+    direction  = "LONG" if last_close >= last_open else "SHORT"
+
+    # Entry: just above/below yesterday's close (continuation play)
+    entry = last_close * 1.002 if direction == "LONG" else last_close * 0.998
+
+    # Stop: far side of today's daily bar (last_low for long, last_high for short)
+    stop = last_low * 0.998 if direction == "LONG" else last_high * 1.002
+
+    risk_per_share = abs(entry - stop)
+    if risk_per_share <= 0:
+        risk_per_share = last_close * 0.02
+    shares    = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
+    target_2r = entry + 2 * risk_per_share if direction == "LONG" else entry - 2 * risk_per_share
+
+    # RVOL vs 20-day avg
+    avg_vol_20 = float(vols[-(atr_lookback + 1):-1].mean()) if len(vols) > atr_lookback + 1 else float(vols.mean())
+    today_vol  = float(vols[-1])
+    rvol       = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
+
+    prev_close_2d = float(closes[-2]) if len(closes) >= 2 else last_close
+    pct_chg = (last_close - prev_close_2d) / prev_close_2d * 100.0 if prev_close_2d else 0.0
+
+    return ScanCandidate(
+        symbol=symbol,
+        last_price=last_close,
+        pct_change=round(pct_chg, 2),
+        rvol=round(rvol, 2),
+        dollar_volume=round(last_close * today_vol, 0),
+        or_high=None, or_low=None, or_pct=None,
+        best_direction=direction,
+        long_trigger=round(entry, 4) if direction == "LONG" else None,
+        short_trigger=round(entry, 4) if direction == "SHORT" else None,
+        long_stop=round(stop, 4) if direction == "LONG" else None,
+        short_stop=round(stop, 4) if direction == "SHORT" else None,
+        long_target_2r=round(target_2r, 4) if direction == "LONG" else None,
+        short_target_2r=round(target_2r, 4) if direction == "SHORT" else None,
+        long_shares=shares if direction == "LONG" else None,
+        short_shares=shares if direction == "SHORT" else None,
+        long_notional=round(entry * shares, 0) if direction == "LONG" else None,
+        short_notional=round(entry * shares, 0) if direction == "SHORT" else None,
+        risk_per_share=round(risk_per_share, 4),
+        ml_score=None, combined_score=None, sentiment_score=None,
+        tradable_now=True, chase_r=0.0,
+        avg20_dollar_vol=round(avg_vol_20 * last_close, 0),
+        notes=(f"atr_expansion x{expansion:.1f} dir={direction} tr={today_tr:.3f} atr{atr_lookback}={avg_tr:.3f} rvol={rvol:.1f}x"),
+        strategy="atr_expansion",
+        scan_ts=datetime.now(timezone.utc).isoformat(),
+        confidence_score=None, confidence_grade=None,
+    )
+
+
+def _get_alpaca_creds(provider) -> tuple[str, str]:
+    """Extract Alpaca API key + secret from provider or environment."""
+    import os
+    cfg = getattr(provider, "_cfg", None) or {}
+    key = getattr(provider, "_api_key", None) or cfg.get("api_key_id") or ""
+    sec = getattr(provider, "_secret_key", None) or cfg.get("secret_key") or ""
+    if not (key and sec):
+        key = os.environ.get("APCA_API_KEY_ID") or os.environ.get("ALPACA_API_KEY_ID") or key
+        sec = os.environ.get("APCA_API_SECRET_KEY") or os.environ.get("ALPACA_SECRET_KEY") or sec
+    return key, sec
+
+
+def _screener_most_actives(provider, top: int = 100) -> list[str]:
+    """Return symbols from Alpaca Screener most-actives endpoint. Returns [] on any error."""
+    try:
+        from alpaca.data.historical.screener import ScreenerClient
+        from alpaca.data.requests import MostActivesRequest
+        key, sec = _get_alpaca_creds(provider)
+        client = ScreenerClient(api_key=key, secret_key=sec)
+        resp = client.get_most_actives(MostActivesRequest(by="volume", top=top))
+        return [a.symbol for a in resp.most_actives]
+    except Exception:
+        return []
+
+
+def _screener_market_movers(provider, top: int = 25) -> tuple[list[str], list[str]]:
+    """Return (gainers, losers) from Alpaca top market movers. Returns ([], []) on any error."""
+    try:
+        from alpaca.data.historical.screener import ScreenerClient
+        from alpaca.data.requests import MarketMoversRequest
+        key, sec = _get_alpaca_creds(provider)
+        client = ScreenerClient(api_key=key, secret_key=sec)
+        resp = client.get_market_movers(MarketMoversRequest(market_type="stocks", top=top))
+        gainers = [m.symbol for m in (resp.gainers or [])]
+        losers  = [m.symbol for m in (resp.losers  or [])]
+        return gainers, losers
+    except Exception:
+        return [], []
+
+
+def _fetch_alpaca_news_batch(symbols: list[str], provider, lookback_hours: int = 48) -> dict[str, tuple[str, float]]:
+    """Return {symbol: (headline, age_hours)} for the most recent article per symbol. Returns {} on error."""
+    try:
+        from alpaca.data.historical.news import NewsClient
+        from alpaca.data.requests import NewsRequest
+        from datetime import timedelta
+        key, sec = _get_alpaca_creds(provider)
+        client = NewsClient(api_key=key, secret_key=sec)
+        syms_str = ",".join(symbols[:50])
+        start = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
+        req = NewsRequest(symbols=syms_str, limit=50, start=start)
+        result = client.get_news(req)
+        now = datetime.now(timezone.utc)
+        out: dict[str, tuple[str, float]] = {}
+        # NewsSet stores articles in result.data['news'] as raw dicts
+        raw_data = getattr(result, "data", None) or {}
+        articles = raw_data.get("news", []) if isinstance(raw_data, dict) else []
+        for article in articles:
+            if isinstance(article, dict):
+                headline = article.get("headline", "") or ""
+                updated  = article.get("updated_at")
+                art_syms = article.get("symbols", []) or []
+            else:
+                headline = getattr(article, "headline", "") or ""
+                updated  = getattr(article, "updated_at", None)
+                art_syms = getattr(article, "symbols", []) or []
+            if not headline or not art_syms:
+                continue
+            if updated and updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            age_hours = round((now - updated).total_seconds() / 3600.0, 1) if updated else 999.0
+            for s in art_syms:
+                if s not in out or age_hours < out[s][1]:
+                    out[s] = (headline, age_hours)
+        return out
+    except Exception:
+        return {}
+
+
+def _fetch_opening_auction(
+    symbols: list[str],
+    provider,
+    session_date,
+) -> dict[str, dict]:
+    """
+    Fetch the opening auction print for symbols on session_date.
+    Returns {symbol: {"auction_price": float, "auction_volume": int}}.
+    Only populates after 9:30am ET when the auction has cleared.
+    Returns {} outside market hours or on any error.
+    """
+    try:
+        import requests as _req
+        from zoneinfo import ZoneInfo
+        _et = ZoneInfo("America/New_York")
+        now_et = datetime.now(_et)
+        # Only useful at/after open; skip if pre-market (saves an API call)
+        open_dt = datetime.combine(session_date, dtime(9, 30), tzinfo=_et)
+        if now_et < open_dt:
+            return {}
+
+        key, sec = _get_alpaca_creds(provider)
+        headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": sec, "accept": "application/json"}
+        start_str = datetime.combine(session_date, dtime(9, 29), tzinfo=_et).strftime("%Y-%m-%dT%H:%M:%S%z")
+        end_str   = datetime.combine(session_date, dtime(9, 32), tzinfo=_et).strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        out: dict[str, dict] = {}
+        for i in range(0, len(symbols), 50):
+            batch = symbols[i : i + 50]
+            params = {
+                "symbols": ",".join(batch),
+                "start":   start_str,
+                "end":     end_str,
+                "feed":    "sip",
+                "limit":   500,
+            }
+            try:
+                resp = _req.get(
+                    "https://data.alpaca.markets/v2/stocks/auctions",
+                    headers=headers, params=params, timeout=10,
+                )
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+                auctions = data.get("auctions") or {}
+                for sym, auction_list in auctions.items():
+                    # auction_list is a list of date-buckets; each has "o" (opening) key
+                    for bucket in (auction_list or []):
+                        opens = bucket.get("o") or []
+                        for a in opens:
+                            conds = a.get("c") or []
+                            # "O" condition = opening auction
+                            if "O" in conds and a.get("p"):
+                                sym_up = sym.upper()
+                                if sym_up not in out:
+                                    out[sym_up] = {
+                                        "auction_price":  float(a["p"]),
+                                        "auction_volume": int(a.get("s") or 0),
+                                    }
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+def _snapshot_prefilter(
+    symbols: list[str],
+    provider,
+    min_day_move_pct: float,
+    max_day_move_pct: float,
+    long_only: bool = False,
+    short_only: bool = False,
+    session_date=None,
+) -> list[str]:
+    """Pre-filter symbols using Snapshots API — one call per 100 syms instead of full 3mo bars.
+    Only applies when snapshot date matches session_date (i.e. running during/after the session).
+    Returns original symbol list on any error or date mismatch."""
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockSnapshotRequest
+        key, sec = _get_alpaca_creds(provider)
+        client = StockHistoricalDataClient(api_key=key, secret_key=sec)
+        survivors: list[str] = []
+        date_verified = False
+        for i in range(0, len(symbols), 100):
+            batch = symbols[i:i + 100]
+            try:
+                snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch))
+                for sym, snap in snaps.items():
+                    db = snap.daily_bar
+                    pb = snap.previous_daily_bar
+                    if not (db and pb and pb.close and db.close):
+                        continue
+                    # On first symbol, verify snapshot date matches session_date
+                    if not date_verified and session_date is not None:
+                        snap_date = getattr(db, "timestamp", None)
+                        if snap_date is not None:
+                            snap_d = snap_date.date() if hasattr(snap_date, "date") else None
+                            if snap_d and snap_d != session_date:
+                                return symbols  # date mismatch — bypass pre-filter
+                        date_verified = True
+                    pct = (db.close - pb.close) / pb.close * 100.0
+                    if abs(pct) < min_day_move_pct or abs(pct) > max_day_move_pct:
+                        continue
+                    if long_only and pct < 0:
+                        continue
+                    if short_only and pct > 0:
+                        continue
+                    survivors.append(sym)
+            except Exception:
+                survivors.extend(batch)
+        return survivors
+    except Exception:
+        return symbols
+
+
+def scan_atr_expansion_symbols(
+    symbols: list,
+    provider,
+    session_date=None,
+    risk_dollars: float = 50.0,
+    expansion_min: float = 2.0,
+    atr_lookback: int = 20,
+    limit: int = 50,
+    **kwargs,
+) -> dict:
+    from datetime import datetime, timezone
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    use_ml            = bool(kwargs.get("use_ml", True))
+    use_sentiment     = bool(kwargs.get("use_sentiment", True))
+    use_catalyst      = bool(kwargs.get("use_catalyst", True))
+    sentiment_provider = kwargs.get("sentiment_provider")
+    sentiment_alpha   = float(kwargs.get("sentiment_alpha", 0.15))
+    catalyst_alpha    = float(kwargs.get("catalyst_alpha", 0.10))
+    catalyst_topn     = kwargs.get("catalyst_topn")
+    catalyst_lookback_hours = int(kwargs.get("catalyst_lookback_hours", 72))
+    min_price              = float(kwargs.get("min_price", 1.0))
+    max_price              = float(kwargs.get("max_price", 500.0))
+    min_rvol               = float(kwargs.get("min_rvol", 0.0))
+    min_avg20_dollar_vol   = float(kwargs.get("min_avg20_dollar_vol", 0.0))
+    min_today_dollar_vol   = float(kwargs.get("min_today_dollar_vol", 0.0))
+
+    if session_date is None:
+        session_date = resolve_session_date(provider)
+
+    if not symbols:
+        # Alpaca caps most_actives at 50; supplement with gainers + losers for a ~150 symbol pool
+        symbols = _screener_most_actives(provider, top=50)
+        gainers, losers = _screener_market_movers(provider, top=50)
+        seen = set(symbols)
+        for s in gainers + losers:
+            if s not in seen:
+                symbols.append(s)
+                seen.add(s)
+
+    candidates, shortlisted, data_failures = [], [], {}
+
+    def _fetch_one(sym):
+        try:
+            return sym, _build_atr_expansion_candidate(
+                sym, provider, session_date, risk_dollars, expansion_min, atr_lookback), False
+        except Exception:
+            return sym, None, True
+
+    max_workers = min(16, max(1, len(symbols)))
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_fetch_one, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            sym, c, is_err = fut.result()
+            if is_err:
+                data_failures["symbol_error"] = data_failures.get("symbol_error", 0) + 1
+            elif c is not None:
+                if not (min_price <= c.last_price <= max_price):
+                    data_failures["filtered_price"] = data_failures.get("filtered_price", 0) + 1
+                    continue
+                if min_rvol > 0 and (c.rvol or 0.0) < min_rvol:
+                    data_failures["filtered_rvol"] = data_failures.get("filtered_rvol", 0) + 1
+                    continue
+                if min_avg20_dollar_vol > 0 and (c.avg20_dollar_vol or 0.0) < min_avg20_dollar_vol:
+                    data_failures["filtered_avg20_dollar_vol"] = data_failures.get("filtered_avg20_dollar_vol", 0) + 1
+                    continue
+                if min_today_dollar_vol > 0 and (c.dollar_volume or 0.0) < min_today_dollar_vol:
+                    data_failures["filtered_today_dollar_vol"] = data_failures.get("filtered_today_dollar_vol", 0) + 1
+                    continue
+                candidates.append(c)
+                shortlisted.append(sym)
+
+    # ── ML scoring ───────────────────────────────────────────────────────────
+    if use_ml and candidates:
+        try:
+            from ml.orb_model_service import score_orb_candidates as _score
+            result = _score(candidates, provider=provider)
+            ml_scores = result.get("scores", {})
+            for c in candidates:
+                c.ml_score = ml_scores.get(c.symbol.upper())
+        except Exception:
+            pass
+
+    # ── Sentiment enrichment ─────────────────────────────────────────────────
+    if use_sentiment and candidates:
+        try:
+            svc = SentimentService(provider=sentiment_provider)
+            sent_map = svc.score_symbols([c.symbol for c in candidates]) or {}
+            for c in candidates:
+                rec = sent_map.get(c.symbol.upper()) or {}
+                c.sentiment_score = float(rec.get("score") or 0.0) or None
+        except Exception:
+            pass
+
+    # ── Catalyst enrichment ──────────────────────────────────────────────────
+    if use_catalyst and candidates:
+        try:
+            cat_svc = CatalystService()
+            cat_map = cat_svc.score_symbols(
+                [c.symbol for c in candidates],
+                lookback_hours=catalyst_lookback_hours,
+                topn=int(catalyst_topn) if catalyst_topn is not None else None,
+            ) or {}
+            for c in candidates:
+                rec = cat_map.get(c.symbol.upper()) or {}
+                c.catalyst_score = float(rec.get("score") or 0.0) or None
+        except Exception:
+            pass
+
+    # ── Combined score ───────────────────────────────────────────────────────
+    # ATR expansion confidence: RVOL (45%) + dollar volume (25%) + VWAP alignment (20%)
+    # + ML as optional bonus (10%). ML is ORB-trained and outputs 0.01-0.35 for ATR
+    # setups — it CANNOT be the primary signal or all candidates grade F.
+    for c in candidates:
+        rvol_n = min(1.0, max(0.0, (float(c.rvol or 0.0) - 1.0) / 4.0))   # 5x RVOL = full
+        vol_n  = min(1.0, float(c.dollar_volume or 0.0) / 10_000_000.0)    # $10M = full
+        ml_n   = min(1.0, float(c.ml_score or 0.0) * 2.0) if (use_ml and c.ml_score is not None) else 0.0
+        sent_term = sentiment_alpha * float(c.sentiment_score or 0.0) if c.sentiment_score else 0.0
+        cat_term  = catalyst_alpha  * float(c.catalyst_score  or 0.0) if c.catalyst_score  else 0.0
+        raw_conf  = (0.60 * rvol_n + 0.30 * vol_n + 0.10 * ml_n) * 100.0
+        conf      = min(100.0, raw_conf + sent_term * 5.0 + cat_term * 5.0)
+        c.combined_score   = conf / 100.0
+        c.confidence_score = conf
+        c.confidence_grade = _stream_confidence_grade(c.confidence_score)
+
+    candidates.sort(key=lambda c: -(c.combined_score or 0))
+
+    # ── News enrichment ───────────────────────────────────────────────────────
+    if candidates:
+        news_map = _fetch_alpaca_news_batch([c.symbol for c in candidates[:int(limit)]], provider)
+        for c in candidates:
+            if c.symbol in news_map:
+                c.news_headline, c.news_age_hours = news_map[c.symbol]
+
+    def _atr_dict(c):
+        d = asdict(c)
+        d["price"]     = float(c.last_price or 0.0)
+        d["scan_date"] = session_date.isoformat()
+        d["scan_ts"]   = c.scan_ts or datetime.now(timezone.utc).isoformat()
+        return d
+
+    return {
+        "session_date": session_date.isoformat() if hasattr(session_date, "isoformat") else str(session_date),
+        "strategy": "atr_expansion",
+        "candidates_total": len(candidates),
+        "candidates":      [_atr_dict(c) for c in candidates[:int(limit)]],
+        "rejected_candidates": [],
+        "prefilter_counts": {"shortlisted": len(shortlisted)},
+        "prefilter_samples": [],
+        "thresholds_used": {
+            "expansion_min": expansion_min,
+            "atr_lookback":  atr_lookback,
+            "min_rvol":      min_rvol,
+            "use_ml":        use_ml,
+            "use_sentiment": use_sentiment,
+            "use_catalyst":  use_catalyst,
+        },
+        "reject_counts": {},
+        "data_failures": data_failures,
+        "shortlisted": len(shortlisted),
+        "seed_candidates_total": len(candidates),
+        "seed_candidates": [_atr_dict(c) for c in candidates[:int(limit)]],
+    }
+
+
+# ---------------------------------------------------------------------------
+# EOD Momentum Scanner  (Saturday → Monday prep; uses only daily bars)
+# ---------------------------------------------------------------------------
+
+def scan_eod_momentum_symbols(
+    symbols: list,
+    provider,
+    session_date=None,
+    risk_dollars: float = 50.0,
+    min_day_move_pct: float = 3.0,
+    max_day_move_pct: float = 50.0,
+    min_close_vs_range: float = 0.60,
+    min_rvol: float = 1.5,
+    min_avg20_dollar_vol: float = 1_000_000.0,
+    long_only: bool = False,
+    short_only: bool = False,
+    limit: int = 50,
+    min_price: float = 1.0,
+    max_price: float = 500.0,
+    use_ml: bool = False,
+    use_sentiment: bool = False,
+    use_catalyst: bool = False,
+    sentiment_provider: str = "auto",
+    sentiment_alpha: float = 0.15,
+    catalyst_alpha: float = 0.10,
+    catalyst_topn=None,
+    catalyst_lookback_hours: int = 72,
+    **_kwargs,
+) -> dict:
+    """
+    Scan using only end-of-day (daily) bars — works on weekends, no intraday data needed.
+
+    LONG candidate:  closed in top 60%+ of day range AND moved up >= min_day_move_pct%.
+                     Entry trigger = above Friday's high on Monday open.
+    SHORT candidate: closed in bottom 40% of day range AND moved down >= min_day_move_pct%.
+                     Entry trigger = below Friday's low on Monday open.
+
+    On Saturdays, resolve_session_date() returns Friday automatically.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    if session_date is None:
+        session_date = resolve_session_date(provider)
+    session_date_str = session_date.isoformat() if hasattr(session_date, "isoformat") else str(session_date)
+
+    candidates: list = []
+    shortlisted: list = []
+    data_failures: dict = {}
+    reject_counts: dict = {
+        "filtered_avg20_dollar_vol": 0,
+        "filtered_rvol": 0,
+        "filtered_day_move_too_small": 0,
+        "filtered_day_move_too_large": 0,
+        "filtered_mixed_signal": 0,
+        "filtered_direction": 0,
+    }
+
+    # Snapshot pre-filter: discard clear non-movers before expensive 3mo bar fetch
+    # (only effective when snapshot date matches session_date — bypassed on weekends/stale runs)
+    symbols = _snapshot_prefilter(
+        [s.strip().upper() for s in symbols if s and s.strip()],
+        provider,
+        min_day_move_pct=min_day_move_pct,
+        max_day_move_pct=max_day_move_pct,
+        long_only=long_only,
+        short_only=short_only,
+        session_date=session_date,
+    ) or [s.strip().upper() for s in symbols if s and s.strip()]
+
+    # Fetch daily bars in parallel batches of 200.
+    # "1mo" (~22 trading days) is sufficient for the 20-bar RVOL lookback.
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _ac
+    batch_size = 200
+    batches = [
+        [s.strip().upper() for s in symbols[i:i + batch_size] if s and s.strip()]
+        for i in range(0, len(symbols), batch_size)
+    ]
+    batches = [b for b in batches if b]
+
+    all_daily: dict = {}
+
+    def _fetch_batch(b):
+        try:
+            return provider.download_daily_batch(b, period="1mo") or {}
+        except Exception:
+            return None
+
+    import os as _os
+    _eod_workers = max(1, min(len(batches), int(_os.getenv("EOD_BATCH_WORKERS", "5"))))
+    with ThreadPoolExecutor(max_workers=_eod_workers) as _ex:
+        _futs = {_ex.submit(_fetch_batch, b): b for b in batches}
+        for _fut in _ac(_futs):
+            _res = _fut.result()
+            if _res is None:
+                data_failures["batch_error"] = data_failures.get("batch_error", 0) + 1
+            else:
+                all_daily.update(_res)
+
+    for sym in symbols:
+        try:
+            sym_u = sym.strip().upper()
+            daily = all_daily.get(sym_u)
+            if daily is None or daily.empty or len(daily) < 5:
+                data_failures["no_data"] = data_failures.get("no_data", 0) + 1
+                continue
+            daily = daily.copy()
+            daily.columns = [c.lower() for c in daily.columns]
+
+            # Locate the session_date row; fall back to last row
+            idx = daily.index
+            try:
+                dates = [d.date() if hasattr(d, "date") else d for d in idx]
+            except Exception:
+                dates = list(range(len(daily)))
+            row_idx = len(daily) - 1
+            for ri, d in enumerate(dates):
+                if str(d) == session_date_str:
+                    row_idx = ri
+            if row_idx < 1:
+                continue
+
+            row      = daily.iloc[row_idx]
+            prev_row = daily.iloc[row_idx - 1]
+
+            close      = float(row["close"])
+            high       = float(row["high"])
+            low        = float(row["low"])
+            vol        = float(row["volume"])
+            prev_close = float(prev_row["close"])
+
+            if close <= 0 or high <= low or prev_close <= 0:
+                continue
+            if not (min_price <= close <= max_price):
+                reject_counts["filtered_price"] = reject_counts.get("filtered_price", 0) + 1
+                continue
+
+            day_move_pct   = (close - prev_close) / prev_close * 100.0
+            close_vs_range = (close - low) / (high - low)
+
+            # 20-day avg dollar vol and RVOL
+            lb = daily.iloc[max(0, row_idx - 20):row_idx]
+            if len(lb) < 3:
+                data_failures["insufficient_history"] = data_failures.get("insufficient_history", 0) + 1
+                continue
+            avg20_dvol = float((lb["close"].astype(float) * lb["volume"].astype(float)).mean())
+            avg20_vol  = float(lb["volume"].astype(float).mean())
+            rvol       = vol / avg20_vol if avg20_vol > 0 else 0.0
+
+            # Filters
+            if avg20_dvol < min_avg20_dollar_vol:
+                reject_counts["filtered_avg20_dollar_vol"] += 1
+                continue
+            if rvol < min_rvol:
+                reject_counts["filtered_rvol"] += 1
+                continue
+            if abs(day_move_pct) < min_day_move_pct:
+                reject_counts["filtered_day_move_too_small"] += 1
+                continue
+            if abs(day_move_pct) > max_day_move_pct:
+                reject_counts["filtered_day_move_too_large"] += 1
+                continue
+
+            # Direction: must be a clean directional close, not a reversal
+            if day_move_pct > 0 and close_vs_range >= min_close_vs_range:
+                if short_only:
+                    reject_counts["filtered_direction"] += 1
+                    continue
+                direction = "LONG"
+                score     = day_move_pct * close_vs_range * rvol
+            elif day_move_pct < 0 and close_vs_range <= (1.0 - min_close_vs_range):
+                if long_only:
+                    reject_counts["filtered_direction"] += 1
+                    continue
+                direction = "SHORT"
+                score     = abs(day_move_pct) * (1.0 - close_vs_range) * rvol
+            else:
+                reject_counts["filtered_mixed_signal"] += 1
+                continue
+
+            # Entry plan around Friday's range
+            if direction == "LONG":
+                entry          = round(high * 1.001, 4)
+                stop           = round(low, 4)
+                risk_per_share = entry - stop
+                target_2r      = round(entry + 2 * risk_per_share, 4)
+            else:
+                entry          = round(low * 0.999, 4)
+                stop           = round(high, 4)
+                risk_per_share = stop - entry
+                target_2r      = round(entry - 2 * risk_per_share, 4)
+
+            if risk_per_share <= 0:
+                risk_per_share = close * 0.02
+            shares = int(risk_dollars / risk_per_share) if risk_per_share > 0 else 0
+
+            c = ScanCandidate(
+                symbol=sym_u,
+                last_price=close,
+                pct_change=round(day_move_pct, 2),
+                rvol=round(rvol, 2),
+                dollar_volume=round(close * vol, 0),
+                or_high=round(high, 4),
+                or_low=round(low, 4),
+                or_pct=round((high - low) / prev_close * 100.0, 2),
+                best_direction=direction,
+                long_trigger=entry if direction == "LONG" else None,
+                short_trigger=entry if direction == "SHORT" else None,
+                long_stop=stop if direction == "LONG" else None,
+                short_stop=stop if direction == "SHORT" else None,
+                long_target_2r=target_2r if direction == "LONG" else None,
+                short_target_2r=target_2r if direction == "SHORT" else None,
+                long_shares=shares if direction == "LONG" else None,
+                short_shares=shares if direction == "SHORT" else None,
+                long_notional=round(entry * shares, 0) if direction == "LONG" else None,
+                short_notional=round(entry * shares, 0) if direction == "SHORT" else None,
+                risk_per_share=round(risk_per_share, 4),
+                ml_score=None,
+                combined_score=round(score, 4),
+                sentiment_score=None,
+                tradable_now=True,
+                chase_r=0.0,
+                notes=(
+                    f"eod_momentum {direction} "
+                    f"close@{close_vs_range:.0%}range "
+                    f"day={day_move_pct:+.1f}% "
+                    f"rvol={rvol:.1f}x "
+                    f"fri={session_date_str}"
+                ),
+                strategy="eod_momentum",
+                scan_ts=datetime.now(timezone.utc).isoformat(),
+                confidence_score=round(score, 4),
+                confidence_grade=None,
+            )
+            candidates.append((score, c))
+            shortlisted.append(sym_u)
+
+        except Exception:
+            data_failures["symbol_error"] = data_failures.get("symbol_error", 0) + 1
+
+    candidates.sort(key=lambda x: -x[0])
+    top = [c for _, c in candidates[:int(limit)]]
+
+    # News enrichment
+    if top:
+        news_map = _fetch_alpaca_news_batch([c.symbol for c in top], provider)
+        for c in top:
+            if c.symbol in news_map:
+                c.news_headline, c.news_age_hours = news_map[c.symbol]
+
+    if use_ml and top:
+        try:
+            from ml.orb_model_service import score_orb_candidates as _score_ml
+            ml_result = _score_ml(top, provider=provider)
+            ml_scores = ml_result.get("scores", {})
+            for c in top:
+                c.ml_score = ml_scores.get(c.symbol.upper())
+        except Exception:
+            pass
+
+    if use_sentiment and top:
+        try:
+            svc = SentimentService(provider=sentiment_provider)
+            sent_map = svc.score_symbols([c.symbol for c in top]) or {}
+            for c in top:
+                rec = sent_map.get(c.symbol.upper()) or {}
+                c.sentiment_score = float(rec.get("score") or 0.0) or None
+        except Exception:
+            pass
+
+    if use_catalyst and top:
+        try:
+            cat_svc = CatalystService()
+            topn_val = int(catalyst_topn) if catalyst_topn is not None else None
+            cat_map = cat_svc.score_symbols(
+                [c.symbol for c in top],
+                lookback_hours=catalyst_lookback_hours,
+                topn=topn_val,
+            ) or {}
+            for c in top:
+                rec = cat_map.get(c.symbol.upper()) or {}
+                c.catalyst_score = float(rec.get("score") or 0.0) or None
+        except Exception:
+            pass
+
+    return {
+        "session_date": session_date_str,
+        "strategy": "eod_momentum",
+        "candidates_total": len(top),
+        "candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date_str,
+             "scan_ts": c.scan_ts}
+            for c in top
+        ],
+        "rejected_candidates": [],
+        "prefilter_counts": {"shortlisted": len(shortlisted)},
+        "prefilter_samples": [],
+        "thresholds_used": {
+            "min_day_move_pct":     min_day_move_pct,
+            "max_day_move_pct":     max_day_move_pct,
+            "min_close_vs_range":   min_close_vs_range,
+            "min_rvol":             min_rvol,
+            "min_avg20_dollar_vol": min_avg20_dollar_vol,
+            "long_only":            long_only,
+            "short_only":           short_only,
+        },
+        "reject_counts": reject_counts,
+        "data_failures": data_failures,
+        "shortlisted": len(shortlisted),
+        "seed_candidates_total": len(top),
+        "seed_candidates": [
+            {**asdict(c), "price": float(c.last_price or 0.0),
+             "scan_date": session_date_str,
+             "scan_ts": c.scan_ts}
+            for c in top
+        ],
+    }
