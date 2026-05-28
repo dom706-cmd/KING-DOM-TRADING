@@ -347,8 +347,8 @@ def analyze(
         daily = snap.get("daily_bar") or {}
         prev_daily = snap.get("prev_daily_bar") or {}
         today_vol     = float(daily.get("volume") or 0)
-        avg_daily_vol = float(snap.get("avg_daily_volume") or 0)
-        if today_vol > 0 and avg_daily_vol > 0:
+        avg_daily_vol = float(snap.get("avg_daily_volume") or 0) or None
+        if today_vol > 0 and avg_daily_vol and avg_daily_vol > 0:
             live_rvol = round(today_vol / avg_daily_vol, 2)
         prev_close = float(prev_daily.get("close") or 0) or None
         # Use daily_bar VWAP from snapshot when caller didn't provide one
@@ -356,6 +356,26 @@ def analyze(
             vwap = float(daily.get("vwap") or 0) or None
     except Exception:
         pass
+
+    # Fallback: compute avg_daily_vol from 20-day bar history when snapshot omits it
+    if live_rvol is None and today_vol and today_vol > 0 and provider is not None:
+        try:
+            from providers.base import BarsRequest as _BR
+            _daily_bars = provider.get_bars(_BR(symbol=sym, interval='1d', period='30d', include_prepost=False))
+            if _daily_bars is not None and not _daily_bars.empty:
+                _vol_col = None
+                for _vc in ('Volume', 'volume', 'v'):
+                    if _vc in _daily_bars.columns:
+                        _vol_col = _vc
+                        break
+                if _vol_col:
+                    _recent_vols = _daily_bars[_vol_col].dropna().tail(20)
+                    _avg20 = float(_recent_vols.mean()) if len(_recent_vols) >= 5 else 0
+                    if _avg20 > 0:
+                        avg_daily_vol = _avg20
+                        live_rvol = round(today_vol / _avg20, 2)
+        except Exception:
+            pass
 
     # Auto-detect SSR: stock down ≥10% from prior close = Reg SHO restriction active
     if not ssr_active and prev_close and prev_close > 0:

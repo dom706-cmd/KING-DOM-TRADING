@@ -3701,14 +3701,25 @@ def api_positions_daily_summary():
 def api_broker_snapshot():
     provider = _BROKER_PROVIDER
     if provider is None:
-        return jsonify(ok=True, buying_power=0, equity=0, broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='unavailable')
+        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
+                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='broker_provider_unavailable'), 503
     if not hasattr(provider, "get_broker_snapshot"):
-        return jsonify(ok=True, buying_power=0, equity=0, broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='unavailable')
+        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
+                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='get_broker_snapshot_not_implemented'), 503
     try:
         snap = provider.get_broker_snapshot()
+        # Validate snapshot has actual data before claiming ok=True
+        eq = float(snap.get('equity') or 0)
+        bp = float(snap.get('buying_power') or 0)
+        if eq == 0 and bp == 0:
+            return jsonify(ok=False, degraded=True, snapshot=snap,
+                           broker=(_BROKER_PROVIDER_NAME or 'alpaca'),
+                           note='equity_and_buying_power_zero_check_credentials'), 503
         return jsonify(ok=True, snapshot=snap)
-    except Exception:
-        return jsonify(ok=True, buying_power=0, equity=0, broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='unavailable')
+    except Exception as e:
+        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
+                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'),
+                       note=f'broker_snapshot_failed: {e}'), 503
 
 
 @app.post("/api/broker_action")
@@ -4710,7 +4721,69 @@ def api_know_the_trade():
         _target = _safe_float(request.args.get('target'))
         _side   = request.args.get('side') or 'long'
 
-        # Target-hit guard: get live price and check if setup has already expired
+        # ── Auto-compute live RVOL from snapshot when not provided ────────────
+        _rvol_hint = _safe_float(request.args.get('rvol_hint'))
+        _live_price_for_ml = None
+        if _rvol_hint is None and _ALPACA_PROVIDER is not None:
+            try:
+                _snaps = _ALPACA_PROVIDER.get_snapshots([sym], feed='sip', timeout_s=6.0) or {}
+                _snap = _snaps.get(sym) or {}
+                _daily = _snap.get('daily_bar') or {}
+                _avg_vol = float(_snap.get('avg_daily_volume') or 0)
+                _today_vol = float(_daily.get('volume') or 0)
+                if _today_vol > 0 and _avg_vol > 0:
+                    _rvol_hint = round(_today_vol / _avg_vol, 2)
+                # grab last trade price for ML scoring
+                _lt2 = _snap.get('latest_trade') or {}
+                _lp2 = float(_lt2.get('price') or 0)
+                if _lp2 > 0:
+                    _live_price_for_ml = _lp2
+            except Exception:
+                pass
+
+        # ── Auto-compute ML score when not supplied ───────────────────────────
+        _ml_score = _safe_float(request.args.get('ml_score'))
+        if _ml_score is None and _ALPACA_PROVIDER is not None:
+            try:
+                from ml.orb_model_service import score_orb_symbol as _ktt_score_ml
+                _px_for_ml = _live_price_for_ml or _entry or 0
+                if _px_for_ml and _px_for_ml > 0:
+                    _ml_out = _ktt_score_ml(sym, last_price=float(_px_for_ml), provider=_ALPACA_PROVIDER)
+                    if _ml_out.get('score') is not None:
+                        _ml_score = float(_ml_out['score'])
+            except Exception:
+                pass
+
+        # ── Auto-fetch catalyst from sniper buffer when not supplied ──────────
+        _catalyst = request.args.get('catalyst_headline') or None
+        _cat_age  = _safe_float(request.args.get('catalyst_age_hours'))
+        if _catalyst is None:
+            try:
+                with _SNIPER_LOCK:
+                    _recent = [a for a in _SNIPER_ALERTS if str(a.get('symbol','')).upper() == sym]
+                if _recent:
+                    _best = _recent[0]
+                    _catalyst = _best.get('headline') or None
+                    _fired_ts = _best.get('fired_ts')
+                    if _fired_ts and _catalyst:
+                        _cat_age = round((time.time() - float(_fired_ts)) / 3600, 2)
+            except Exception:
+                pass
+
+        # ── Auto-infer setup_age_hours from time since RTH open ──────────────
+        _setup_age = _safe_float(request.args.get('setup_age_hours'))
+        if _setup_age is None:
+            try:
+                import pytz as _pytz_ktt
+                _et_ktt = _pytz_ktt.timezone('America/New_York')
+                _now_et = datetime.now(_et_ktt)
+                _rth_open = _now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+                if _now_et > _rth_open:
+                    _setup_age = round((_now_et - _rth_open).total_seconds() / 3600, 2)
+            except Exception:
+                pass
+
+        # Target-hit guard
         if _target is not None and _ALPACA_PROVIDER is not None:
             try:
                 _lt = _ALPACA_PROVIDER.get_latest_trade(sym) or {}
@@ -4744,15 +4817,15 @@ def api_know_the_trade():
             pm_low=_safe_float(request.args.get('pm_low')),
             pm_vol=int(float(request.args.get('pm_vol') or 0)) or None,
             pm_move_pct=_safe_float(request.args.get('pm_move_pct')),
-            ml_score=_safe_float(request.args.get('ml_score')),
-            catalyst_headline=request.args.get('catalyst_headline') or None,
-            catalyst_age_hours=_safe_float(request.args.get('catalyst_age_hours')),
-            rvol_hint=_safe_float(request.args.get('rvol_hint')),
+            ml_score=_ml_score,
+            catalyst_headline=_catalyst,
+            catalyst_age_hours=_cat_age,
+            rvol_hint=_rvol_hint,
             halt_count=halt_count,
             ssr_active=request.args.get('ssr_active', '').lower() in ('1', 'true', 'yes'),
             stop_capped=request.args.get('stop_capped', '').lower() in ('1', 'true', 'yes'),
             stop_cap=_safe_float(request.args.get('stop_cap')),
-            setup_age_hours=_safe_float(request.args.get('setup_age_hours')),
+            setup_age_hours=_setup_age,
             setup_status=request.args.get('setup_status') or None,
             gap_fill_rate=_safe_float(request.args.get('gap_fill_rate')),
             vwap=_safe_float(request.args.get('vwap')),
@@ -4772,6 +4845,10 @@ def api_ktt_grades_batch():
         body = request.get_json(force=True, silent=True) or {}
         candidates = body.get('candidates') or []
         if not candidates:
+            # Help callers who send the wrong key
+            alt_keys = [k for k in ('setups', 'symbols', 'items', 'data') if body.get(k)]
+            if alt_keys:
+                return jsonify(ok=False, error=f"wrong payload key '{alt_keys[0]}' — use 'candidates'"), 400
             return jsonify(ok=True, grades={})
 
         halt_map: dict[str, int] = {}
@@ -4785,6 +4862,32 @@ def api_ktt_grades_batch():
         except Exception:
             pass
 
+        # ── Pre-compute RTH age once for all candidates ──────────────────────
+        _batch_rth_age: float | None = None
+        try:
+            import pytz as _batch_pytz
+            _batch_et = _batch_pytz.timezone('America/New_York')
+            _batch_now = datetime.now(_batch_et)
+            _batch_open = _batch_now.replace(hour=9, minute=30, second=0, microsecond=0)
+            if _batch_now > _batch_open:
+                _batch_rth_age = round((_batch_now - _batch_open).total_seconds() / 3600, 2)
+        except Exception:
+            pass
+
+        # ── Pre-index sniper alerts for catalyst lookup ───────────────────────
+        _batch_catalyst_map: dict[str, tuple[str, float]] = {}
+        try:
+            with _SNIPER_LOCK:
+                for _a in _SNIPER_ALERTS:
+                    _asym = str(_a.get('symbol', '')).upper()
+                    if _asym and _asym not in _batch_catalyst_map:
+                        _hl = _a.get('headline') or ''
+                        _ft = float(_a.get('fired_ts') or 0)
+                        if _hl and _ft:
+                            _batch_catalyst_map[_asym] = (_hl, round((time.time() - _ft) / 3600, 2))
+        except Exception:
+            pass
+
         def _grade_one(c: dict) -> tuple[str, dict]:
             sym = str(c.get('symbol') or '').upper()
             if not sym:
@@ -4793,9 +4896,8 @@ def api_ktt_grades_batch():
             entry  = _safe_float(c.get('long_entry') if side == 'long' else c.get('short_entry'))
             stop   = _safe_float(c.get('long_stop')  if side == 'long' else c.get('short_stop'))
             target = _safe_float(c.get('long_2r')    if side == 'long' else c.get('short_2r'))
-            # Accept setup_age_hours directly (from detail view data-setup_age),
-            # or compute it from scan_ts if provided. This ensures batch and detail
-            # view use identical time-decay values.
+
+            # setup_age_hours: prefer explicit → scan_ts → RTH elapsed
             setup_age_hours = _safe_float(c.get('setup_age_hours'))
             if setup_age_hours is None:
                 try:
@@ -4808,6 +4910,42 @@ def api_ktt_grades_batch():
                         setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
                 except Exception:
                     pass
+            if setup_age_hours is None:
+                setup_age_hours = _batch_rth_age
+
+            # ml_score: prefer candidate value, else auto-score
+            ml_score = _safe_float(c.get('ml_score'))
+            if ml_score is None and _ALPACA_PROVIDER is not None:
+                try:
+                    from ml.orb_model_service import score_orb_symbol as _b_score_ml
+                    _px = entry or 0
+                    if _px > 0:
+                        _b_ml_out = _b_score_ml(sym, last_price=float(_px), provider=_ALPACA_PROVIDER)
+                        if _b_ml_out.get('score') is not None:
+                            ml_score = float(_b_ml_out['score'])
+                except Exception:
+                    pass
+
+            # rvol: prefer candidate value, else auto-fetch
+            rvol_hint = _safe_float(c.get('rvol'))
+            if rvol_hint is None and _ALPACA_PROVIDER is not None:
+                try:
+                    _b_snaps = _ALPACA_PROVIDER.get_snapshots([sym], feed='sip', timeout_s=5.0) or {}
+                    _b_snap  = _b_snaps.get(sym) or {}
+                    _b_daily = _b_snap.get('daily_bar') or {}
+                    _b_avg   = float(_b_snap.get('avg_daily_volume') or 0)
+                    _b_vol   = float(_b_daily.get('volume') or 0)
+                    if _b_vol > 0 and _b_avg > 0:
+                        rvol_hint = round(_b_vol / _b_avg, 2)
+                except Exception:
+                    pass
+
+            # catalyst: prefer candidate value, else sniper buffer
+            catalyst_headline = c.get('news_headline') or None
+            catalyst_age_hours = _safe_float(c.get('news_age_hours'))
+            if catalyst_headline is None and sym in _batch_catalyst_map:
+                catalyst_headline, catalyst_age_hours = _batch_catalyst_map[sym]
+
             setup_status = 'triggered' if (
                 (side == 'long' and c.get('long_triggered')) or
                 (side == 'short' and c.get('short_triggered'))
@@ -4816,10 +4954,10 @@ def api_ktt_grades_batch():
                 result = _ktt_analyze(
                     symbol=sym, provider=_ALPACA_PROVIDER,
                     entry=entry, stop=stop, target=target, side=side,
-                    ml_score=_safe_float(c.get('ml_score')),
-                    catalyst_headline=c.get('news_headline') or None,
-                    catalyst_age_hours=_safe_float(c.get('news_age_hours')),
-                    rvol_hint=_safe_float(c.get('rvol')),
+                    ml_score=ml_score,
+                    catalyst_headline=catalyst_headline,
+                    catalyst_age_hours=catalyst_age_hours,
+                    rvol_hint=rvol_hint,
                     halt_count=halt_map.get(sym, 0),
                     setup_age_hours=setup_age_hours,
                     setup_status=setup_status,
@@ -4828,7 +4966,8 @@ def api_ktt_grades_batch():
                 grade = str(result.get('grade') or '?')
                 score = int(result.get('score') or 0)
                 color = {'A': '#4ade80', 'B': '#fbbf24', 'C': '#f97316', 'D': '#f87171'}.get(grade, '#94a3b8')
-                return sym, {'grade': grade, 'score': score, 'color': color}
+                return sym, {'grade': grade, 'score': score, 'color': color,
+                             'ml_score': ml_score, 'rvol': result.get('live_rvol')}
             except Exception as ex:
                 return sym, {'grade': '?', 'score': 0, 'color': '#94a3b8', 'error': str(ex)}
 
