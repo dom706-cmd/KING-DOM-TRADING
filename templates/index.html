@@ -1119,6 +1119,8 @@ th {
           <select id="candSortDir"><option value="desc">High → Low</option><option value="asc">Low → High</option></select>
           <span class="tag">Category</span>
           <select id="candCategoryFilter"><option value="all">All</option><option value="momentum">Momentum</option><option value="news">News</option><option value="reversal">Reversal</option><option value="liquidity">Liquidity</option></select>
+          <button type="button" id="addAllBPlusBtn" title="Add all B+ grade candidates to the desk watchlist" style="margin-left:12px;padding:4px 14px;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;">+ Add All B+ to Watchlist</button>
+          <span id="addAllBPlusStatus" style="font-size:11px;margin-left:8px;color:#94a3b8;"></span>
         </div>
 <div class="tableWrap" id="candidatesWrap"><table>
       <thead>
@@ -6400,6 +6402,48 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
     }));
 
     document.getElementById('candCategoryFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
+
+    document.getElementById('addAllBPlusBtn')?.addEventListener('click', async function() {
+      const btn = this;
+      const status = document.getElementById('addAllBPlusStatus');
+      const all = loadCandidatesCache();
+      const bplus = all.filter(c => {
+        const sc = c.ktt_score != null ? Number(c.ktt_score) : 0;
+        return sc >= 56;
+      });
+      if (!bplus.length) {
+        if (status) { status.textContent = 'No B+ candidates in scanner'; status.style.color='#f87171'; }
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '...';
+      if (status) status.textContent = '';
+      try {
+        const payload = bplus.map(c => ({
+          symbol: c.symbol, side: c.best_side || c.side || 'long',
+          long_entry: c.long_entry, long_stop: c.long_stop, long_2r: c.long_2r,
+          short_entry: c.short_entry, short_stop: c.short_stop, short_2r: c.short_2r,
+          ktt_grade: c.ktt_grade, ktt_score: c.ktt_score,
+        }));
+        const resp = await fetch('/api/desk_watchlist/bulk_add', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({candidates: payload}),
+        });
+        const d = await resp.json();
+        if (d.ok) {
+          if (status) { status.textContent = `Added ${d.count} symbols`; status.style.color='#4ade80'; }
+          if (typeof window.loadDeskWatchlist === 'function') window.loadDeskWatchlist();
+        } else {
+          if (status) { status.textContent = d.error || 'Error'; status.style.color='#f87171'; }
+        }
+      } catch(e) {
+        if (status) { status.textContent = 'Error'; status.style.color='#f87171'; }
+      }
+      btn.disabled = false;
+      btn.textContent = '+ Add All B+ to Watchlist';
+      setTimeout(() => { if (status) status.textContent = ''; }, 4000);
+    });
     document.getElementById('candidateExplainCloseBtn')?.addEventListener('click', () => {
       const modal = document.getElementById('candidateExplainModal');
       if (modal) modal.style.display = 'none';

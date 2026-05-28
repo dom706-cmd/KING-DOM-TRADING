@@ -2634,6 +2634,29 @@ def _scan_worker(jid: str):
                 top = [_c for _c in top if (_c.get('ktt_score') or 0) >= 56]
                 rejected_candidates_all = _ktt_demoted + rejected_candidates_all
                 rejected_candidates_all = rejected_candidates_all[:max(limit * 3, 100)]
+
+                # Auto-add all surviving B+ candidates to the desk watchlist
+                _today_str = datetime.now(_ET).strftime('%Y-%m-%d')
+                for _wc in top:
+                    try:
+                        _wsym  = str(_wc.get('symbol') or '').upper()
+                        _wside = str(_wc.get('best_side') or _wc.get('side') or 'long').lower()
+                        _wentry = _safe_float(_wc.get('long_entry') if _wside == 'long' else _wc.get('short_entry'))
+                        _wstop  = _safe_float(_wc.get('long_stop')  if _wside == 'long' else _wc.get('short_stop'))
+                        _wtgt   = _safe_float(_wc.get('long_2r')    if _wside == 'long' else _wc.get('short_2r'))
+                        if not _wsym:
+                            continue
+                        _RUNTIME_STORE.desk_watchlist_set(
+                            _wsym,
+                            side=_wside,
+                            trigger_price=_wentry,
+                            stop_price=_wstop,
+                            target_price=_wtgt,
+                            notes=f"auto-added by scanner — KTT {_wc.get('ktt_grade','?')} {_wc.get('ktt_score',0)}",
+                            session_date=_today_str,
+                        )
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -4600,6 +4623,38 @@ def api_desk_watchlist_purge_stale():
     today = datetime.now(_ET).strftime('%Y-%m-%d')
     purged = _RUNTIME_STORE.desk_watchlist_purge_stale(today)
     return jsonify(ok=True, purged=purged, count=len(purged))
+
+
+@app.post('/api/desk_watchlist/bulk_add')
+def api_desk_watchlist_bulk_add():
+    """Add a list of candidates (already KTT-graded) to the desk watchlist."""
+    data = request.get_json(force=True, silent=True) or {}
+    candidates = data.get('candidates') or []
+    if not candidates:
+        return jsonify(ok=False, error='no candidates'), 400
+    today = datetime.now(_ET).strftime('%Y-%m-%d')
+    added = []
+    for c in candidates:
+        sym = str(c.get('symbol') or '').strip().upper()
+        if not sym:
+            continue
+        side = str(c.get('side') or c.get('best_side') or 'long').lower()
+        entry  = _safe_float(c.get('long_entry')  if side == 'long' else c.get('short_entry'))
+        stop   = _safe_float(c.get('long_stop')   if side == 'long' else c.get('short_stop'))
+        target = _safe_float(c.get('long_2r')     if side == 'long' else c.get('short_2r'))
+        ktt    = c.get('ktt_grade') or '?'
+        score  = c.get('ktt_score') or 0
+        try:
+            _RUNTIME_STORE.desk_watchlist_set(
+                sym, side=side,
+                trigger_price=entry, stop_price=stop, target_price=target,
+                notes=f"scanner B+ auto-add — KTT {ktt} {score}",
+                session_date=today,
+            )
+            added.append(sym)
+        except Exception:
+            pass
+    return jsonify(ok=True, added=added, count=len(added))
 
 
 @app.get('/api/screener_seeds')
