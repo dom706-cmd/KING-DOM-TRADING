@@ -1,0 +1,64 @@
+== live quotes from app ==
+{
+    "feed": "sip",
+    "ok": true,
+    "provider": "alpaca",
+    "quotes": {
+        "AAPL": {
+            "ask": 261.57,
+            "bid": 261.53,
+            "error": null,
+            "feed": "sip",
+            "last_trade_ts": "2026-03-10T16:33:49.268732+00:00",
+            "mid": 261.54999999999995,
+            "price": 261.5301,
+            "price_ts": "2026-03-10T16:33:49.268732+00:00",
+            "provider": "alpaca",
+            "quote_ts": "2026-03-10T16:33:49.496471+00:00",
+            "stale_reason": null,
+            "symbol": "AAPL"
+        },
+        "ENGN": {
+            "ask": 7.05,
+            "bid": 6.94,
+            "error": null,
+            "feed": "sip",
+            "last_trade_ts": "2026-03-10T16:33:37.172602+00:00",
+            "mid": 6.995,
+            "price": 7.0,
+            "price_ts": "2026-03-10T16:33:37.172602+00:00",
+            "provider": "alpaca",
+            "quote_ts": "2026-03-10T16:33:42.393225+00:00",
+            "stale_reason": null,
+            "symbol": "ENGN"
+        },
+        "NVDA": {
+            "ask": 185.53,
+            "bid": 185.52,
+            "error": null,
+            "feed": "sip",
+            "last_trade_ts": "2026-03-10T16:33:49.807236+00:00",
+            "mid": 185.525,
+            "price": 185.53,
+            "price_ts": "2026-03-10T16:33:49.807236+00:00",
+            "provider": "alpaca",
+            "quote_ts": "2026-03-10T16:33:49.845497+00:00",
+            "stale_reason": null,
+            "symbol": "NVDA"
+        },
+        "SPY": {
+            "ask": 681.15,
+            "bid": 681.13,
+            "error": null,
+            "feed": "sip",
+            "last_trade_ts": "2026-03-10T16:33:49.507172+00:00",
+            "mid": 681.14,
+            "price": 681.14,
+            "price_ts": "2026-03-10T16:33:49.507172+00:00",
+            "provider": "alpaca",
+            "quote_ts": "2026-03-10T16:33:49.572139+00:00",
+            "stale_reason": null,
+            "symbol": "SPY"
+        }
+    }
+}

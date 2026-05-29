@@ -2604,18 +2604,54 @@ def _scan_worker(jid: str):
                     (_side == 'long' and c.get('long_triggered')) or
                     (_side == 'short' and c.get('short_triggered'))
                 ) else None
+                # Catalyst: scanner headline → sniper buffer → live Alpaca news
+                _cat_hl  = c.get('news_headline') or None
+                _cat_age = _safe_float(c.get('news_age_hours'))
+                if not _cat_hl:
+                    try:
+                        with _SNIPER_LOCK:
+                            for _sa in _SNIPER_ALERTS:
+                                if str(_sa.get('symbol', '')).upper() == _sym and _sa.get('headline'):
+                                    _cat_hl  = str(_sa['headline'])
+                                    _sa_ft   = float(_sa.get('fired_ts') or 0)
+                                    if _sa_ft:
+                                        _cat_age = round((time.time() - _sa_ft) / 3600, 2)
+                                    break
+                    except Exception:
+                        pass
+                if not _cat_hl and provider is not None:
+                    try:
+                        _now_utc   = datetime.now(timezone.utc)
+                        _start_iso = (_now_utc - timedelta(hours=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        _arts      = provider.get_news(_sym, limit=5, start=_start_iso)
+                        if _arts:
+                            _art = _arts[0]
+                            _cat_hl = _art.get('headline') or _art.get('title') or None
+                            _pub = _art.get('created_at') or _art.get('published_at')
+                            if _pub and _cat_hl:
+                                try:
+                                    _pub_dt  = _ktt_dp.parse(str(_pub))
+                                    if _pub_dt.tzinfo is None:
+                                        _pub_dt = _pub_dt.replace(tzinfo=timezone.utc)
+                                    _cat_age = (_now_utc - _pub_dt).total_seconds() / 3600
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
                 try:
                     _res = _ktt_scan_analyze(
                         symbol=_sym, provider=provider,
                         entry=_entry, stop=_stop, target=_target, side=_side,
                         ml_score=_safe_float(c.get('ml_score')),
-                        catalyst_headline=c.get('news_headline') or None,
-                        catalyst_age_hours=_safe_float(c.get('news_age_hours')),
+                        catalyst_headline=_cat_hl,
+                        catalyst_age_hours=_cat_age,
                         rvol_hint=_safe_float(c.get('rvol')),
                         halt_count=_ktt_halt_map.get(_sym, 0),
                         setup_age_hours=_age,
                         setup_status=_status,
                         vwap=_safe_float(c.get('vwap_last')),
+                        setup_type=str(c.get('strategy') or '').lower() or None,
                     )
                     _g  = str(_res.get('grade') or 'D')
                     _sc = int(_res.get('score') or 0)
@@ -2632,10 +2668,10 @@ def _scan_worker(jid: str):
                 with _KttPool(max_workers=min(len(top), 16)) as _ktt_ex:
                     _ktt_futs = {_ktt_ex.submit(_ktt_grade_scan_cand, c): c for c in top}
                     top = [_f.result() for _f in _ktt_as_completed(_ktt_futs)]
+                # Stamp scan-time grade so UI filter can use it even after batch regrade decays scores
+                for _c in top:
+                    _c['ktt_score_at_scan'] = _c.get('ktt_score') or 0
                 top.sort(key=lambda _c: _c.get('ktt_score') or 0, reverse=True)
-                _ktt_demoted = [_c for _c in top if (_c.get('ktt_score') or 0) < 56]
-                top = [_c for _c in top if (_c.get('ktt_score') or 0) >= 56]
-                rejected_candidates_all = _ktt_demoted + rejected_candidates_all
                 rejected_candidates_all = rejected_candidates_all[:max(limit * 3, 100)]
 
                 # Auto-add all surviving B+ candidates to the desk watchlist
@@ -4748,7 +4784,7 @@ def api_know_the_trade():
                 from ml.orb_model_service import score_orb_symbol as _ktt_score_ml
                 _px_for_ml = _live_price_for_ml or _entry or 0
                 if _px_for_ml and _px_for_ml > 0:
-                    _ml_out = _ktt_score_ml(sym, last_price=float(_px_for_ml), provider=_ALPACA_PROVIDER)
+                    _ml_out = _ktt_score_ml(sym, last_price=float(_px_for_ml), provider=_ALPACA_PROVIDER, rvol=_rvol_hint)
                     if _ml_out.get('score') is not None:
                         _ml_score = float(_ml_out['score'])
             except Exception:
@@ -4864,6 +4900,7 @@ def api_ktt_grades_batch():
 
         # ── Pre-compute RTH age once for all candidates ──────────────────────
         _batch_rth_age: float | None = None
+        _batch_et = None
         try:
             import pytz as _batch_pytz
             _batch_et = _batch_pytz.timezone('America/New_York')
@@ -4897,7 +4934,7 @@ def api_ktt_grades_batch():
             stop   = _safe_float(c.get('long_stop')  if side == 'long' else c.get('short_stop'))
             target = _safe_float(c.get('long_2r')    if side == 'long' else c.get('short_2r'))
 
-            # setup_age_hours: prefer explicit → scan_ts → RTH elapsed
+            # setup_age_hours: prefer explicit → scan_ts (capped at RTH age for pre-market scans) → RTH elapsed
             setup_age_hours = _safe_float(c.get('setup_age_hours'))
             if setup_age_hours is None:
                 try:
@@ -4907,11 +4944,24 @@ def api_ktt_grades_batch():
                         scanned_at = _dp.parse(str(scan_ts_raw))
                         if scanned_at.tzinfo is None:
                             scanned_at = scanned_at.replace(tzinfo=timezone.utc)
-                        setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+                        # Pre-market scan: decay from RTH open, not scan time
+                        # A stock scanned at 6 AM shouldn't get 4h penalty at 10 AM — setup window opens at 9:30
+                        if _batch_et is not None:
+                            _scan_et = scanned_at.astimezone(_batch_et)
+                            _rth_open_today = _scan_et.replace(hour=9, minute=30, second=0, microsecond=0)
+                            if _scan_et < _rth_open_today and _batch_rth_age is not None:
+                                setup_age_hours = _batch_rth_age
+                            else:
+                                setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+                        else:
+                            setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
                 except Exception:
                     pass
             if setup_age_hours is None:
                 setup_age_hours = _batch_rth_age
+
+            # rvol: prefer candidate value, else auto-fetch
+            rvol_hint = _safe_float(c.get('rvol'))
 
             # ml_score: prefer candidate value, else auto-score
             ml_score = _safe_float(c.get('ml_score'))
@@ -4920,14 +4970,11 @@ def api_ktt_grades_batch():
                     from ml.orb_model_service import score_orb_symbol as _b_score_ml
                     _px = entry or 0
                     if _px > 0:
-                        _b_ml_out = _b_score_ml(sym, last_price=float(_px), provider=_ALPACA_PROVIDER)
+                        _b_ml_out = _b_score_ml(sym, last_price=float(_px), provider=_ALPACA_PROVIDER, rvol=rvol_hint)
                         if _b_ml_out.get('score') is not None:
                             ml_score = float(_b_ml_out['score'])
                 except Exception:
                     pass
-
-            # rvol: prefer candidate value, else auto-fetch
-            rvol_hint = _safe_float(c.get('rvol'))
             if rvol_hint is None and _ALPACA_PROVIDER is not None:
                 try:
                     _b_snaps = _ALPACA_PROVIDER.get_snapshots([sym], feed='sip', timeout_s=5.0) or {}
@@ -4962,6 +5009,7 @@ def api_ktt_grades_batch():
                     setup_age_hours=setup_age_hours,
                     setup_status=setup_status,
                     vwap=_safe_float(c.get('vwap_last')),
+                    setup_type=str(c.get('strategy') or '').lower() or None,
                 )
                 grade = str(result.get('grade') or '?')
                 score = int(result.get('score') or 0)
@@ -5995,7 +6043,7 @@ def api_gap_watchlist_analysis():
                     _cutoff_30 = _rth_open_t - timedelta(minutes=30)
                     _recent_idx = idx_et[pm_mask]
                     _recent_mask_inner = (_recent_idx >= _cutoff_30) & (_recent_idx < _rth_open_t)
-                    _recent_pm = pm_bars[_recent_mask_inner.values]
+                    _recent_pm = pm_bars[_recent_mask_inner]
                     if len(_recent_pm) >= 3:
                         _r_high = float(_recent_pm['High'].max())
                         _r_low  = float(_recent_pm['Low'].min())
@@ -6927,7 +6975,23 @@ def _news_feed_loop() -> None:
             # Use 20h lookback so overnight runs always cover the full prior day.
             start_iso = (now - timedelta(hours=20)).isoformat()
 
-            # Collect symbols: desk watchlist + active monitor session
+            # ── Market-wide scan: pull top 50 recent articles regardless of watchlist ──
+            # Builds (sym, article) pairs for every symbol tagged in each article.
+            sym_art_pairs: list[tuple[str, dict]] = []
+            try:
+                mkt_arts = _ALPACA_PROVIDER.get_market_news(limit=50, start=start_iso)
+                for art in mkt_arts:
+                    raw_syms = art.get('symbols') or []
+                    if isinstance(raw_syms, str):
+                        raw_syms = [raw_syms]
+                    for s in raw_syms:
+                        s = str(s).strip().upper()
+                        if s:
+                            sym_art_pairs.append((s, art))
+            except Exception:
+                pass
+
+            # ── Watchlist / monitor depth-fetch: more articles per symbol in view ──
             syms: set[str] = set()
             try:
                 for entry in _RUNTIME_STORE.desk_watchlist_all():
@@ -6942,88 +7006,89 @@ def _news_feed_loop() -> None:
             except Exception:
                 pass
 
-            if not syms:
-                _NEWS_REFRESH_EVENT.wait(timeout=_NEWS_POLL_INTERVAL)
-                _NEWS_REFRESH_EVENT.clear()
-                continue
+            if syms:
+                try:
+                    raw_map = _ALPACA_PROVIDER.get_news_batch(
+                        list(syms), limit_per_symbol=5, start=start_iso
+                    )
+                    for sym, articles in raw_map.items():
+                        for art in articles:
+                            sym_art_pairs.append((sym, art))
+                except Exception:
+                    pass
 
-            raw_map = _ALPACA_PROVIDER.get_news_batch(
-                list(syms), limit_per_symbol=5, start=start_iso
-            )
+            for sym, art in sym_art_pairs:
+                raw_id = str(art.get('id') or art.get('news_id') or '').strip()
+                if not raw_id:
+                    key = f"{sym}:{art.get('headline', '')}:{art.get('created_at', '')}"
+                    raw_id = hashlib.md5(key.encode()).hexdigest()
+                news_id = f"{sym}:{raw_id}"
 
-            for sym, articles in raw_map.items():
-                for art in articles:
-                    raw_id = str(art.get('id') or art.get('news_id') or '').strip()
-                    if not raw_id:
-                        key = f"{sym}:{art.get('headline', '')}:{art.get('created_at', '')}"
-                        raw_id = hashlib.md5(key.encode()).hexdigest()
-                    news_id = f"{sym}:{raw_id}"
+                headline = str(art.get('headline') or art.get('title') or '').strip()
+                if not headline:
+                    continue
 
-                    headline = str(art.get('headline') or art.get('title') or '').strip()
-                    if not headline:
-                        continue
+                bundle = svc._score_symbol(sym, [art], now=now)
 
-                    bundle = svc._score_symbol(sym, [art], now=now)
-
-                    # ── News Sniper: fire on first sight of a catalyst headline ──
-                    is_new_article = news_id not in _NEWS_SEEN_IDS
-                    if is_new_article:
-                        if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
-                            _NEWS_SEEN_IDS.clear()
-                        _NEWS_SEEN_IDS.add(news_id)
-                        has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
-                        strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
-                        if has_catalyst_tag and strong_enough:
-                            try:
-                                snap_price: float | None = None
-                                if _ALPACA_PROVIDER is not None:
-                                    t = _ALPACA_PROVIDER.get_latest_trade(sym)
-                                    snap_price = float(t.get('price') or 0) or None
-                            except Exception:
-                                snap_price = None
-                            _emit_sniper_alert(sym, art, bundle, snap_price)
-                    src = art.get('source')
-                    source = src if isinstance(src, str) else ((src or {}).get('name') or '')
-
-                    # For actionable sentiment, compute entry plan + ML
-                    plan: dict = {}
-                    if abs(bundle.score) >= 0.25:
+                # ── News Sniper: fire on first sight of a catalyst headline ──
+                is_new_article = news_id not in _NEWS_SEEN_IDS
+                if is_new_article:
+                    if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
+                        _NEWS_SEEN_IDS.clear()
+                    _NEWS_SEEN_IDS.add(news_id)
+                    has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
+                    strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
+                    if has_catalyst_tag and strong_enough:
                         try:
-                            plan = _news_entry_plan(sym, bundle.score)
+                            snap_price: float | None = None
+                            if _ALPACA_PROVIDER is not None:
+                                t = _ALPACA_PROVIDER.get_latest_trade(sym)
+                                snap_price = float(t.get('price') or 0) or None
                         except Exception:
-                            plan = {}
+                            snap_price = None
+                        _emit_sniper_alert(sym, art, bundle, snap_price)
+                src = art.get('source')
+                source = src if isinstance(src, str) else ((src or {}).get('name') or '')
 
-                    payload = {
-                        'news_id': news_id,
-                        'symbol': sym,
-                        'headline': headline,
-                        'summary': str(art.get('summary') or '')[:300] or None,
-                        'source': source or None,
-                        'url': art.get('url') or None,
-                        'published_at': str(art.get('created_at') or art.get('updated_at') or ''),
-                        'received_at': now.timestamp(),
-                        'sentiment_score': bundle.score,
-                        'catalyst_score': bundle.score,
-                        'freshness_sec': (bundle.freshness_hours * 3600) if bundle.freshness_hours is not None else None,
-                        'tags': bundle.tags,
-                        'confidence': bundle.confidence,
-                        'strength': bundle.strength,
-                        'article_count': 1,
-                        # Entry plan fields (populated for |score| >= 0.25)
-                        'side': plan.get('side'),
-                        'price': plan.get('price'),
-                        'entry': plan.get('entry'),
-                        'stop': plan.get('stop'),
-                        'target_2r': plan.get('target_2r'),
-                        'target_3r': plan.get('target_3r'),
-                        'risk_per_share': plan.get('risk_per_share'),
-                        'ml_score': plan.get('ml_score'),
-                        'combined_score': plan.get('combined_score') if plan else bundle.score,
-                    }
+                # For actionable sentiment, compute entry plan + ML
+                plan: dict = {}
+                if abs(bundle.score) >= 0.25:
                     try:
-                        _RUNTIME_STORE.append_news_event(payload)
+                        plan = _news_entry_plan(sym, bundle.score)
                     except Exception:
-                        pass
+                        plan = {}
+
+                payload = {
+                    'news_id': news_id,
+                    'symbol': sym,
+                    'headline': headline,
+                    'summary': str(art.get('summary') or '')[:300] or None,
+                    'source': source or None,
+                    'url': art.get('url') or None,
+                    'published_at': str(art.get('created_at') or art.get('updated_at') or ''),
+                    'received_at': now.timestamp(),
+                    'sentiment_score': bundle.score,
+                    'catalyst_score': bundle.score,
+                    'freshness_sec': (bundle.freshness_hours * 3600) if bundle.freshness_hours is not None else None,
+                    'tags': bundle.tags,
+                    'confidence': bundle.confidence,
+                    'strength': bundle.strength,
+                    'article_count': 1,
+                    # Entry plan fields (populated for |score| >= 0.25)
+                    'side': plan.get('side'),
+                    'price': plan.get('price'),
+                    'entry': plan.get('entry'),
+                    'stop': plan.get('stop'),
+                    'target_2r': plan.get('target_2r'),
+                    'target_3r': plan.get('target_3r'),
+                    'risk_per_share': plan.get('risk_per_share'),
+                    'ml_score': plan.get('ml_score'),
+                    'combined_score': plan.get('combined_score') if plan else bundle.score,
+                }
+                try:
+                    _RUNTIME_STORE.append_news_event(payload)
+                except Exception:
+                    pass
 
         except Exception:
             pass

@@ -204,6 +204,15 @@ def _rank_symbols(
 ) -> list[str]:
     listings = listing_meta or {}
     assets = asset_meta or {}
+
+    # If Alpaca metadata is available, require tradable=True to drop ADRs,
+    # shells, OTC names, and anything Alpaca can't stream intraday data for.
+    if assets:
+        symbols = [
+            sym for sym in symbols
+            if assets.get(sym, {}).get("tradable", True)  # pass-through if no metadata
+        ]
+
     return sorted(
         symbols,
         key=lambda sym: (
@@ -233,10 +242,11 @@ def fetch_us_equity_symbols(cfg: UniverseConfig) -> List[str]:
                 etf_flag = str(row.get("ETF") or "").strip().upper()
                 if not raw_symbol or test_issue == "Y":
                     continue
+                if etf_flag == "Y":
+                    continue
                 sym = to_provider_symbol(raw_symbol)
                 if not sym or not _is_primary_common_equity(sym):
                     continue
-                # keep ETFs; top scanners include them by default
                 listing_meta[sym] = {
                     "exchange": str(row.get("Exchange") or row.get("Listing Exchange") or "").strip().upper(),
                     "market_category": str(row.get("Market Category") or "").strip().upper(),

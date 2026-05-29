@@ -1,0 +1,31 @@
+== duplicate polling check ==
+11:34:32
+scan_status code=200 total=0.705625s
+stream_status code=200 total=0.000665s
+11:34:34
+scan_status code=200 total=0.466680s
+stream_status code=200 total=0.000657s
+11:34:35
+scan_status code=200 total=0.653169s
+stream_status code=200 total=0.000722s
+11:34:37
+scan_status code=200 total=0.480315s
+stream_status code=200 total=0.000650s
+11:34:39
+scan_status code=200 total=0.456605s
+stream_status code=200 total=0.000688s
+11:34:40
+scan_status code=200 total=0.464380s
+stream_status code=200 total=0.000612s
+11:34:42
+scan_status code=200 total=0.507525s
+stream_status code=200 total=0.000773s
+11:34:43
+scan_status code=200 total=0.578615s
+stream_status code=200 total=0.000644s
+11:34:45
+scan_status code=200 total=0.523534s
+stream_status code=200 total=0.000706s
+11:34:46
+scan_status code=200 total=0.681204s
+stream_status code=200 total=0.002798s

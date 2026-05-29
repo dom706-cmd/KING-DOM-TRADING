@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>KingDom Trading — Crypto Realm</title>
+  <style>
+    :root{
+      --bg:#0f0e0b; --panel:#171511; --border:rgba(245,242,234,0.14); --text:rgba(245,242,234,0.92); --muted:rgba(199,192,178,0.82);
+      --accent:#4f6b3a; --accent2:#c8b08a;
+    }
+    body{font-family:-apple-system,system-ui,sans-serif;margin:20px;background:var(--bg);color:var(--text);}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;margin-top:12px;}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+    .tag{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);font-size:12px;}
+    input,button{background:#111;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
+    button{cursor:pointer}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    .good{color:#86efac}.bad{color:#fca5a5}.muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="row" style="justify-content:space-between;">
+    <div>
+      <h1 style="margin:0;">Crypto Realm</h1>
+      <div class="muted" style="margin-top:4px;">Real Alpaca crypto snapshots with breakout/reversal ticket math.</div>
+    </div>
+    <div class="row">
+      <a href="/" style="color:var(--accent2);">← Stocks</a>
+      <span class="tag">Provider {{ provider }}</span>
+      <span class="tag">Feed {{ feed }}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <label>Symbols <input id="symbols" value="BTC/USD,ETH/USD,SOL/USD" style="min-width:360px;" /></label>
+      <button id="refreshBtn" type="button">Refresh</button>
+      <span id="status" class="muted">Idle.</span>
+    </div>
+    <div class="muted" style="margin-top:8px;">Signals are derived from real Alpaca crypto snapshot minute bars. No placeholder data.</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Market Context</h3>
+    <div id="contextLine" class="muted">Loading context…</div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Live Crypto Monitor</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Pair</th>
+          <th>Price / Spread</th>
+          <th>1m Bar</th>
+          <th>Signal</th>
+          <th>Risk Plan</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="6" class="muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+function esc(v){ return v===null || v===undefined ? '' : String(v); }
+function fmt(v,d=2){ const n=Number(v); return Number.isFinite(n)?n.toFixed(d):'—'; }
+async function getJSON(url, opts){ const r = await fetch(url, opts||{}); const j = await r.json(); if(!r.ok || j.ok===false) throw new Error(j.error || ('HTTP '+r.status)); return j; }
+
+function renderContext(ctx){
+  const el = document.getElementById('contextLine');
+  if(!el) return;
+  if(!ctx || Object.keys(ctx).length===0){ el.textContent = 'No context snapshot yet.'; return; }
+  el.innerHTML = `SPY <b>${esc(ctx.spy_trend_state||'unknown')}</b> • QQQ <b>${esc(ctx.qqq_trend_state||'unknown')}</b> • breadth <b>${fmt(ctx.breadth_score,2)}</b> • risk-on <b>${fmt(ctx.risk_on_score,2)}</b> • volatility <b>${esc(ctx.volatility_regime||'unknown')}</b> • bucket <b>${esc(ctx.time_of_day_bucket||'unknown')}</b>`;
+}
+
+function renderRows(items){
+  const body = document.getElementById('rows');
+  if(!body) return;
+  const rows = Array.isArray(items) ? items : [];
+  if(!rows.length){ body.innerHTML = '<tr><td colspan="6" class="muted">No rows.</td></tr>'; return; }
+  body.innerHTML = rows.map(r => {
+    const cls = r.signal_side === 'long' ? 'good' : (r.signal_side === 'short' ? 'bad' : '');
+    return `<tr>
+      <td><b>${esc(r.symbol||'—')}</b></td>
+      <td><div><b>$${fmt(r.price,2)}</b></div><div class="muted">bid $${fmt(r.bid,2)} / ask $${fmt(r.ask,2)} • spread ${fmt(r.spread_pct,2)}%</div></td>
+      <td><div>O $${fmt(r.minute_open,2)} • H $${fmt(r.minute_high,2)} • L $${fmt(r.minute_low,2)} • C $${fmt(r.minute_close,2)}</div><div class="muted">vol ${esc(r.minute_volume||'—')}</div></td>
+      <td class="${cls}"><b>${esc(r.signal_side||'watch')}</b></td>
+      <td><div>entry $${fmt(r.entry,2)} • stop $${fmt(r.stop_loss,2)}</div><div class="muted">2R $${fmt(r.target_2r,2)} • 3R $${fmt(r.target_3r,2)} • risk ${fmt(r.risk_per_unit,4)}</div></td>
+      <td class="muted">${esc(r.error||'')}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function refresh(){
+  const status = document.getElementById('status');
+  const syms = document.getElementById('symbols').value || '';
+  status.textContent = 'Refreshing…';
+  try{
+    const [snap, ctx] = await Promise.all([
+      getJSON(`/api/crypto_snapshot?symbols=${encodeURIComponent(syms)}`),
+      getJSON('/api/context_status'),
+    ]);
+    renderRows(snap.rows || []);
+    renderContext((ctx||{}).context || {});
+    status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }catch(e){
+    status.textContent = 'Refresh failed: ' + String(e.message || e);
+  }
+}
+document.getElementById('refreshBtn').addEventListener('click', refresh);
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

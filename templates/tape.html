@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tape Tracker — Kingdom</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f0f0b;
+      --card:     rgba(255,255,255,0.04);
+      --border:   rgba(255,255,255,0.10);
+      --ink:      #ece6da;
+      --muted:    rgba(236,230,218,0.55);
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --amber:    #f59e0b;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    .topbar a { color: var(--muted); text-decoration: none; font-size: 12px; }
+    .topbar a:hover { color: var(--ink); }
+    .topbar h1 { font-size: 15px; font-weight: 700; }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* ── Input row ── */
+    .input-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    input {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: 13px;
+      padding: 6px 11px;
+      outline: none;
+      text-transform: uppercase;
+    }
+    input:focus { border-color: rgba(255,255,255,0.25); }
+    input::placeholder { color: var(--muted); text-transform: none; }
+    #symbolInput { width: 280px; }
+
+    button {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 13px;
+      transition: background 0.15s;
+    }
+    button:hover { background: rgba(255,255,255,0.14); }
+    button.primary { background: rgba(124,58,237,0.25); border-color: rgba(124,58,237,0.5); }
+    button.primary:hover { background: rgba(124,58,237,0.38); }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── Main body — two columns ── */
+    .main-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    /* ── Left: tape cards ── */
+    .left-panel {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 10px;
+    }
+
+    /* ── Right: EOD check ── */
+    .right-panel {
+      width: 380px;
+      flex-shrink: 0;
+      border-left: 1px solid var(--border);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .eod-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .eod-header h2 {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .eod-header p { font-size: 11px; color: var(--muted); }
+
+    .eod-inputs {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .eod-field { display: flex; flex-direction: column; gap: 3px; }
+    .eod-field label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+    .eod-field input { width: 100%; text-transform: uppercase; }
+    .eod-row { display: flex; gap: 8px; }
+    .eod-row .eod-field { flex: 1; }
+
+    .eod-run-btn {
+      width: 100%;
+      padding: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      background: rgba(245,158,11,0.18);
+      border-color: rgba(245,158,11,0.45);
+      color: #fde68a;
+      border-radius: 8px;
+      margin-top: 2px;
+    }
+    .eod-run-btn:hover { background: rgba(245,158,11,0.28); }
+
+    /* EOD result area */
+    .eod-result { padding: 14px 16px; flex: 1; }
+
+    .eod-placeholder {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 40px 0;
+    }
+
+    /* Verdict block */
+    .verdict-block {
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+      text-align: center;
+    }
+    .verdict-block.hold   { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.35); }
+    .verdict-block.caution { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35); }
+    .verdict-block.exit   { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); }
+
+    .verdict-emoji { font-size: 32px; line-height: 1; margin-bottom: 6px; }
+    .verdict-label {
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .verdict-label.hold   { color: var(--green); }
+    .verdict-label.caution { color: var(--amber); }
+    .verdict-label.exit   { color: var(--red); }
+    .verdict-score { font-size: 12px; color: var(--muted); }
+
+    .position-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 12px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      font-size: 12px;
+    }
+    .position-strip span { color: var(--muted); }
+    .position-strip b { color: var(--ink); }
+    .position-strip .rpos { color: var(--green); font-weight: 700; }
+    .position-strip .rneg { color: var(--red); font-weight: 700; }
+
+    /* Signal list */
+    .signal-list { display: flex; flex-direction: column; gap: 6px; }
+    .signal-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .signal-icon { font-size: 13px; flex-shrink: 0; margin-top: 1px; }
+    .signal-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      min-width: 90px;
+      margin-top: 1px;
+    }
+    .signal-value { color: var(--ink); }
+    .signal-value.bull { color: var(--green); }
+    .signal-value.bear { color: var(--red); }
+    .signal-value.neutral { color: var(--muted); }
+
+    /* ── Tape card styles (left panel) ── */
+    .card {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+    .card.bull { background: rgba(34,197,94,0.10); border-color: rgba(34,197,94,0.35); }
+    .card.bear { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.35); }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 11px 7px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sym { font-size: 14px; font-weight: 800; letter-spacing: 0.4px; }
+    .signal-badge { font-size: 14px; line-height: 1; }
+    .score-pill {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+      border: 1px solid currentColor;
+    }
+    .score-pill.bull { color: var(--green); }
+    .score-pill.bear { color: var(--red); }
+    .score-pill.neutral { color: var(--muted); }
+
+    /* Pre-entry confidence badge */
+    .pe-badge {
+      font-size: 10px; font-weight: 800;
+      padding: 2px 7px; border-radius: 999px;
+      letter-spacing: 0.5px; text-transform: uppercase;
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .pe-badge.early  { background: rgba(34,197,94,0.20);  color: var(--green); border: 1px solid rgba(34,197,94,0.5); }
+    .pe-badge.watch  { background: rgba(245,158,11,0.18); color: var(--amber); border: 1px solid rgba(245,158,11,0.45); }
+    .pe-badge.wait   { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
+    .pe-badge.none   { display: none; }
+
+    .price-block { margin-left: auto; text-align: right; }
+    .price { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .change { font-size: 10px; font-weight: 600; }
+    .change.pos { color: var(--green); }
+    .change.neg { color: var(--red); }
+    .change.flat { color: var(--muted); }
+
+    .remove-btn {
+      background: none; border: none; color: var(--muted);
+      font-size: 12px; padding: 2px 3px; cursor: pointer;
+      border-radius: 4px; line-height: 1;
+    }
+    .remove-btn:hover { color: var(--red); background: rgba(239,68,68,0.1); }
+
+    /* Compact body */
+    .card-body { padding: 7px 11px 9px; display: flex; flex-direction: column; gap: 5px; }
+
+    .imb-bar {
+      height: 4px; border-radius: 3px;
+      background: rgba(255,255,255,0.08);
+      position: relative; overflow: hidden;
+    }
+    .imb-bar-bid { position: absolute; left: 0; top: 0; height: 100%; background: var(--green); border-radius: 3px 0 0 3px; transition: width 0.4s; }
+    .imb-bar-ask { position: absolute; right: 0; top: 0; height: 100%; background: var(--red); border-radius: 0 3px 3px 0; transition: width 0.4s; }
+    .imb-bar-mid { position: absolute; left: 50%; top: 0; width: 1px; height: 100%; background: rgba(255,255,255,0.2); transform: translateX(-50%); }
+
+    .metrics { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 10px; color: var(--muted); }
+    .metrics span { white-space: nowrap; }
+    .metrics b { color: var(--ink); font-weight: 600; }
+    .metrics .g { color: var(--green); font-weight: 600; }
+    .metrics .r { color: var(--red); font-weight: 600; }
+
+    /* Score mini-bars strip (L1/L2/L3) */
+    .score-strip { display: flex; gap: 4px; align-items: center; }
+    .score-mini { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .score-mini-label { font-size: 9px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .score-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden; }
+    .score-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease, background 0.5s ease; }
+
+    /* Plan strip (entry/stop/dist) */
+    .plan-strip {
+      display: flex; gap: 6px 10px; flex-wrap: wrap;
+      font-size: 10px; color: var(--muted);
+      padding: 4px 0 0;
+      border-top: 1px solid var(--border);
+    }
+    .plan-strip span { white-space: nowrap; }
+    .plan-strip b { color: var(--ink); font-weight: 600; }
+    .plan-strip .pe-note { color: var(--green); font-weight: 600; font-style: italic; }
+
+    /* Legacy level-row kept for compat (unused in compact cards) */
+    .levels { padding: 9px 13px 11px; display: flex; flex-direction: column; gap: 7px; }
+    .level-row { display: flex; flex-direction: column; gap: 3px; }
+    .level-head { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); }
+    .level-score { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 999px; }
+    .level-score.bull { background: rgba(34,197,94,0.18); color: var(--green); }
+    .level-score.bear { background: rgba(239,68,68,0.18); color: var(--red); }
+    .level-score.neutral { background: rgba(255,255,255,0.07); color: var(--muted); }
+
+    .empty { grid-column: 1/-1; text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
+
+    /* Close Watch */
+    .cw-section { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+    .cw-header { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; background: rgba(255,255,255,0.04); border-bottom: 1px solid var(--border); }
+    .cw-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+    .cw-time { font-size: 13px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .cw-window { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .cw-win-row { display: flex; align-items: center; gap: 6px; }
+    .cw-win-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+    .cw-win-desc { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+    .cw-countdown { font-size: 11px; color: var(--muted); margin-top: 5px; }
+    .cw-urgency { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+    .cw-urgency.low      { background: rgba(255,255,255,0.07); color: var(--muted); }
+    .cw-urgency.medium   { background: rgba(245,158,11,0.15);  color: var(--amber); }
+    .cw-urgency.high     { background: rgba(239,68,68,0.15);   color: var(--red); }
+    .cw-urgency.critical { background: rgba(239,68,68,0.25);   color: var(--red); border: 1px solid rgba(239,68,68,0.5); }
+    .cw-metrics { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .cw-metric { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+    .cw-metric-label { color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+    .cw-metric-value { font-weight: 600; text-align: right; }
+    .cw-metric-value.up   { color: var(--green); }
+    .cw-metric-value.down { color: var(--red); }
+    .cw-metric-value.flat { color: var(--muted); }
+    .cw-rec { padding: 12px 14px; }
+    .cw-rec-badge { display: inline-block; font-size: 11px; font-weight: 800; padding: 4px 12px; border-radius: 6px; margin-bottom: 7px; letter-spacing: 0.6px; }
+    .cw-rec-badge.cut   { background: rgba(239,68,68,0.2);  color: var(--red);   border: 1px solid rgba(239,68,68,0.5); }
+    .cw-rec-badge.wait  { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.4); }
+    .cw-rec-badge.watch { background: rgba(245,158,11,0.15);color: var(--amber); border: 1px solid rgba(245,158,11,0.4); }
+    .cw-rec-reason { font-size: 11px; color: var(--muted); line-height: 1.55; }
+    .cw-loading { padding: 14px; color: var(--muted); font-size: 12px; }
+
+    /* Status dot */
+    .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); margin-right: 4px; }
+    .status-dot.live { background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    #lastUpdated { color: var(--muted); font-size: 11px; }
+
+    /* ── Right panel tabs ── */
+    .rp-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .rp-tab {
+      flex: 1; padding: 9px 12px; font-size: 11px; font-weight: 700; text-align: center;
+      color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .rp-tab.active { color: var(--ink); border-bottom-color: rgba(124,58,237,0.7); }
+    .rp-pane { display: none; flex-direction: column; flex: 1; overflow: hidden; }
+    .rp-pane.active { display: flex; }
+
+    /* ── L2 DOM panel ── */
+    .l2-header { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .l2-sym-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .l2-sym-row input { flex: 1; font-size: 12px; padding: 5px 9px; text-transform: uppercase; }
+    .l2-sym-row button { font-size: 11px; padding: 5px 11px; white-space: nowrap; }
+    .l2-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+    .l2-meta b { color: var(--ink); font-weight: 700; }
+    .l2-meta .g { color: var(--green); font-weight: 700; }
+    .l2-meta .r { color: var(--red); font-weight: 700; }
+
+    .l2-pressure-bar {
+      height: 6px; border-radius: 4px; margin: 7px 0 0;
+      background: rgba(255,255,255,0.08); position: relative; overflow: hidden;
+    }
+    .l2-pressure-fill { position: absolute; left: 0; top: 0; height: 100%; background: var(--green); border-radius: 4px; transition: width 0.35s; }
+    .l2-pressure-label { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+    .l2-dom { overflow-y: auto; flex: 1; font-size: 11px; font-variant-numeric: tabular-nums; }
+    .dom-ask-side { background: rgba(239,68,68,0.03); }
+    .dom-bid-side { background: rgba(34,197,94,0.03); }
+
+    .dom-row {
+      display: grid;
+      grid-template-columns: 1fr 70px 1fr;
+      gap: 0;
+      align-items: center;
+      padding: 1px 0;
+      min-height: 20px;
+    }
+    .dom-row.current-price { background: rgba(255,255,255,0.06); border-top: 1px solid rgba(255,255,255,0.12); border-bottom: 1px solid rgba(255,255,255,0.12); }
+    .dom-row.is-wall { background: rgba(245,158,11,0.08); }
+
+    .dom-bid-bar { position: relative; height: 16px; overflow: hidden; }
+    .dom-bid-fill { position: absolute; right: 0; top: 50%; transform: translateY(-50%); height: 10px; background: rgba(34,197,94,0.40); border-radius: 2px 0 0 2px; transition: width 0.3s; }
+    .dom-bid-size { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); color: var(--green); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .dom-bid-wall  { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #f59e0b; font-weight: 800; white-space: nowrap; }
+
+    .dom-ask-bar { position: relative; height: 16px; overflow: hidden; }
+    .dom-ask-fill { position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 10px; background: rgba(239,68,68,0.40); border-radius: 0 2px 2px 0; transition: width 0.3s; }
+    .dom-ask-size { position: absolute; left: 4px; top: 50%; transform: translateY(-50%); color: var(--red); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .dom-ask-wall  { position: absolute; left: 4px; top: 50%; transform: translateY(-50%); font-size: 10px; color: #f59e0b; font-weight: 800; white-space: nowrap; }
+
+    .dom-price-cell {
+      text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); padding: 0 2px;
+    }
+    .dom-price-cell.ask-price { color: var(--red); }
+    .dom-price-cell.bid-price { color: var(--green); }
+    .dom-price-cell.mid-price { color: var(--ink); font-size: 12px; }
+
+    .l2-no-data { text-align: center; color: var(--muted); font-size: 11px; padding: 30px 16px; line-height: 1.6; }
+
+    /* ── Time & Sales ── */
+    .tns-header { display: flex; justify-content: space-between; align-items: center; padding: 7px 14px 5px; border-top: 1px solid var(--border); flex-shrink: 0; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px; }
+    .tns-feed { overflow-y: auto; max-height: 180px; flex-shrink: 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    .tns-row { display: grid; grid-template-columns: 55px 1fr 1fr 28px; gap: 0 6px; padding: 2px 14px; font-size: 11px; font-variant-numeric: tabular-nums; align-items: center; }
+    .tns-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+    .tns-time { color: var(--muted); font-size: 10px; }
+    .tns-price.up { color: var(--green); font-weight: 700; }
+    .tns-price.down { color: var(--red); font-weight: 700; }
+    .tns-price.flat { color: var(--ink); }
+    .tns-size { color: var(--muted); text-align: right; }
+    .tns-size.large { color: var(--amber); font-weight: 700; }
+    .tns-tick { font-size: 9px; }
+    .tns-tick.up { color: var(--green); }
+    .tns-tick.down { color: var(--red); }
+    .tns-empty { text-align: center; color: var(--muted); font-size: 11px; padding: 14px; }
+
+    /* L1 fallback notice */
+    .l2-fallback-notice { background: rgba(245,158,11,0.10); border-bottom: 1px solid rgba(245,158,11,0.25); padding: 6px 14px; font-size: 10px; color: var(--amber); }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <a href="/">← Kingdom</a>
+  <h1>🎯 Tape Tracker</h1>
+  <div class="topbar-right">
+    <span id="lastUpdated">—</span>
+    <span><span class="status-dot" id="statusDot"></span><span id="statusTxt">idle</span></span>
+    <button onclick="toggleAuto()">⏸ Pause</button>
+  </div>
+</div>
+
+<!-- Symbol input -->
+<div class="input-row">
+  <input id="symbolInput" type="text" placeholder="SLNH 1.93 1.79 L, EOSE 7.74 7.81 L — sym entry stop L/S" style="width:400px;" />
+  <button class="primary" onclick="trackSymbols()">Track</button>
+  <button onclick="clearAll()">Clear all</button>
+</div>
+
+<!-- Two-column body -->
+<div class="main-body">
+
+  <!-- Left: live tape cards -->
+  <div class="left-panel">
+    <div class="grid" id="grid">
+      <div class="empty" id="emptyState">Enter symbols above and click Track to start monitoring.</div>
+    </div>
+  </div>
+
+  <!-- Right panel: L2 + EOD tabs -->
+  <div class="right-panel">
+    <div class="rp-tabs">
+      <div class="rp-tab active" id="rpTabL2" onclick="switchRpTab('l2')">📊 L2 Book</div>
+      <div class="rp-tab" id="rpTabEod" onclick="switchRpTab('eod')">📋 EOD Check</div>
+    </div>
+
+    <!-- ── L2 DOM pane ── -->
+    <div class="rp-pane active" id="rpPaneL2">
+      <div class="l2-header">
+        <div class="l2-sym-row">
+          <input id="l2SymInput" type="text" placeholder="Enter symbol" />
+          <button onclick="l2Track()">Track</button>
+          <span class="status-dot" id="l2Dot"></span>
+        </div>
+        <div class="l2-meta" id="l2Meta">Enter a symbol to stream the order book.</div>
+        <div class="l2-pressure-bar" id="l2PressureBar" style="display:none;">
+          <div class="l2-pressure-fill" id="l2PressureFill" style="width:50%;"></div>
+        </div>
+        <div class="l2-pressure-label" id="l2PressureLabel" style="display:none;">
+          <span>Bid</span><span id="l2PressurePct">50%</span><span>Ask</span>
+        </div>
+      </div>
+
+      <div id="l2FallbackNotice" class="l2-fallback-notice" style="display:none;">
+        Showing L1 NBBO only — alpaca-py SDK v0.43.x does not implement orderbook streaming. Your Algo Trader Plus plan supports L2 — SDK upgrade needed. NBBO bid/ask and T&amp;S are live.
+      </div>
+
+      <div class="l2-dom" id="l2Dom">
+        <div class="l2-no-data">Track a symbol to see Level 2 depth, walls, and book pressure.</div>
+      </div>
+
+      <div class="tns-header">
+        <span>Time &amp; Sales</span>
+        <span id="tnsPrintCount" style="color:var(--muted);">—</span>
+      </div>
+      <div class="tns-feed" id="tnsFeed">
+        <div class="tns-empty">Prints will appear here once streaming.</div>
+      </div>
+    </div>
+
+    <!-- ── EOD Check pane ── -->
+    <div class="rp-pane" id="rpPaneEod">
+      <div class="eod-header">
+        <h2>📋 EOD Gut Check</h2>
+        <p>Should I hold overnight? Run before market close.</p>
+      </div>
+
+      <div class="eod-inputs">
+        <div class="eod-field">
+          <label>Symbol</label>
+          <input id="eodSymbol" type="text" placeholder="SOUN" />
+        </div>
+        <div class="eod-row">
+          <div class="eod-field">
+            <label>Entry price</label>
+            <input id="eodEntry" type="number" step="0.01" placeholder="8.15" style="text-transform:none;" />
+          </div>
+          <div class="eod-field">
+            <label>Stop price</label>
+            <input id="eodStop" type="number" step="0.01" placeholder="7.70" style="text-transform:none;" />
+          </div>
+        </div>
+        <button class="eod-run-btn" onclick="runEodCheck()">Run EOD Check</button>
+      </div>
+
+      <!-- Close Watch strip -->
+      <div class="cw-section" id="closeWatchSection" style="display:none;">
+        <div class="cw-header">
+          <span class="cw-title">🕐 Close Watch</span>
+          <span class="cw-time" id="cwTime">—</span>
+        </div>
+        <div id="cwBody"><div class="cw-loading">Loading…</div></div>
+      </div>
+
+      <div class="eod-result" id="eodResult">
+        <div class="eod-placeholder">Enter a symbol and your entry/stop, then click Run EOD Check.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end main-body -->
+
+<script>
+(function() {
+  // ── Tape tracker state ────────────────────────────────────────────────────
+  let _symbols = [];
+  let _plans   = {};   // { SYM: {entry, stop, side} }  side = 'L'|'S'|null
+  let _auto    = true;
+  let _inFlight = false;
+  const POLL_MS = 2500;
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = (v, d=2) => { const n=Number(v); return Number.isFinite(n)?n.toFixed(d):'—'; };
+  const fmtK = (v) => { const n=Number(v); if(!Number.isFinite(n))return'—'; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1000)return(n/1000).toFixed(1)+'k'; return String(n); };
+
+  function sc(s) { return s>=62?'bull':(s<=38?'bear':'neutral'); }
+  function barClr(s) { return s>=62?'#22c55e':(s<=38?'#ef4444':'#94a3b8'); }
+
+  // ── Symbol management ─────────────────────────────────────────────────────
+  window.trackSymbols = function() {
+    const raw = $('symbolInput').value.trim().toUpperCase();
+    if (!raw) return;
+    // Parse each token: "SLNH 1.93 1.79" or "SLNH:1.93:1.79" or just "SLNH"
+    const newSyms = [];
+    const chunks = raw.split(/,/);
+    for (const chunk of chunks) {
+      const parts = chunk.trim().split(/[\s:]+/).filter(Boolean);
+      if (!parts.length) continue;
+      const sym = parts[0];
+      newSyms.push(sym);
+      if (parts.length >= 3) {
+        const entry = parseFloat(parts[1]);
+        const stop  = parseFloat(parts[2]);
+        if (!isNaN(entry) && !isNaN(stop)) {
+          let side = null;
+          if (parts.length >= 4) {
+            const sv = parts[3].toUpperCase();
+            if (sv==='L'||sv==='LONG')  side = 'L';
+            if (sv==='S'||sv==='SHORT') side = 'S';
+          }
+          _plans[sym] = { entry, stop, side };
+        }
+      }
+    }
+    _symbols = [...new Set([..._symbols,...newSyms])].slice(0,20);
+    $('symbolInput').value = '';
+    saveSymbols(); renderSkeletons(newSyms); poll();
+  };
+
+  window.removeSymbol = function(sym) {
+    _symbols = _symbols.filter(s=>s!==sym);
+    delete _plans[sym];
+    const c = document.getElementById('card-'+sym);
+    if (c) c.remove();
+    if (_symbols.length===0) { $('emptyState').style.display=''; }
+    saveSymbols();
+  };
+
+  window.clearAll = function() {
+    _symbols = []; _plans = {};
+    $('grid').innerHTML = '<div class="empty" id="emptyState">Enter symbols above and click Track to start monitoring.</div>';
+    saveSymbols();
+  };
+
+  function saveSymbols() {
+    try { localStorage.setItem('tape_symbols', JSON.stringify(_symbols)); } catch(e) {}
+    try { localStorage.setItem('tape_plans',   JSON.stringify(_plans));   } catch(e) {}
+  }
+  function loadSymbols() {
+    try {
+      const s = JSON.parse(localStorage.getItem('tape_symbols')||'[]');
+      const p = JSON.parse(localStorage.getItem('tape_plans')||'{}');
+      if (typeof p === 'object' && p !== null) _plans = p;
+      if (Array.isArray(s) && s.length) { _symbols = s; renderSkeletons(_symbols); poll(); }
+    } catch(e) {}
+  }
+
+  // ── Polling ───────────────────────────────────────────────────────────────
+  window.toggleAuto = function() {
+    _auto = !_auto;
+    $('statusDot').className = 'status-dot'+(_auto?' live':'');
+    $('statusTxt').textContent = _auto?'live':'paused';
+    if (_auto) poll();
+  };
+
+  async function poll() {
+    if (_inFlight||!_auto||!_symbols.length) return;
+    _inFlight = true;
+    $('statusDot').className = 'status-dot live';
+    $('statusTxt').textContent = 'fetching…';
+    try {
+      let _url = `/api/tape_signal?symbols=${encodeURIComponent(_symbols.join(','))}`;
+      const _planParts = Object.entries(_plans).filter(([s])=>_symbols.includes(s)).map(([s,p])=>`${s}:${p.entry}:${p.stop}${p.side?':'+p.side:''}`);
+      if (_planParts.length) _url += `&plans=${encodeURIComponent(_planParts.join(','))}`;
+      const r = await fetch(_url, {cache:'no-store'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      if (j && j.ok && j.signals) {
+        renderCards(j.signals);
+        $('lastUpdated').textContent = 'Updated '+new Date(j.ts*1000).toLocaleTimeString();
+        $('statusTxt').textContent = 'live';
+        $('statusTxt').title = '';
+      } else if (j && !j.ok) {
+        $('statusTxt').textContent = 'error';
+        $('statusTxt').title = j.error || 'unknown error';
+      }
+    } catch(e) {
+      $('statusTxt').textContent = 'error';
+      $('statusTxt').title = e.message || String(e);
+    } finally { _inFlight = false; }
+    if (_auto && _symbols.length) setTimeout(poll, POLL_MS);
+  }
+
+  function renderSkeletons(syms) {
+    const grid=$('grid'), empty=$('emptyState');
+    if (empty) empty.style.display='none';
+    for (const sym of syms) {
+      if (document.getElementById('card-'+sym)) continue;
+      const d=document.createElement('div');
+      d.className='card'; d.id='card-'+sym;
+      d.innerHTML=`<div class="card-head"><span class="sym">${esc(sym)}</span><span class="signal-badge">⏳</span><div class="price-block"><span class="price">—</span></div><button class="remove-btn" onclick="removeSymbol('${esc(sym)}')">✕</button></div><div class="card-body"><span style="color:var(--muted);font-size:11px;">Loading…</span></div>`;
+      grid.appendChild(d);
+    }
+  }
+
+  function renderCards(signals) {
+    for (const sym of _symbols) {
+      const sig = signals[sym];
+      let card = document.getElementById('card-'+sym);
+      if (!card) { card = document.createElement('div'); card.id = 'card-'+sym; $('grid').appendChild(card); const e=$('emptyState'); if(e) e.style.display='none'; }
+      if (!sig) {
+        // Signal missing for this symbol — show a stale placeholder instead of stuck "Loading…"
+        card.className = 'card';
+        card.innerHTML = `<div class="card-head"><span class="sym">${esc(sym)}</span><span class="signal-badge">⚪</span><div class="price-block"><span class="price">—</span></div><button class="remove-btn" onclick="removeSymbol('${esc(sym)}')">✕</button></div><div class="card-body"><span style="color:var(--muted);font-size:11px;">No data — market may be closed</span></div>`;
+        continue;
+      }
+      card.className = 'card '+sc(sig.composite);
+      card.innerHTML = cardHTML(sig);
+    }
+  }
+
+  function cardHTML(sig) {
+    const l1=sig.l1, l2=sig.l2, l3=sig.l3, pe=sig.pre_entry||{}, bk=sig.book||{};
+    const emoji      = sig.signal==='BULL'?'🐂':(sig.signal==='BEAR'?'🐻':'⚪');
+    const priceStr   = sig.price!=null?'$'+fmt(sig.price,2):'—';
+    const chgVal     = sig.change_pct;
+    const chgStr     = chgVal!=null?((chgVal>=0?'+':'')+fmt(chgVal,2)+'%'):'—';
+    const chgCls     = chgVal==null?'flat':(chgVal>0?'pos':(chgVal<0?'neg':'flat'));
+
+    // L1
+    const bid=l1.bid_size||0, ask=l1.ask_size||0, tot=bid+ask;
+    const bidPct  = tot>0?Math.round(bid/tot*100):50;
+    const imb     = l1.imbalance!=null?((l1.imbalance>=0?'+':'')+fmt(l1.imbalance,2)):'—';
+    const imbCls  = l1.imbalance==null?'':(l1.imbalance>0.1?'g':(l1.imbalance<-0.1?'r':''));
+    const dirArrow= l1.direction==='up'?'▲':(l1.direction==='down'?'▼':'→');
+    const dirCls  = l1.direction==='up'?'g':(l1.direction==='down'?'r':'');
+
+    // L2
+    const vwapCls  = l2.above_vwap===true?'g':(l2.above_vwap===false?'r':'');
+    const vwapTxt  = l2.above_vwap===true?'▲V':(l2.above_vwap===false?'▼V':'—V');
+    const structCls= l2.structure==='up'?'g':(l2.structure==='down'?'r':'');
+    const structTxt= l2.structure==='up'?'▲S':(l2.structure==='down'?'▼S':'→S');
+    const momCls   = l2.momentum==null?'':(l2.momentum>0?'g':'r');
+    const momStr   = l2.momentum!=null?(l2.momentum>=0?'+':'')+fmt(l2.momentum,1)+'%':'—';
+
+    // L3
+    const rvolCls = l3.rvol==null?'':(l3.rvol>1.5?'g':(l3.rvol<0.7?'r':''));
+    const newsCls = l3.news_count>0?'g':'';
+    const spyCls  = l3.spy_pct==null?'':(l3.spy_pct>=0?'g':'r');
+
+    // Pre-entry badge
+    const peSig    = (pe.signal||'NONE').toLowerCase();
+    const peLabel  = peSig==='early'?'⚡ EARLY':(peSig==='watch'?'👁 WATCH':(peSig==='wait'?'WAIT':''));
+    const peNote   = (pe.notes||[]).slice(0,2).join(' · ');
+
+    // Plan strip (entry/stop/dist)
+    let planHTML = '';
+    if (pe.entry!=null && pe.stop!=null) {
+      const side = pe.side ? pe.side.toUpperCase() : (pe.entry > pe.stop ? 'LONG' : 'SHORT');
+      const distStr = pe.dist_atr!=null ? pe.dist_atr+'R away' : '—';
+      const noteEl  = peNote ? `<span class="pe-note">${esc(peNote)}</span>` : '';
+      planHTML = `<div class="plan-strip">
+        <span>${side} <b>$${fmt(pe.entry,2)}</b></span>
+        <span>Stop <b>$${fmt(pe.stop,2)}</b></span>
+        <span>${esc(distStr)}</span>
+        ${noteEl}
+      </div>`;
+    }
+
+    return `
+      <div class="card-head">
+        <span class="sym">${esc(sig.symbol)}</span>
+        <span class="signal-badge">${emoji}</span>
+        <span class="score-pill ${sc(sig.composite)}">${sig.composite}</span>
+        ${peSig!=='none'&&peSig?`<span class="pe-badge ${peSig}">${peLabel}</span>`:''}
+        <div class="price-block"><div class="price">${priceStr}</div><div class="change ${chgCls}">${chgStr}</div></div>
+        <button class="remove-btn" onclick="removeSymbol('${esc(sig.symbol)}')">✕</button>
+      </div>
+      <div class="card-body">
+        <div class="imb-bar"><div class="imb-bar-bid" style="width:${bidPct}%;"></div><div class="imb-bar-ask" style="width:${100-bidPct}%;"></div><div class="imb-bar-mid"></div></div>
+        <div class="metrics">
+          <span>Bid <b>${fmtK(bid)}</b></span>
+          <span>Ask <b>${fmtK(ask)}</b></span>
+          <span>Imb <span class="${imbCls}">${imb}</span></span>
+          <span>Dir <span class="${dirCls}">${dirArrow}</span></span>
+          <span><span class="${vwapCls}">${vwapTxt}</span></span>
+          <span><span class="${structCls}">${structTxt}</span></span>
+          <span>Mom <span class="${momCls}">${momStr}</span></span>
+          <span>RVOL <span class="${rvolCls}">${l3.rvol!=null?fmt(l3.rvol,1)+'x':'—'}</span></span>
+          <span>SPY <span class="${spyCls}">${l3.spy_pct!=null?((l3.spy_pct>=0?'+':'')+fmt(l3.spy_pct,1)+'%'):'—'}</span></span>
+          <span>News <span class="${newsCls}">${l3.news_count}</span></span>
+          ${bk.pressure!=null?`<span>Book <span class="${bk.pressure>0.6?'g':(bk.pressure<0.4?'r':'')}">${Math.round(bk.pressure*100)}%bid</span></span>`:''}
+          ${bk.bid_wall?`<span>Bid wall <b style="color:#f59e0b">$${fmt(bk.bid_wall,2)}</b></span>`:''}
+          ${bk.ask_wall?`<span>Ask wall <b style="color:#f59e0b">$${fmt(bk.ask_wall,2)}</b></span>`:''}
+        </div>
+        <div class="score-strip">
+          <div class="score-mini">
+            <div class="score-mini-label">L1 ${l1.score}</div>
+            <div class="score-bar"><div class="score-bar-fill" style="width:${l1.score}%;background:${barClr(l1.score)};"></div></div>
+          </div>
+          <div class="score-mini">
+            <div class="score-mini-label">L2 ${l2.score}</div>
+            <div class="score-bar"><div class="score-bar-fill" style="width:${l2.score}%;background:${barClr(l2.score)};"></div></div>
+          </div>
+          <div class="score-mini">
+            <div class="score-mini-label">L3 ${l3.score}</div>
+            <div class="score-bar"><div class="score-bar-fill" style="width:${l3.score}%;background:${barClr(l3.score)};"></div></div>
+          </div>
+        </div>
+        ${planHTML}
+      </div>`;
+  }
+
+  // ── EOD Check ─────────────────────────────────────────────────────────────
+  window.runEodCheck = async function() {
+    const sym   = ($('eodSymbol').value||'').trim().toUpperCase();
+    const entry = $('eodEntry').value;
+    const stop  = $('eodStop').value;
+    if (!sym) { $('eodResult').innerHTML='<div class="eod-placeholder" style="color:var(--red);">Enter a symbol first.</div>'; return; }
+
+    $('eodResult').innerHTML='<div class="eod-placeholder">Fetching…</div>';
+    try {
+      let url = `/api/eod_check?symbol=${encodeURIComponent(sym)}`;
+      if (entry) url += `&entry=${encodeURIComponent(entry)}`;
+      if (stop)  url += `&stop=${encodeURIComponent(stop)}`;
+      const r = await fetch(url, {cache:'no-store'});
+      const j = await r.json();
+      if (!j.ok) { $('eodResult').innerHTML=`<div class="eod-placeholder" style="color:var(--red);">Error: ${esc(j.error||'unknown')}</div>`; return; }
+      $('eodResult').innerHTML = eodHTML(j);
+    } catch(e) {
+      $('eodResult').innerHTML=`<div class="eod-placeholder" style="color:var(--red);">Request failed.</div>`;
+    }
+  };
+
+  function eodHTML(j) {
+    const v   = j.verdict.toLowerCase();   // hold / caution / exit
+    const vEmoji = v==='hold'?'✅':(v==='caution'?'⚠️':'🚪');
+    const chgStr = j.change_pct!=null?((j.change_pct>=0?'+':'')+j.change_pct.toFixed(2)+'%'):'—';
+    const chgCls = j.change_pct==null?'':'('+chgStr+')';
+    const priceStr = j.price!=null?'$'+j.price.toFixed(2):'—';
+
+    let posHTML = '';
+    if (j.position) {
+      const p=j.position;
+      const rCls = p.current_r>=0?'rpos':'rneg';
+      posHTML=`<div class="position-strip">
+        <span>Entry <b>$${p.entry.toFixed(2)}</b></span>
+        <span>Stop <b>$${p.stop.toFixed(2)}</b></span>
+        <span>Risk/sh <b>$${p.risk_per_share.toFixed(2)}</b></span>
+        <span>Current R <span class="${rCls}">${p.current_r>=0?'+':''}${p.current_r.toFixed(2)}R</span></span>
+      </div>`;
+    }
+
+    const sigRows = (j.signals||[]).map(s=>{
+      const icon = s.bullish===true?'🟢':(s.bullish===false?'🔴':'🟡');
+      const cls  = s.bullish===true?'bull':(s.bullish===false?'bear':'neutral');
+      return `<div class="signal-row">
+        <span class="signal-icon">${icon}</span>
+        <span class="signal-label">${esc(s.label)}</span>
+        <span class="signal-value ${cls}">${esc(s.value)}</span>
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="verdict-block ${v}">
+        <div class="verdict-emoji">${vEmoji}</div>
+        <div class="verdict-label ${v}">${j.verdict}</div>
+        <div class="verdict-score">${priceStr} ${chgStr} • Score ${j.score}/100</div>
+      </div>
+      ${posHTML}
+      <div class="signal-list">${sigRows||'<div class="eod-placeholder">No signals computed.</div>'}</div>`;
+  }
+
+  // ── Close Watch ───────────────────────────────────────────────────────────
+  let _cwSym    = '';
+  let _cwPollId = null;
+  const CW_MS   = 30000;
+
+  async function fetchCloseWatch() {
+    const sym   = ($('eodSymbol').value||'').trim().toUpperCase();
+    const entry = $('eodEntry').value;
+    const stop  = $('eodStop').value;
+    if (!sym) return;
+
+    const section = $('closeWatchSection');
+    if (section) section.style.display = '';
+
+    let url = `/api/close_watch?symbol=${encodeURIComponent(sym)}`;
+    if (entry) url += `&entry=${encodeURIComponent(entry)}`;
+    if (stop)  url += `&stop=${encodeURIComponent(stop)}`;
+
+    try {
+      const r = await fetch(url, {cache:'no-store'});
+      const j = await r.json();
+      if (j && j.ok) renderCloseWatch(j);
+    } catch(e) {
+      const b=$('cwBody'); if(b) b.innerHTML='<div class="cw-loading" style="color:var(--red);">Failed.</div>';
+    }
+  }
+
+  function renderCloseWatch(j) {
+    const timeEl = $('cwTime');
+    if (timeEl) timeEl.textContent = j.et_time + ' ET';
+
+    const urg = j.window.urgency;
+    const urgBadge = `<span class="cw-urgency ${urg}">${urg}</span>`;
+
+    let countdown = '';
+    if (j.next_window) {
+      const m = Math.floor(j.next_window.seconds_until / 60);
+      const s = j.next_window.seconds_until % 60;
+      const warn = (urg==='critical'||urg==='high') ? '⚠️ ' : '';
+      countdown = `<div class="cw-countdown">${warn}Next: <b style="color:var(--ink);">${esc(j.next_window.name)}</b> in ${m}m ${s}s</div>`;
+    }
+
+    const mom    = j.momentum;
+    const momCls = mom ? (mom.direction==='up'?'up':(mom.direction==='down'?'down':'flat')) : 'flat';
+    const momTxt = mom ? ((mom.direction==='up'?'▲ ':(mom.direction==='down'?'▼ ':'→ '))+esc(mom.label)) : '—';
+
+    const vol    = j.vol_rate;
+    const volCls = vol ? (vol.ratio>1.5?'down':(vol.ratio<0.6?'up':'flat')) : 'flat';
+    const volTxt = vol ? esc(vol.label) : '—';
+
+    const vwapCls = j.above_vwap===true?'up':(j.above_vwap===false?'down':'flat');
+    const vwapTxt = j.above_vwap===true
+      ? `▲ above${j.vwap_price?' $'+j.vwap_price:''}`
+      : (j.above_vwap===false ? `▼ below${j.vwap_price?' $'+j.vwap_price:''}` : '—');
+
+    const rec    = j.recommendation;
+    const recKey = rec==='CUT NOW'?'cut':(rec==='WAIT'?'wait':'watch');
+    const recEmoji = rec==='CUT NOW'?'✂️':(rec==='WAIT'?'✅':'👁');
+
+    const body = $('cwBody');
+    if (!body) return;
+    body.innerHTML = `
+      <div class="cw-window">
+        <div class="cw-win-row"><span class="cw-win-name">${esc(j.window.name)}</span>${urgBadge}</div>
+        <div class="cw-win-desc">${esc(j.window.desc)}</div>
+        ${countdown}
+      </div>
+      <div class="cw-metrics">
+        <div class="cw-metric">
+          <span class="cw-metric-label">5-bar Momentum</span>
+          <span class="cw-metric-value ${momCls}">${momTxt}</span>
+        </div>
+        <div class="cw-metric">
+          <span class="cw-metric-label">Volume Rate</span>
+          <span class="cw-metric-value ${volCls}">${volTxt}</span>
+        </div>
+        <div class="cw-metric">
+          <span class="cw-metric-label">VWAP</span>
+          <span class="cw-metric-value ${vwapCls}">${esc(vwapTxt)}</span>
+        </div>
+      </div>
+      <div class="cw-rec">
+        <div class="cw-rec-badge ${recKey}">${recEmoji} ${esc(rec)}</div>
+        <div class="cw-rec-reason">${esc(j.reasoning)}</div>
+      </div>`;
+  }
+
+  // Patch runEodCheck to also trigger close watch
+  const _eodOrig = window.runEodCheck;
+  window.runEodCheck = async function() {
+    const sym = ($('eodSymbol').value||'').trim().toUpperCase();
+    await _eodOrig();
+    if (!sym) return;
+    // Restart the 30s polling if the symbol changed
+    if (sym !== _cwSym) {
+      _cwSym = sym;
+      if (_cwPollId) clearInterval(_cwPollId);
+      _cwPollId = setInterval(fetchCloseWatch, CW_MS);
+    }
+    fetchCloseWatch();
+  };
+
+  // ── Tab switcher ──────────────────────────────────────────────────────────
+  window.switchRpTab = function(tab) {
+    $('rpTabL2')?.classList.toggle('active', tab==='l2');
+    $('rpTabEod')?.classList.toggle('active', tab==='eod');
+    $('rpPaneL2')?.classList.toggle('active', tab==='l2');
+    $('rpPaneEod')?.classList.toggle('active', tab==='eod');
+  };
+
+  // ── L2 Order Book ─────────────────────────────────────────────────────────
+  let _l2Sym    = '';
+  let _l2Timer  = null;
+  const L2_MS   = 600;   // poll every 600ms — fast enough for intraday walls
+
+  window.l2Track = function() {
+    const sym = ($('l2SymInput').value||'').trim().toUpperCase();
+    if (!sym) return;
+    _l2Sym = sym;
+    $('l2SymInput').value = sym;
+    if (_l2Timer) clearInterval(_l2Timer);
+    fetchL2();
+    _l2Timer = setInterval(fetchL2, L2_MS);
+  };
+
+  async function fetchL2() {
+    if (!_l2Sym) return;
+    try {
+      const r = await fetch(`/api/l2_book?symbol=${encodeURIComponent(_l2Sym)}`, {cache:'no-store'});
+      const j = await r.json();
+      if (!j.ok) return;
+      renderL2(j);
+      $('l2Dot').className = 'status-dot live';
+    } catch(e) {
+      $('l2Dot').className = 'status-dot';
+    }
+  }
+
+  function renderL2(j) {
+    const book  = j.book  || {};
+    const tns   = j.tns   || [];
+    const l1    = j.l1_fallback;
+    const sym   = j.symbol || _l2Sym;
+
+    // Fallback notice
+    const fallback = !book.supported || (!book.bids?.length && !book.asks?.length);
+    $('l2FallbackNotice').style.display = fallback ? '' : 'none';
+
+    // Meta row (spread, pressure)
+    let bid = book.bids?.[0]?.price ?? l1?.bid_price;
+    let ask = book.asks?.[0]?.price ?? l1?.ask_price;
+    const spread = (bid && ask) ? ((ask - bid)).toFixed(4) : '—';
+    const spreadPct = (bid && ask && bid > 0) ? ((ask-bid)/bid*100).toFixed(3)+'%' : '—';
+    const bidWall = book.bid_wall;
+    const askWall = book.ask_wall;
+    const pressure = book.pressure;
+
+    let metaHtml = `<span>Sym <b>${esc(sym)}</b></span>`;
+    if (bid) metaHtml += `<span>Bid <span class="g">$${fmt(bid,2)}</span></span>`;
+    if (ask) metaHtml += `<span>Ask <span class="r">$${fmt(ask,2)}</span></span>`;
+    metaHtml += `<span>Spread <b>${spread} (${spreadPct})</b></span>`;
+    if (bidWall) metaHtml += `<span>Bid wall <b style="color:#f59e0b">$${fmt(bidWall,2)}</b></span>`;
+    if (askWall) metaHtml += `<span>Ask wall <b style="color:#f59e0b">$${fmt(askWall,2)}</b></span>`;
+    $('l2Meta').innerHTML = metaHtml;
+
+    // Pressure bar
+    if (pressure !== null && pressure !== undefined) {
+      const pct = Math.round(pressure * 100);
+      $('l2PressureBar').style.display  = '';
+      $('l2PressureLabel').style.display = '';
+      $('l2PressureFill').style.width   = pct + '%';
+      $('l2PressureFill').style.background = pct > 60 ? 'var(--green)' : (pct < 40 ? 'var(--red)' : '#94a3b8');
+      $('l2PressurePct').textContent = `${pct}% bid`;
+    }
+
+    // DOM render
+    const maxSize = Math.max(
+      ...((book.bids||[]).map(l=>l.size)),
+      ...((book.asks||[]).map(l=>l.size)),
+      1
+    );
+
+    let domHtml = '';
+
+    // Ask side (displayed top → bottom, highest ask first for DOM view)
+    const asks = [...(book.asks||[])].reverse();  // flip: highest ask at top
+    for (const lvl of asks) {
+      const barW = Math.max(4, Math.round(lvl.size / maxSize * 100));
+      domHtml += `<div class="dom-row dom-ask-side${lvl.is_wall?' is-wall':''}">
+        <div class="dom-bid-bar"></div>
+        <div class="dom-price-cell ask-price">$${fmt(lvl.price,2)}</div>
+        <div class="dom-ask-bar">
+          <div class="dom-ask-fill" style="width:${barW}%;"></div>
+          ${lvl.is_wall
+            ? `<span class="dom-ask-wall">🧱 ${fmtK(lvl.size)}</span>`
+            : `<span class="dom-ask-size">${fmtK(lvl.size)}</span>`}
+        </div>
+      </div>`;
+    }
+
+    // Current price / spread midpoint row
+    if (bid && ask) {
+      const mid = ((bid + ask) / 2).toFixed(2);
+      domHtml += `<div class="dom-row current-price">
+        <div class="dom-bid-bar"><div style="text-align:right;padding-right:6px;font-size:10px;color:var(--muted);">SPREAD</div></div>
+        <div class="dom-price-cell mid-price">$${mid}</div>
+        <div class="dom-ask-bar"><div style="padding-left:6px;font-size:10px;color:var(--muted);">${spread}</div></div>
+      </div>`;
+    }
+
+    // Bid side (best bid at top)
+    for (const lvl of (book.bids||[])) {
+      const barW = Math.max(4, Math.round(lvl.size / maxSize * 100));
+      domHtml += `<div class="dom-row dom-bid-side${lvl.is_wall?' is-wall':''}">
+        <div class="dom-bid-bar">
+          <div class="dom-bid-fill" style="width:${barW}%;"></div>
+          ${lvl.is_wall
+            ? `<span class="dom-bid-wall">🧱 ${fmtK(lvl.size)}</span>`
+            : `<span class="dom-bid-size">${fmtK(lvl.size)}</span>`}
+        </div>
+        <div class="dom-price-cell bid-price">$${fmt(lvl.price,2)}</div>
+        <div class="dom-ask-bar"></div>
+      </div>`;
+    }
+
+    if (!domHtml) {
+      if (fallback && l1) {
+        // L1 fallback view
+        domHtml = `<div class="l2-no-data">
+          L1 NBBO: Bid <span style="color:var(--green)">$${fmt(l1.bid_price,2)} × ${l1.bid_size||'?'}</span>
+          &nbsp;|&nbsp; Ask <span style="color:var(--red)">$${fmt(l1.ask_price,2)} × ${l1.ask_size||'?'}</span>
+          <br><br>Full depth requires Alpaca SIP subscription.
+        </div>`;
+      } else {
+        domHtml = `<div class="l2-no-data">Waiting for book data… (stream may take a few seconds to populate)</div>`;
+      }
+    }
+
+    $('l2Dom').innerHTML = domHtml;
+
+    // Time & Sales
+    renderTns(tns);
+  }
+
+  function renderTns(tns) {
+    if (!tns.length) {
+      $('tnsFeed').innerHTML = '<div class="tns-empty">Waiting for prints…</div>';
+      $('tnsPrintCount').textContent = '0 prints';
+      return;
+    }
+    $('tnsPrintCount').textContent = tns.length + ' prints';
+
+    // Compute median size for "large print" detection
+    const sizes = tns.map(t=>t.size||0).filter(s=>s>0).sort((a,b)=>a-b);
+    const medSize = sizes.length ? sizes[Math.floor(sizes.length/2)] : 0;
+    const largeThreshold = medSize * 5;
+
+    // Show newest at top
+    const rows = [...tns].reverse().slice(0, 60).map(tr => {
+      const ts = tr.timestamp ? new Date(tr.timestamp).toLocaleTimeString([], {hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+      const tick = tr.tick || 'flat';
+      const tickArrow = tick==='up'?'▲':(tick==='down'?'▼':'·');
+      const large = (tr.size||0) >= largeThreshold && largeThreshold > 0;
+      return `<div class="tns-row">
+        <span class="tns-time">${ts}</span>
+        <span class="tns-price ${tick}">$${fmt(tr.price,2)}</span>
+        <span class="tns-size${large?' large':''}">${fmtK(tr.size)}</span>
+        <span class="tns-tick ${tick}">${tickArrow}</span>
+      </div>`;
+    }).join('');
+    $('tnsFeed').innerHTML = rows;
+  }
+
+  // Auto-set L2 symbol when tape symbols are added
+  const _origTrackSymbols = window.trackSymbols;
+  window.trackSymbols = function() {
+    _origTrackSymbols();
+    if (!_l2Sym && _symbols.length > 0) {
+      $('l2SymInput').value = _symbols[0];
+      window.l2Track();
+    }
+  };
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  $('symbolInput').addEventListener('keydown', e=>{ if(e.key==='Enter') trackSymbols(); });
+  $('eodSymbol').addEventListener('keydown', e=>{ if(e.key==='Enter') runEodCheck(); });
+  $('l2SymInput').addEventListener('keydown', e=>{ if(e.key==='Enter') l2Track(); });
+
+  loadSymbols();
+})();
+</script>
+</body>
+</html>

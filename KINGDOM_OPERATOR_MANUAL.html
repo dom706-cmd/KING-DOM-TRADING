@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KingDom Operator Manual</title>
+<style>
+  @page { size: Letter; margin: 0.6in; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #111; line-height: 1.45; font-size: 11pt; }
+  h1,h2,h3 { margin: 0 0 8px 0; line-height: 1.2; }
+  h1 { font-size: 24pt; }
+  h2 { font-size: 16pt; margin-top: 22px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h3 { font-size: 12.5pt; margin-top: 14px; }
+  p, li { margin: 0 0 8px 0; }
+  ul { margin: 0 0 10px 20px; }
+  code { background: #f3f3f3; padding: 1px 4px; border-radius: 4px; }
+  .hero { padding: 14px 16px; border: 2px solid #111; border-radius: 10px; margin-bottom: 18px; }
+  .box { border: 1px solid #cfcfcf; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .small { font-size: 10pt; color: #444; }
+  .pill { display: inline-block; border: 1px solid #888; border-radius: 999px; padding: 2px 8px; margin-right: 6px; font-size: 9pt; }
+  .footer { margin-top: 30px; font-size: 9pt; color: #555; border-top: 1px solid #ddd; padding-top: 10px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { border: 1px solid #d8d8d8; padding: 8px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <h1>KingDom Operator Manual</h1>
+    <p><strong>Purpose:</strong> a printable quick-start and workflow guide for using KingDom as a scanner and monitor desk tool.</p>
+    <p><span class="pill">Scanner</span><span class="pill">Monitor</span><span class="pill">Presets</span><span class="pill">Paper Trading</span></p>
+  </div>
+
+  <h2>1. What KingDom Is</h2>
+  <p>KingDom is a scanner and monitor system. It is designed to find potential setups, separate <strong>trade-ready</strong> ideas from <strong>watch / monitor</strong> ideas, and explain why names passed or failed. It is not a black box and it should not be treated like one.</p>
+  <div class="box">
+    <p><strong>Core principle:</strong> if no strict trade-ready names pass, KingDom should still surface the best <strong>monitor/watch seeds</strong> instead of looking empty or broken.</p>
+  </div>
+
+  <h2>2. Mental Model</h2>
+  <div class="grid">
+    <div class="box">
+      <h3>Trade-ready</h3>
+      <ul>
+        <li>Best strict setups right now</li>
+        <li>Passed the tighter gating stack</li>
+        <li>Most actionable if you are looking for immediate execution</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h3>Monitor / Watch</h3>
+      <ul>
+        <li>Interesting names that did not fully pass strict entry conditions</li>
+        <li>Still worth watching for improvement</li>
+        <li>Useful for paper trading and workflow validation</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>3. Main Workflow</h2>
+  <ol>
+    <li>Choose a <strong>quick preset</strong> or load a saved preset.</li>
+    <li>Run a scan.</li>
+    <li>Read the top section carefully:
+      <ul>
+        <li>Mode</li>
+        <li>Trade-ready count</li>
+        <li>Rejected count</li>
+        <li>Seed pool</li>
+        <li>Primary message</li>
+      </ul>
+    </li>
+    <li>If trade-ready is zero, review the <strong>monitor/watch fallback</strong> names rather than assuming the scan failed.</li>
+    <li>Open candidate details and read the <strong>why this ranked here</strong> section before acting.</li>
+    <li>Move interesting names into a monitoring workflow.</li>
+  </ol>
+
+  <h2>4. Presets and Categories</h2>
+  <p>The <strong>Pro workflow</strong> area gives you several ways to operate the scanner:</p>
+  <ul>
+    <li><strong>Quick preset:</strong> fast benchmark-style profile selection</li>
+    <li><strong>Saved presets:</strong> your reusable desk configurations</li>
+    <li><strong>Favorite / starred:</strong> identify your most-used setups</li>
+    <li><strong>Category:</strong> organize presets by use case</li>
+    <li><strong>Desk notes:</strong> write why the preset exists and when to use it</li>
+  </ul>
+
+  <table>
+    <tr><th>Preset Type</th><th>Use It For</th></tr>
+    <tr><td>Auto / KingDom default</td><td>Balanced general use</td></tr>
+    <tr><td>Momentum</td><td>Higher-velocity names, stronger movement bias</td></tr>
+    <tr><td>News</td><td>Catalyst-driven scanning and event-heavy names</td></tr>
+    <tr><td>Reversal</td><td>Names setting up for failure, reclaim, or reversal conditions</td></tr>
+    <tr><td>Liquidity</td><td>Cleaner tradeability / less junk in the universe</td></tr>
+    <tr><td><strong>saturday_prep</strong></td><td>Weekend EOD momentum scan — generates Monday watchlist candidates from Friday closes. No live data needed.</td></tr>
+    <tr><td><strong>parabolic_watch</strong></td><td>Pre-market parabolic detector — run 4am–9am. Auto-seeds from Market Movers (top gainers). Scores stocks on PM move %, acceleration, float turnover, RVOL, catalyst freshness, and institutional footprint. Use after a big PM mover you want to track before open.</td></tr>
+  </table>
+
+  <h2>5. Scan Strategies</h2>
+  <p>KingDom supports multiple scan strategies selectable per run. Each has a distinct edge and time-of-day profile:</p>
+  <table>
+    <tr><th>Strategy</th><th>When to Use</th><th>Auto-Seeds From</th></tr>
+    <tr><td><code>orb</code></td><td>9:30–10:00 opening range breakout setups</td><td>Manual symbol list or monitor cache</td></tr>
+    <tr><td><code>parabolic</code></td><td>Pre-market (4am–9:29) — stocks accelerating in PM, scored on velocity + institutional footprint</td><td><strong>Alpaca Market Movers</strong> (top 25 gainers) when no symbols passed</td></tr>
+    <tr><td><code>gap_and_go</code></td><td>Pre-market (4am–9:29) — stocks gapped ≥3% from prev close</td><td><strong>Alpaca Market Movers</strong> (top 25 gainers + losers) when no symbols passed</td></tr>
+    <tr><td><code>atr_expansion</code></td><td>Any time — stocks with today's range ≥1.5× their 20-day ATR</td><td><strong>Alpaca Most Actives</strong> (top 100 by volume) when no symbols passed</td></tr>
+    <tr><td><code>eod_momentum</code></td><td>Evening / weekend prep — stocks that closed strong with RVOL ≥1.5×</td><td>Manual list; uses <strong>Snapshot pre-filter</strong> to skip non-movers before pulling 3-month history</td></tr>
+    <tr><td><code>range_reversion</code></td><td>Mid-day (11am–2pm) — names overextended from their established range</td><td>Monitor cache</td></tr>
+    <tr><td><code>range_trap</code></td><td>Mid-day — failed breakouts and trapped longs/shorts</td><td>Monitor cache</td></tr>
+    <tr><td><code>float_rotation</code></td><td>Any time — small-float stocks with turnover ≥ float size</td><td>Manual list</td></tr>
+    <tr><td><code>halt_resume</code></td><td>Any time — stocks that halted and resumed trading recently</td><td>Live halt feed</td></tr>
+    <tr><td><code>52wk_pullback</code></td><td>Any time — names pulling back 2–15% from a 52-week high with RVOL</td><td>Manual list</td></tr>
+  </table>
+
+  <h3>News Enrichment (all strategies)</h3>
+  <p>Every scan result now includes <code>news_headline</code> and <code>news_age_hours</code> sourced from the Alpaca News feed. A candidate moving 5× ATR with a 2-hour-old headline is a very different trade from one with no news. If a candidate shows <strong>—</strong> for news, it's a pure technical move with no identifiable catalyst.</p>
+
+  <h3>Institutional Footprint Score (parabolic + gap_and_go)</h3>
+  <p>Every Alpaca bar includes a trade count (<code>n</code> field). KingDom computes <code>avg_trade_size = volume / trade_count</code> per session and compares it to the 20-day historical baseline. A stock with 10M shares in 50 prints is institutional accumulation. The same 10M shares in 200,000 prints is retail FOMO. The <code>Inst +X%</code> badge in candidate notes reflects the multiplier applied to the composite score. No commercial scanner does this calculation.</p>
+
+  <h3>Opening Auction Confirmation (parabolic + gap_and_go, post-9:30am)</h3>
+  <p>After the market opens, KingDom fetches the opening auction print via Alpaca’s <code>/v2/stocks/auctions</code> endpoint and computes <code>auction_gap_pct = (auction_price - pm_last) / pm_last × 100</code>. A positive <strong>Auction +X%</strong> badge (green) means the stock opened <em>above</em> its PM price — institutional MOO buyers were present and the move is confirmed. A negative badge (red) means sellers absorbed at open — likely fade, not a breakout. This signal addresses the AKAN problem directly: knowing the opening auction direction before you commit to chasing.</p>
+
+  <h3>Analyze Watchlist — Setup Quality Indicators (Gap Orders card)</h3>
+  <p>When you click <strong>⚖ Analyze Watchlist</strong> in the Gap Orders card, each symbol in your Desk Watchlist is scored against its previous session’s data. In addition to the plan status (Intact / Near Entry / Triggered / Invalidated), the table shows four <strong>Setup Quality</strong> columns that tell you how clean the setup was at EOD:</p>
+  <table>
+    <tr><th>Column</th><th>Green ✓</th><th>Amber ~</th><th>Red ✗</th><th>What it tells you</th></tr>
+    <tr>
+      <td><strong>Close%</strong></td>
+      <td>≥ 60%</td><td>30–60%</td><td>&lt; 30%</td>
+      <td>Where yesterday’s close landed in the day’s range (0% = LOD, 100% = HOD). ≥ 60% means it closed near the top of the range — sellers never regained control. &lt; 30% means it gave back most of the move before close — weak setup.</td>
+    </tr>
+    <tr>
+      <td><strong>RVOL</strong></td>
+      <td>≥ 1.5×</td><td>0.8–1.5×</td><td>&lt; 0.8×</td>
+      <td>Yesterday’s volume vs the 20-day average (computed from 60 days of daily history for accuracy). Elevated volume on the setup day confirms conviction. Low RVOL = thin, uncommitted move.</td>
+    </tr>
+    <tr>
+      <td><strong>News</strong></td>
+      <td>&lt; 12h old</td><td>12–48h</td><td>No news</td>
+      <td>Age of the most recent headline from Alpaca News. Hover the cell to read the full headline. A fresh catalyst (&lt; 12h) means the story is still active going into the next session. No news = pure technical move.</td>
+    </tr>
+    <tr>
+      <td><strong>Ext%</strong></td>
+      <td>3–30%</td><td>0–3%</td><td>&gt; 30%</td>
+      <td>Yesterday’s day move (open→close). 3–30% is the sweet spot — meaningful move with room left to work. &gt; 30% = extended, hard to get a clean entry without chasing. &lt; 3% = barely moved, low conviction.</td>
+    </tr>
+  </table>
+  <p>Use these four columns together with the plan status to prioritize. An <strong>Intact</strong> name with all four green — strong HOD close, elevated RVOL, fresh catalyst, not overextended — is your highest-quality setup. An Intact name with red Close% and red RVOL is technically valid but structurally weak; treat it with lower conviction.</p>
+
+  <h2>6. Alpaca Data APIs — What’s Wired In</h2>
+  <p>KingDom uses three Alpaca data endpoints automatically. You do not need to configure anything — they run on your existing API key.</p>
+  <table>
+    <tr><th>API</th><th>Used By</th><th>What It Does</th></tr>
+    <tr>
+      <td><strong>Market Movers</strong><br><code>/v1beta1/screener/stocks/movers</code></td>
+      <td><code>gap_and_go</code></td>
+      <td>When you run gap_and_go with no symbol list, it auto-seeds from the top 25 real-time gainers + 25 losers (SIP data vs prev close). These are the actual gap candidates at open.</td>
+    </tr>
+    <tr>
+      <td><strong>Most Actives</strong><br><code>/v1beta1/screener/stocks/most-actives</code></td>
+      <td><code>atr_expansion</code></td>
+      <td>When you run atr_expansion with no symbol list, it auto-seeds from the top 100 most-active stocks by volume. You never need to pass a symbol list for these strategies.</td>
+    </tr>
+    <tr>
+      <td><strong>Snapshots</strong><br><code>/v2/stocks/snapshots</code></td>
+      <td><code>eod_momentum</code></td>
+      <td>Pre-filter pass before fetching 3-month daily bars. One API call per 100 symbols returns today’s OHLCV + yesterday’s close — symbols that clearly didn’t move are discarded immediately, cutting API calls by 80–90% on large universes like saturday_prep.</td>
+    </tr>
+    <tr>
+      <td><strong>News</strong><br><code>/v1beta1/news</code></td>
+      <td><code>gap_and_go</code>, <code>atr_expansion</code>, <code>eod_momentum</code></td>
+      <td>After candidates are built, the most recent headline per symbol is fetched and attached as <code>news_headline</code> + <code>news_age_hours</code>. A "—" means no news in the last 48 hours — pure technical move.</td>
+    </tr>
+    <tr>
+      <td><strong>Bar Trade Count</strong><br><code>n</code> field in every bar</td>
+      <td><code>parabolic</code>, <code>gap_and_go</code></td>
+      <td>Already included in every bar response — zero extra API calls. KingDom extracts the <code>Trades</code> column and computes avg trade size vs 20-day baseline. Drives the Institutional Footprint Score multiplier shown as <code>Inst +X%</code> on candidates.</td>
+    </tr>
+    <tr>
+      <td><strong>Auctions</strong><br><code>/v2/stocks/auctions</code></td>
+      <td><code>parabolic</code>, <code>gap_and_go</code></td>
+      <td>Fetched once per session at 9:30am after the opening auction clears. Returns the opening print price and volume. Attached to candidates as <code>auction_gap_pct</code> — positive = confirmed gap up beyond PM price, negative = faded at open.</td>
+    </tr>
+  </table>
+  <div class="box">
+    <p><strong>Note on the Snapshot pre-filter:</strong> it only filters on the day it’s run. On weekends (saturday_prep), the snapshot date won’t match the session date (Friday), so the pre-filter automatically bypasses itself and the full daily bar fetch runs as normal. You always get correct results — the pre-filter is a speed optimization, not a correctness change.</p>
+  </div>
+
+  <h2>7. Understanding Results</h2>
+  <h3>If you see trade-ready names</h3>
+  <ul>
+    <li>These are the strictest actionable outputs.</li>
+    <li>Still review individual setup logic and context before acting.</li>
+  </ul>
+
+  <h3>If you see monitor / watch fallback</h3>
+  <ul>
+    <li>This means the scan found useful names, but none fully passed the trade-ready gate.</li>
+    <li>This is not a broken scan.</li>
+    <li>Use these names for watchlisting, paper trading, and intraday reassessment.</li>
+  </ul>
+
+  <h3>Zero-result diagnostics</h3>
+  <p>When no strict candidates pass, KingDom should explain why. Typical reasons include:</p>
+  <ul>
+    <li>filtered price</li>
+    <li>avg20 dollar volume too low</li>
+    <li>confidence too low</li>
+    <li>ORB retest ML too low</li>
+    <li>chase too high</li>
+  </ul>
+
+  <h2>8. Candidate Detail Panel</h2>
+  <p>Use the candidate detail view to answer:</p>
+  <ul>
+    <li>Why did this symbol rank here?</li>
+    <li>Was it trade-ready or just a watch seed?</li>
+    <li>What are the plan levels: entry, stop, targets?</li>
+    <li>What catalyst / news context exists? (check <code>news_headline</code> + age)</li>
+    <li>What score breakdown drove the ranking?</li>
+  </ul>
+
+  <h2>9. Alert Tape and Monitor States</h2>
+  <p>KingDom’s monitor should distinguish between:</p>
+  <ul>
+    <li><strong>Near trigger</strong> – setup approaching action point</li>
+    <li><strong>Ready</strong> – conditions becoming actionable</li>
+    <li><strong>Triggered</strong> – conditions fired</li>
+    <li><strong>Suppressed</strong> – conditions intentionally muted / degraded</li>
+  </ul>
+  <p>Use alert cooldown and alert level controls to avoid noise.</p>
+
+  <h2>10. Paper Trading Workflow</h2>
+  <p>Paper trading here means <strong>taking notes</strong>, not sending orders.</p>
+  <div class="box">
+    <h3>Record for each paper trade</h3>
+    <ul>
+      <li>symbol</li>
+      <li>time</li>
+      <li>side</li>
+      <li>entry</li>
+      <li>stop</li>
+      <li>target(s)</li>
+      <li>trade-ready or watch fallback?</li>
+      <li>why selected?</li>
+      <li>why entered?</li>
+      <li>why held / trimmed / stopped?</li>
+      <li>what did KingDom get right or wrong?</li>
+    </ul>
+  </div>
+
+  <h2>11. Daily Operating Routine</h2>
+  <ol>
+    <li><strong>Night before / weekend:</strong> run <code>saturday_prep</code> → review EOD momentum candidates → save best to Desk Watchlist with entry/stop/side.</li>
+    <li><strong>Pre-market:</strong> Analyze Watchlist (Gap Orders card) → use the four Setup Quality columns (Close%, RVOL, News, Ext%) to prioritize Intact names — all-green = highest conviction → trim invalidated names → Generate Orders for survivors.</li>
+    <li><strong>Pre-market (4am–9:29am):</strong> run <code>parabolic_watch</code> — auto-seeds from Market Movers gainers. Look for candidates with high <code>acceleration_ratio</code> (still moving at 7–8am), strong <code>Inst</code> factor (institutional prints), and fresh catalyst. Add the best names to your Desk Watchlist before 9:30.</li>
+    <li><strong>At open:</strong> run <code>gap_and_go</code> (auto-seeds from Market Movers) and/or <code>atr_expansion</code> (auto-seeds from Most Actives) with no symbol list required. Check the <strong>Auction</strong> badge on each candidate — green = confirmed gap up beyond PM, red = fading at open.</li>
+    <li>Review trade-ready names first. If none, review watch fallback names.</li>
+    <li>Check <code>news_headline</code> on every candidate — know why it’s moving before you act.</li>
+    <li>Open candidate details on the best 3–10 names.</li>
+    <li>Pick paper trades with explicit reasoning.</li>
+    <li>Review outcomes later and calibrate thresholds/ranking.</li>
+  </ol>
+
+  <h2>12. What KingDom Still Is Not</h2>
+  <ul>
+    <li>Not an automatic money printer</li>
+    <li>Not a substitute for judgment</li>
+    <li>Not finished forever</li>
+    <li>Not better than every incumbent tool in every dimension yet</li>
+  </ul>
+
+  <h2>13. What to Trust Most</h2>
+  <ol>
+    <li>Clear ranking logic</li>
+    <li>Diagnostics explaining why names passed or failed</li>
+    <li>Monitor/watch fallback when strict trade-ready is empty</li>
+    <li>Repeated paper-trade validation over time</li>
+  </ol>
+
+  <div class="footer">
+    <p><strong>File:</strong> KingDom Operator Manual</p>
+    <p class="small">Prepared for printable PDF use. Save a copy to Desktop and keep it beside your workstation until the workflow becomes second nature.</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+== debug last scan after ORB ==
+{
+    "data_failures": {
+        "count": 1550,
+        "stage_daily": 219,
+        "stage_intraday": 1331
+    },
+    "debug": {
+        "chunk_errors": [],
+        "chunk_timings": [
+            {
+                "chunk_index": 0,
+                "n_symbols": 100,
+                "seconds": 1.508
+            },
+            {
+                "chunk_index": 1,
+                "n_symbols": 100,
+                "seconds": 0.843
+            },
+            {
+                "chunk_index": 2,
+                "n_symbols": 100,
+                "seconds": 2.347
+            },
+            {
+                "chunk_index": 3,
+                "n_symbols": 100,
+                "seconds": 1.04
+            },
+            {
+                "chunk_index": 4,
+                "n_symbols": 100,
+                "seconds": 0.695
+            }
+        ],
+        "failure_samples": [
+            {
+                "code": "intraday_or_window_incomplete",
+                "error": "intraday_or_window_incomplete",
+                "stage": "intraday",
+                "symbol": "ZUMZ"
+            },
+            {
+                "code": "intraday_or_window_missing_open",
+                "error": "intraday_or_window_missing_open",
+                "stage": "intraday",
+                "symbol": "ZFEB"
+            },
+            {
+                "code": "intraday_or_window_incomplete",
+                "error": "intraday_or_window_incomplete",
+                "stage": "intraday",
+                "symbol": "ZMAR"
+            },
+            {
+                "code": "filtered_or_range",
+                "error": "filtered_or_range",
+                "stage": "intraday",
+                "symbol": "ZIM"
+            },
+            {
+                "code": "intraday_or_window_incomplete",
+                "error": "intraday_or_window_incomplete",
+                "stage": "intraday",
+                "symbol": "ZURA"
+            }
+        ],
+        "failure_samples_by_code": {},
+        "session_date_used": "2026-03-06"
+    },
+    "job_id": "6cd0befa744044a29bba3fa6a0622860",
+    "ok": true,
+    "prefilter_counts": {
+        "avg20_below_threshold": 1595,
+        "avg20_calc_missing": 89,
+        "daily_empty": 219,
+        "daily_ok": 1380,
+        "filtered_avg20_dollar_vol": 1684,
+        "filtered_price": 2576,
+        "normalized_skipped": 0
+    },
+    "prefilter_samples": [],
+    "provider": "alpaca",
+    "reject_counts": {
+        "avg20_below_threshold": 1595,
+        "avg20_calc_missing": 89,
+        "bars_fetch_error_auth": 0,
+        "bars_fetch_error_http_400": 0,
+        "bars_fetch_error_http_404": 0,
+        "bars_fetch_error_network": 0,
+        "bars_fetch_error_parse": 0,
+        "bars_fetch_error_provider": 0,
+        "bars_fetch_error_rate_limit": 0,
+        "bars_fetch_error_timeout": 0,
+        "daily_empty": 219,
+        "daily_ok": 1380,
+        "filtered_avg20_dollar_vol": 1684,
+        "filtered_no_valid_plan": 26,
+        "filtered_notional": 0,
+        "filtered_or_range": 143,
+        "filtered_price": 2108,
+        "filtered_risk_per_share": 0,
+        "filtered_rvol": 561,
+        "filtered_shares": 0,
+        "filtered_today_dollar_vol": 63,
+        "intraday_empty": 3,
+        "intraday_invalid_or_values": 0,
+        "intraday_missing_columns": 0,
+        "intraday_or_window": 0,
+        "intraday_or_window_incomplete": 468,
+        "intraday_or_window_missing_close": 0,
+        "intraday_or_window_missing_open": 54,
+        "intraday_session_filter_empty": 0,
+        "intraday_timezone_convert_failed": 0,
+        "normalized_skipped": 0,
+        "other_data_failures": 0,
+        "plan_build_exception": 0
+    },
+    "scan_date": "2026-03-06",
+    "thresholds_used": {
+        "chunk_size": 100,
+        "exec_style": "retest",
+        "limit": 25,
+        "max_price": 30.0,
+        "max_symbols": 6500,
+        "min_avg20_dollar_vol": 1000000.0,
+        "min_price": 1.0,
+        "min_rvol": 1.5,
+        "min_today_dollar_vol": 2000000.0,
+        "offset": 6500,
+        "range_band_k": 2.0,
+        "range_window_min": 60,
+        "rr_stop_sigma_mult": 0.75,
+        "rr_touch_lookback_min": 15,
+        "strategy": "orb",
+        "use_catalyst": false,
+        "use_ml": true,
+        "use_sentiment": true
+    }
+}

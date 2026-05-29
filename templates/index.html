@@ -605,9 +605,9 @@ th {
       <div class="quickCard" id="capitalStatusCard">
         <div class="sectionLabel">Capital</div>
         <div id="capitalStatusBody" class="denseMeta">
-          <span class="tag">Broker</span><span>{{ (broker_snapshot or {}).get('broker', '—') }}</span>
-          <span class="tag">BP</span><span>{{ '%.0f'|format((broker_snapshot or {}).get('buying_power', 0) or 0) }}</span>
-          <span class="tag">Equity</span><span>{{ '%.0f'|format((broker_snapshot or {}).get('equity', 0) or 0) }}</span>
+          <span class="tag">Account</span><input type="number" id="manualAccountSize" placeholder="100000" style="width:80px;background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:3px;padding:1px 4px;font-size:11px;" />
+          <span class="tag">Risk $</span><input type="number" id="manualRiskBudget" placeholder="500" style="width:55px;background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:3px;padding:1px 4px;font-size:11px;" />
+          <span class="tag">Day P&amp;L</span><input type="number" id="manualDayPnl" placeholder="0" style="width:65px;background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:3px;padding:1px 4px;font-size:11px;" />
         </div>
       </div>
     </div>
@@ -1226,21 +1226,6 @@ th {
   </div>
   {% endif %}
 
-      <div class="card compactCard utilityCard" id="brokerCard">
-        <div class="sectionIntro">
-          <div>
-            <div class="sectionLabel">Broker</div>
-            <h3 style="margin:0;">Account cockpit</h3>
-            <div class="muted" style="margin-top:4px;">Live broker snapshot, buying power, and open positions import. Backend: <b>{{ broker_provider_name or 'alpaca' }}</b>{% if broker_provider_error %} <span class="positionError">({{ broker_provider_error }})</span>{% endif %}</div>
-          </div>
-          <div class="positionToolbar">
-            <button type="button" id="brokerRefreshBtn">Refresh broker</button>
-            <button type="button" id="brokerImportBtn">Import positions to desk</button>
-          </div>
-        </div>
-        <div id="brokerSummary" class="metricRow" style="margin-top:10px;"></div>
-        <div id="brokerPositions" class="positionChartShell" style="margin-top:10px;"><div class="positionGuide" style="padding:10px;">Broker positions will appear here.</div></div>
-      </div>
 
       <div class="card compactCard utilityCard" id="positionDeskCard">
         <div class="sectionIntro">
@@ -1252,7 +1237,6 @@ th {
           <div class="positionToolbar">
             <button type="button" id="positionDeskAddRowBtn">Add row</button>
             <button type="button" id="positionDeskRefreshBtn">Refresh guidance</button>
-            <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="positionDeskBrokerSync" /> Sync broker positions</label>
           </div>
         </div>
         <div class="positionDeskGrid" style="margin-top:10px;">
@@ -1714,7 +1698,6 @@ th {
 </div>
 
 <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-<script id="orb_broker_snapshot_json" type="application/json">{{ (broker_snapshot or {})|tojson }}</script>
 <script id="orb_context_json" type="application/json">{{ (context_snapshot or {})|tojson }}</script>
 <script id="orb_recent_alerts_json" type="application/json">{{ (recent_alerts or [])|tojson }}</script>
 <script id="orb_recent_news_json" type="application/json">{{ (recent_news or [])|tojson }}</script>
@@ -2220,8 +2203,9 @@ function gradeClass(g){
     }
     if (f.minGrade && f.minGrade > 0){
       filtered = filtered.filter(c => {
-        const sc = c.ktt_score != null ? Number(c.ktt_score) : 0;
-        return sc >= f.minGrade;
+        // Use scan-time grade for filtering — prevents batch regrade time decay from hiding valid setups
+        const scanScore = c.ktt_score_at_scan != null ? Number(c.ktt_score_at_scan) : (c.ktt_score != null ? Number(c.ktt_score) : 0);
+        return scanScore >= f.minGrade;
       });
     }
     if (f.limit !== 'all'){
@@ -2552,6 +2536,8 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
           const g = data.grades[sym];
           if (g && g.grade && g.grade !== '?') {
             c.ktt_grade = g.grade; c.ktt_score = g.score; c.ktt_color = g.color;
+            // Preserve scan-time grade — never overwrite with live regrade
+            if (c.ktt_score_at_scan == null) c.ktt_score_at_scan = g.score;
             updated = true;
           }
         }
@@ -4070,7 +4056,10 @@ function renderLastRun(summary){
     const zeroDiag = summary.zero_result_diagnostics || {};
     const fallbackActive = primaryMode === 'monitor_watch' || !!zeroDiag.monitor_fallback_active;
     const failureByCode = (summary.failure_samples_by_code && typeof summary.failure_samples_by_code === 'object') ? summary.failure_samples_by_code : {};
-    const rejectedPreview = rejected.slice(0, 8).map((c) => {
+    const rejectedPreview = rejected.filter((c) => {
+      const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons : [];
+      return !gateReasons.includes('awaiting_trigger');
+    }).slice(0, 8).map((c) => {
       const sym = esc(String(c.symbol || '—'));
       const reasons = [];
       const gateReasons = Array.isArray(c.gate_fail_reasons) ? c.gate_fail_reasons : [];
@@ -4351,7 +4340,9 @@ async function poll(jobId) {
           ? (Number(p.current_chunk) + 1)
           : Number(p.chunks_done || 0);
         const shownChunk = totalChunks > 0 ? Math.min(totalChunks, Math.max(1, currentChunk || 1)) : (currentChunk || '?');
-        setStatus(`Scanning… <b>${p.scanned||0}</b> symbols • chunk <b>${shownChunk}</b> / <b>${p.chunks_total||'?'}</b> • offset <b>${p.offset||0}</b> → <b>${p.end_offset||0}</b>`);
+        const scanned = p.scanned || 0;
+        setScanBusy(true, scanned > 0 ? `Scanning… ${scanned} syms` : 'Scanning…');
+        setStatus(`Scanning… <b>${scanned}</b> symbols • chunk <b>${shownChunk}</b> / <b>${p.chunks_total||'?'}</b> • offset <b>${p.offset||0}</b> → <b>${p.end_offset||0}</b>`);
         return false;
       }
       if (j.status === 'error') {
@@ -4594,7 +4585,6 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
 <script>
 (function(){
   const LS_POSITION_DESK = 'kingdom_position_desk_v1';
-  const LS_POSITION_BROKER_SYNC = 'kingdom_position_broker_sync_v1';
   let positionDeskTimer = null;
   const positionDeskCharts = new Map();
 
@@ -4667,34 +4657,6 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       notes: row.querySelector('[data-k="notes"]').value.trim(),
       entry_type: row.querySelector('[data-k="entry_type"]').value,
     }));
-  }
-  function brokerSeed(){ try{ return JSON.parse(document.getElementById('orb_broker_snapshot_json')?.textContent || '{}'); }catch(e){ return {}; } }
-  async function brokerRefresh(){
-    const sum=document.getElementById('brokerSummary'); const box=document.getElementById('brokerPositions'); const cap=document.getElementById('capitalStatusBody');
-    try{
-      const res=await fetch('/api/broker_snapshot'); const j=await res.json();
-      if(!res.ok || !j || j.ok===false) throw new Error((j && (j.error||j.message)) || `HTTP ${res.status}`);
-      const s=j.snapshot||{}; window.__brokerSnapshot=s;
-      const dtCount = Number(s.daytrade_count ?? 0);
-      const pdtWarn = dtCount >= 3 ? `<span style="background:rgba(239,68,68,0.2);color:#f87171;border:1px solid rgba(239,68,68,0.5);border-radius:5px;padding:2px 8px;font-size:11px;font-weight:800;margin-left:8px;">⛔ PDT ${dtCount}/3 DAY TRADES USED</span>` : dtCount >= 2 ? `<span style="background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;">⚠ ${dtCount}/3 day trades used</span>` : '';
-      if(sum) sum.innerHTML=`<span class="tag">Broker</span><b>${pdEsc(s.broker||'—')}</b><span class="tag">Buying power</span><b>${pdMoney(s.buying_power)}</b><span class="tag">Cash</span><b>${pdMoney(s.cash)}</b><span class="tag">Equity</span><b>${pdMoney(s.equity)}</b><span class="tag">Open positions</span><b>${pdEsc(s.position_count ?? 0)}</b><span class="tag">Day trades</span><b>${dtCount}/3</b>${pdtWarn}`;
-      if(cap) cap.innerHTML=`<span class="tag">Broker</span><span>${pdEsc(s.broker||'—')}</span><span class="tag">BP</span><span>${pdMoney(s.buying_power,0)}</span><span class="tag">Equity</span><span>${pdMoney(s.equity,0)}</span><span class="tag">Pos</span><span>${pdEsc(s.position_count ?? 0)}</span>${dtCount >= 2 ? `<span class="tag" style="color:${dtCount>=3?'#f87171':'#fbbf24'};">DT ${dtCount}/3</span>` : ''}`;
-      const rows=(s.positions||[]).map(p=>`<tr><td><b>${pdEsc(p.symbol||'')}</b></td><td>${pdEsc(p.side||'')}</td><td>${pdNum(p.qty,0)}</td><td>${pdMoney(p.avg_entry_price)}</td><td>${pdMoney(p.current_price)}</td><td>${pdMoney(p.market_value,0)}</td><td>${pdMoney(p.unrealized_pl,0)}</td><td>${pdNum((Number(p.unrealized_plpc)||0)*100,2)}%</td></tr>`).join('');
-      if(box) box.innerHTML=`<div class="positionChartHead"><div class="denseMeta"><span class="tag">Live positions</span><span class="positionGuide">Import brings these into Position Desk with inferred stop placeholders you can edit.</span></div></div><table class="scoreTable"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg entry</th><th>Current</th><th>Value</th><th>Unreal P/L</th><th>P/L %</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No broker positions.</td></tr>'}</tbody></table>`;
-      const syncOn = localStorage.getItem(LS_POSITION_BROKER_SYNC) === '1';
-      if(syncOn) brokerImportToDesk(true);
-    }catch(e){ if(sum) sum.innerHTML=`<span class="positionError">${pdEsc(String(e.message||e))}</span>`; }
-  }
-  function brokerImportToDesk(silent=false){
-    const s=window.__brokerSnapshot || brokerSeed() || {}; const pos=Array.isArray(s.positions)?s.positions:[]; if(!pos.length) return;
-    const existing = silent ? pdCollect() : [];
-    const bySym = new Map(existing.filter(r=>r.symbol).map(r=>[String(r.symbol).toUpperCase(), r]));
-    const rows=pos.map(p=>{
-      const sym=String(p.symbol||'').toUpperCase();
-      const prev=bySym.get(sym);
-      return {symbol:sym, side:String(p.side||prev?.side||'long').toLowerCase(), entry:Number(p.avg_entry_price||prev?.entry||0)||'', stop:(prev?.stop||pdInferStop(Number(p.avg_entry_price||0), String(p.side||'long').toLowerCase())), shares:Number(p.qty||prev?.shares||0)||'', target:(prev?.target||''), must_flat:!!prev?.must_flat, notes:(prev?.notes||'imported from broker')};
-    });
-    pdSave(rows); pdRenderInputs(rows); pdRefresh();
   }
   function pdRenderInputs(rows){
     const wrap=document.getElementById('positionDeskInputs'); if(!wrap) return;
@@ -4996,24 +4958,34 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
   }
 
   function pdBind(){
-    document.getElementById('brokerRefreshBtn')?.addEventListener('click', ()=>brokerRefresh());
-    document.getElementById('brokerImportBtn')?.addEventListener('click', ()=>brokerImportToDesk());
-    const brokerSync=document.getElementById('positionDeskBrokerSync');
-    if(brokerSync){ brokerSync.checked = localStorage.getItem(LS_POSITION_BROKER_SYNC) === '1'; brokerSync.addEventListener('change', ()=>{ localStorage.setItem(LS_POSITION_BROKER_SYNC, brokerSync.checked ? '1' : '0'); if(brokerSync.checked) brokerRefresh().catch(()=>{}); }); }
     document.getElementById('positionDeskAddRowBtn')?.addEventListener('click', ()=>{ const rows=pdCollect(); rows.push(pdDefaultRow()); pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskBulkAddBtn')?.addEventListener('click', ()=>{ const el=document.getElementById('positionDeskBulkSymbols'); const syms=String(el?.value||'').split(',').map(s=>s.trim().toUpperCase()).filter(Boolean); if(!syms.length) return; const rows=pdCollect(); syms.forEach(sym=>rows.push(pdDefaultRow(sym))); if(el) el.value=''; pdSave(rows); pdRenderInputs(rows); });
     document.getElementById('positionDeskRefreshBtn')?.addEventListener('click', ()=>pdRefresh());
     document.addEventListener('click', (e)=>{ const btn=e.target.closest('[data-chart-symbol]'); if(!btn) return; pdLoadChart(btn).catch(err=>{ const host=document.getElementById(`chart_${btn.dataset.chartSymbol}`); if(host) host.innerHTML=`<div class="positionError" style="padding:12px;">${pdEsc(err.message||err)}</div>`; }); });
-    document.addEventListener('click', async (e)=>{ const btn=e.target.closest('[data-broker-act]'); if(!btn) return; const action=btn.getAttribute('data-broker-act'); const symbol=btn.getAttribute('data-broker-symbol'); const limitInput=document.querySelector(`[data-broker-limit="${symbol}"]`); const limitPrice=limitInput?.value; const ok=window.confirm(`Confirm ${action} for ${symbol}?`); if(!ok) return; try{ const res=await fetch('/api/broker_action',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, symbol, confirm:true, limit_price: limitPrice, qty: btn.getAttribute('data-broker-qty')})}); const j=await res.json(); if(!res.ok||!j||j.ok===false) throw new Error((j&&(j.error||j.message))||`HTTP ${res.status}`); await brokerRefresh(); await pdRefresh(); }catch(err){ window.alert(`Broker action failed: ${String(err.message||err)}`); } });
     document.addEventListener('change', (e)=>{ const sel=e.target.closest('[data-chart-timeframe]'); if(!sel) return; const symbol=sel.getAttribute('data-chart-timeframe'); const btn=document.querySelector(`[data-chart-symbol="${symbol}"]`); if(btn) pdLoadChart(btn).catch(()=>{}); });
     const auto=document.getElementById('positionDeskAutoRefresh');
     auto?.addEventListener('change', ()=>{ if(positionDeskTimer){ clearInterval(positionDeskTimer); positionDeskTimer=null; } if(auto.checked){ positionDeskTimer=setInterval(()=>{ if (document.visibilityState !== 'visible') return; pdRefresh(); }, 15000); } });
-    brokerRefresh().catch(()=>{});
     // Async init — load from server then render
     pdLoad().then(seed=>{ pdRenderInputs(seed); pdRefresh(); pdLoadHistory(); pdLoadDailySummary(); });
-    if(auto?.checked){ positionDeskTimer=setInterval(()=>{ if (document.visibilityState !== 'visible') return; pdRefresh(); brokerRefresh().catch(()=>{}); }, 15000); }
+    if(auto?.checked){ positionDeskTimer=setInterval(()=>{ if (document.visibilityState !== 'visible') return; pdRefresh(); }, 15000); }
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', pdBind); else pdBind();
+})();
+</script>
+
+<script>
+// Manual capital inputs — persist to localStorage
+(function(){
+  const KEYS = {account:'orb_manual_account', risk:'orb_manual_risk', pnl:'orb_manual_pnl'};
+  function init(){
+    const acct = document.getElementById('manualAccountSize');
+    const risk = document.getElementById('manualRiskBudget');
+    const pnl  = document.getElementById('manualDayPnl');
+    if(acct){ const v=localStorage.getItem(KEYS.account); if(v) acct.value=v; acct.addEventListener('change',()=>localStorage.setItem(KEYS.account,acct.value)); }
+    if(risk){ const v=localStorage.getItem(KEYS.risk);    if(v) risk.value=v; risk.addEventListener('change',()=>localStorage.setItem(KEYS.risk,risk.value)); }
+    if(pnl){  const v=localStorage.getItem(KEYS.pnl);     if(v) pnl.value=v;  pnl.addEventListener('change',()=>localStorage.setItem(KEYS.pnl,pnl.value)); }
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
 </script>
 

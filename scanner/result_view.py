@@ -6,6 +6,13 @@ from typing import Any
 def candidate_sort_score(row: dict[str, Any] | None) -> float:
     if not isinstance(row, dict):
         return 0.0
+    # KTT score is the primary sort: A/B grades surface before C/D regardless of combined_score
+    ktt = row.get("ktt_score")
+    if ktt is not None:
+        try:
+            return 1000.0 + float(ktt)
+        except Exception:
+            pass
     for key in ("combined_score", "score", "ml_score", "confidence_score", "today_dollar_vol"):
         try:
             value = row.get(key)

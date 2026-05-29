@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper Trader — Kingdom</title>
+<style>
+:root {
+  --bg:      #0f0e0b;
+  --panel:   #171511;
+  --panel2:  #1e1b16;
+  --border:  rgba(245,242,234,0.09);
+  --text:    rgba(245,242,234,0.92);
+  --muted:   rgba(199,192,178,0.75);
+  --muted2:  rgba(199,192,178,0.45);
+  --accent:  #4f6b3a;
+  --blue:    #4f8ef7;
+  --green:   #22c55e;
+  --red:     #ef4444;
+  --yellow:  #f59e0b;
+  --radius:  11px;
+  --font:    -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --mono:    'SF Mono','Fira Mono','Cascadia Code',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── Nav ── */
+.nav{display:flex;align-items:center;gap:14px;padding:11px 18px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;}
+.nav-back{color:var(--muted);text-decoration:none;font-size:11px;font-weight:700;letter-spacing:.04em;opacity:.8;transition:opacity .15s;}
+.nav-back:hover{opacity:1;color:var(--text);}
+.sep{color:var(--border);font-size:14px;}
+.nav-title{font-size:14px;font-weight:800;letter-spacing:.05em;}
+.nav-meta{color:var(--muted);font-size:11px;margin-left:2px;}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
+
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.05em;}
+.pill-run{background:rgba(34,197,94,.14);color:#86efac;border:1px solid rgba(34,197,94,.28);}
+.pill-stop{background:rgba(148,163,184,.1);color:var(--muted);border:1px solid var(--border);}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;}
+.dot-pulse{animation:pulse 1.4s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.poll-info{font-size:11px;color:var(--muted2);}
+
+/* ── Controls bar ── */
+.ctrl-bar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
+.ctrl-group{display:flex;align-items:center;gap:6px;}
+.ctrl-label{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--muted2);text-transform:uppercase;white-space:nowrap;}
+select,input[type="number"]{background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:11px;font-family:var(--font);}
+select:focus,input:focus{outline:none;border-color:var(--blue);}
+.ctrl-sep{width:1px;height:24px;background:var(--border);}
+.btn{padding:7px 14px;border-radius:9px;font-weight:700;font-size:12px;cursor:pointer;border:none;transition:opacity .15s;white-space:nowrap;letter-spacing:.02em;}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+.btn-start{background:#22c55e;color:#052e16;}
+.btn-stop{background:rgba(239,68,68,.14);color:#fca5a5;border:1px solid rgba(239,68,68,.3);}
+.btn-ghost{background:rgba(79,142,247,.1);color:var(--blue);border:1px solid rgba(79,142,247,.25);}
+.btn-sm{padding:5px 10px;font-size:11px;border-radius:7px;}
+
+/* Toggle */
+.tog-wrap{display:flex;align-items:center;gap:6px;}
+.tog-label{font-size:11px;font-weight:600;color:var(--text);}
+.tog{position:relative;width:32px;height:18px;flex-shrink:0;}
+.tog input{display:none;}
+.tog-track{position:absolute;inset:0;background:rgba(148,163,184,.2);border-radius:999px;cursor:pointer;transition:background .2s;}
+.tog input:checked+.tog-track{background:var(--blue);}
+.tog-knob{position:absolute;top:3px;left:3px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .2s;pointer-events:none;}
+.tog input:checked~.tog-knob{transform:translateX(14px);}
+
+/* ── Main layout ── */
+.main{display:grid;grid-template-columns:1fr 320px;flex:1;overflow:hidden;}
+
+/* ── Positions desk (left) ── */
+.desk{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+
+.desk-tabs{display:flex;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;}
+.dtab{padding:9px 16px;font-size:11px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;letter-spacing:.03em;}
+.dtab.on{color:var(--text);border-bottom-color:var(--blue);}
+.badge{display:inline-block;background:rgba(79,142,247,.15);color:var(--blue);border-radius:999px;font-size:9px;font-weight:800;padding:1px 6px;margin-left:4px;}
+.badge-red{background:rgba(239,68,68,.12);color:#fca5a5;}
+.badge-green{background:rgba(34,197,94,.12);color:#86efac;}
+
+.tab-body{display:none;flex:1;flex-direction:column;overflow:hidden;}
+.tab-body.on{display:flex;}
+
+.tbl-scroll{flex:1;overflow-y:auto;}
+table{width:100%;border-collapse:collapse;}
+thead th{font-size:9px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--muted2);padding:8px 12px;text-align:left;background:var(--panel);position:sticky;top:0;border-bottom:1px solid var(--border);}
+tbody td{padding:8px 12px;border-bottom:1px solid rgba(245,242,234,.04);font-size:12px;font-variant-numeric:tabular-nums;vertical-align:middle;}
+tr:hover td{background:rgba(245,242,234,.02);}
+.sym{font-weight:800;font-size:13px;}
+.long{color:#60a5fa;font-size:10px;font-weight:800;}
+.short{color:#f87171;font-size:10px;font-weight:800;}
+.tape-l{color:#86efac;}
+.tape-s{color:#fca5a5;}
+.r-win{color:#86efac;font-weight:800;}
+.r-loss{color:#fca5a5;font-weight:800;}
+.r-scratch{color:var(--muted);font-weight:700;}
+.lbl{font-size:9px;font-weight:800;padding:2px 7px;border-radius:999px;letter-spacing:.04em;text-transform:uppercase;}
+.lbl-w{background:rgba(34,197,94,.14);color:#86efac;}
+.lbl-l{background:rgba(239,68,68,.14);color:#fca5a5;}
+.lbl-s{background:rgba(148,163,184,.1);color:#94a3b8;}
+.empty-row td{text-align:center;color:var(--muted2);padding:28px;font-size:12px;}
+.open-row td{background:rgba(79,142,247,.04);}
+
+/* ── Right sidebar ── */
+.sidebar{display:flex;flex-direction:column;overflow:hidden;}
+
+/* Session stats */
+.stats-card{padding:14px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px;}
+.stat-box{background:var(--panel2);border-radius:9px;padding:9px 8px;text-align:center;}
+.stat-val{font-size:18px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.stat-lbl{font-size:9px;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-top:3px;}
+.total-r-row{display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border-radius:9px;padding:10px 14px;margin-top:6px;}
+.total-r-lbl{font-size:11px;color:var(--muted);font-weight:600;}
+.total-r-val{font-size:24px;font-weight:900;font-variant-numeric:tabular-nums;}
+.pos{color:#86efac;} .neg{color:#fca5a5;} .zero{color:var(--muted);}
+
+/* Watchlist */
+.wl-card{padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.wl-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}
+.wl-chip{background:rgba(79,142,247,.12);color:var(--blue);border:1px solid rgba(79,142,247,.2);border-radius:7px;font-size:10px;font-weight:800;padding:3px 8px;letter-spacing:.03em;}
+
+/* Gate blocks */
+.gate-card{padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.gate-list{display:flex;flex-direction:column;gap:4px;margin-top:6px;}
+.gate-row{display:flex;justify-content:space-between;align-items:center;font-size:11px;}
+.gate-name{color:var(--muted);font-family:var(--mono);}
+.gate-n{font-weight:800;color:#fbbf24;}
+
+/* Context */
+.ctx-card{padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.ctx-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:6px;}
+.ctx-item{background:var(--panel2);border-radius:7px;padding:7px 9px;}
+.ctx-k{font-size:9px;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;font-weight:700;}
+.ctx-v{font-size:13px;font-weight:800;margin-top:2px;font-variant-numeric:tabular-nums;}
+
+/* Live feed */
+.feed-card{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.feed-header{padding:10px 16px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.feed-scroll{flex:1;overflow-y:auto;padding:8px 14px;font-family:var(--mono);font-size:10.5px;line-height:1.8;background:var(--bg);}
+.fl{display:flex;gap:8px;}
+.fl-t{color:var(--muted2);flex-shrink:0;width:52px;}
+.fl-m{flex:1;word-break:break-word;}
+.fl.open .fl-m{color:#60a5fa;font-weight:700;}
+.fl.close-w .fl-m{color:#86efac;font-weight:700;}
+.fl.close-l .fl-m{color:#fca5a5;font-weight:700;}
+.fl.close-s .fl-m{color:var(--muted);font-weight:700;}
+.fl.gate .fl-m{color:#fbbf24;}
+.fl.trans .fl-m{color:var(--muted2);}
+.feed-empty{color:var(--muted2);text-align:center;padding:24px 0;font-size:11px;}
+
+/* EOD validate section (below main grid, full width) */
+.validate-bar{display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--panel);border-top:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
+.validate-title{font-size:11px;font-weight:700;color:var(--muted);}
+.validate-out-wrap{padding:0 18px 14px;background:var(--panel);display:none;}
+.validate-out{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:var(--mono);font-size:11px;max-height:260px;overflow-y:auto;white-space:pre-wrap;color:#94a3b8;margin-top:8px;}
+
+/* Section title */
+.sec-title{font-size:9px;font-weight:800;letter-spacing:.08em;color:var(--muted2);text-transform:uppercase;}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(199,192,178,.13);border-radius:99px;}
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <a class="nav-back" href="/">← Kingdom</a>
+  <span class="sep">/</span>
+  <span class="nav-title">Paper Trader</span>
+  <span class="nav-meta" id="navMeta"></span>
+  <div class="nav-right">
+    <span id="statusPill" class="pill pill-stop"><span class="dot"></span> STOPPED</span>
+    <span class="poll-info" id="pollInfo"></span>
+  </div>
+</nav>
+
+<!-- Controls bar -->
+<div class="ctrl-bar">
+  <div class="ctrl-group">
+    <span class="ctrl-label">Mode</span>
+    <select id="modeSelect">
+      <option value="all">All Symbols</option>
+      <option value="watchlist">Watchlist Only</option>
+    </select>
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">Min ML</span>
+    <input type="number" id="cfgML" value="0.35" step="0.05" min="0" max="1" style="width:60px;">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Min Risk $</span>
+    <input type="number" id="cfgRiskMin" value="0.03" step="0.01" min="0.01" style="width:65px;">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Max Risk $</span>
+    <input type="number" id="cfgRiskMax" value="2.00" step="0.05" min="0.05" style="width:65px;">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Spread &lt;$10</span>
+    <input type="number" id="cfgSpreadLo" value="0.20" step="0.01" min="0.05" style="width:65px;">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Spread ≥$10</span>
+    <input type="number" id="cfgSpreadHi" value="0.15" step="0.01" min="0.05" style="width:65px;">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">Regime min</span>
+    <input type="number" id="cfgRegime" value="0.20" step="0.05" min="-1" max="1" style="width:65px;">
+  </div>
+
+  <div class="ctrl-sep"></div>
+
+  <button class="btn btn-start" id="startBtn">▶ Start Monitor</button>
+  <button class="btn btn-stop" id="stopBtn" disabled>■ Stop</button>
+</div>
+
+<!-- Main grid -->
+<div class="main">
+
+  <!-- Left: Positions desk -->
+  <div class="desk">
+    <div class="desk-tabs">
+      <div class="dtab on" data-tab="open">Open Positions <span class="badge" id="openBadge">0</span></div>
+      <div class="dtab" data-tab="closed">Closed Trades <span class="badge" id="closedBadge">0</span></div>
+    </div>
+
+    <!-- Open positions -->
+    <div class="tab-body on" id="tab-open">
+      <div class="tbl-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Stop</th>
+              <th>2R Target</th>
+              <th>ML</th>
+              <th>Tape</th>
+              <th>Opened</th>
+              <th>Playbook</th>
+            </tr>
+          </thead>
+          <tbody id="openBody">
+            <tr class="empty-row"><td colspan="9">No open positions — monitor not started or no trades triggered yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Closed trades blotter -->
+    <div class="tab-body" id="tab-closed">
+      <div class="tbl-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Result</th>
+              <th>Label</th>
+              <th>ML</th>
+              <th>Tape@Entry</th>
+              <th>Opened</th>
+              <th>Closed</th>
+              <th>Playbook</th>
+            </tr>
+          </thead>
+          <tbody id="closedBody">
+            <tr class="empty-row"><td colspan="11">No closed trades this session.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right sidebar -->
+  <div class="sidebar">
+
+    <!-- Session stats -->
+    <div class="stats-card">
+      <div class="sec-title">Session</div>
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-val" id="statTrades">0</div>
+          <div class="stat-lbl">Trades</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val pos" id="statWins">0</div>
+          <div class="stat-lbl">Wins</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val neg" id="statLosses">0</div>
+          <div class="stat-lbl">Losses</div>
+        </div>
+      </div>
+      <div class="total-r-row">
+        <span class="total-r-lbl">Total R</span>
+        <span class="total-r-val zero" id="totalR">+0.00R</span>
+      </div>
+    </div>
+
+    <!-- Watchlist -->
+    <div class="wl-card" id="wlCard" style="display:none;">
+      <div class="sec-title">Watchlist Focus</div>
+      <div class="wl-chips" id="wlChips"></div>
+    </div>
+
+    <!-- Gate blocks -->
+    <div class="gate-card" id="gateCard" style="display:none;">
+      <div class="sec-title">Gate Blocks</div>
+      <div class="gate-list" id="gateList"></div>
+    </div>
+
+    <!-- Market context -->
+    <div class="ctx-card" id="ctxCard" style="display:none;">
+      <div class="sec-title">Market Context</div>
+      <div class="ctx-grid" id="ctxGrid"></div>
+    </div>
+
+    <!-- Live feed -->
+    <div class="feed-card">
+      <div class="feed-header">
+        <span class="sec-title">Live Feed</span>
+        <button class="btn btn-ghost btn-sm" id="clearFeedBtn">Clear</button>
+      </div>
+      <div class="feed-scroll" id="feedScroll">
+        <div class="feed-empty" id="feedEmpty">Waiting for monitor events…</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- EOD Validation bar (full width, below main grid) -->
+<div class="validate-bar">
+  <span class="validate-title">EOD Validation</span>
+  <button class="btn btn-ghost btn-sm" id="validateBtn">▶ Run Validation</button>
+  <button class="btn btn-ghost btn-sm" id="validateNoBarsBtn">▶ Quick (no bars)</button>
+  <span id="validateStatus" style="font-size:11px;color:var(--muted);"></span>
+</div>
+<div class="validate-out-wrap" id="validateOutWrap">
+  <div class="validate-out" id="validateOut"></div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+let _running = false;
+let _lastFeedTs = '';     // ISO timestamp of last rendered feed event (avoids sliding-window stall)
+let _pollTimer = null;
+let _valPollTimer = null;
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+document.querySelectorAll('.dtab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const id = tab.dataset.tab;
+    document.querySelectorAll('.dtab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('on'));
+    tab.classList.add('on');
+    document.getElementById('tab-' + id)?.classList.add('on');
+  });
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(s){ const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmt(v, digits=2){ return v == null ? '—' : Number(v).toFixed(digits); }
+function fmtR(r){
+  if (r == null) return '<span class="r-scratch">—</span>';
+  const v = Number(r);
+  const cls = v >= 0.9 ? 'r-win' : v < -0.15 ? 'r-loss' : 'r-scratch';
+  return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}R</span>`;
+}
+function fmtLabel(lbl){
+  if (!lbl) return '';
+  const isWin = lbl.includes('win') || lbl.includes('2r');
+  const isLoss = lbl.includes('loss');
+  const cls = isWin ? 'lbl-w' : isLoss ? 'lbl-l' : 'lbl-s';
+  return `<span class="lbl ${cls}">${esc(lbl)}</span>`;
+}
+function timeOf(iso){
+  if (!iso) return '—';
+  try { return iso.slice(11,19); } catch(e){ return iso; }
+}
+function fmtTape(v){ return v ? '<span class="tape-l">live</span>' : '<span class="tape-s">STALE</span>'; }
+
+// ── Start/Stop ─────────────────────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click', async () => {
+  const watchlistOnly = document.getElementById('modeSelect').value === 'watchlist';
+  const payload = {
+    watchlist_only: watchlistOnly,
+    min_ml_score:      parseFloat(document.getElementById('cfgML').value)      || undefined,
+    min_risk_per_share:parseFloat(document.getElementById('cfgRiskMin').value)  || undefined,
+    max_risk_per_share:parseFloat(document.getElementById('cfgRiskMax').value)  || undefined,
+    max_spread_sub10:  parseFloat(document.getElementById('cfgSpreadLo').value)|| undefined,
+    max_spread_above10:parseFloat(document.getElementById('cfgSpreadHi').value)|| undefined,
+    regime_min_risk_on:parseFloat(document.getElementById('cfgRegime').value)  || undefined,
+  };
+  document.getElementById('startBtn').disabled = true;
+  try {
+    const r = await fetch('/api/pt/start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!d.ok && !d.reused) throw new Error(d.error || 'start failed');
+    _lastFeedTs = '';  // reset feed cursor on new session
+    document.getElementById('feedScroll').innerHTML = '<div class="feed-empty" id="feedEmpty">Monitor started — waiting for first poll…</div>';
+    startPolling();
+  } catch(e) {
+    alert('Error starting monitor: ' + e.message);
+    document.getElementById('startBtn').disabled = false;
+  }
+});
+
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  await fetch('/api/pt/stop', { method:'POST' });
+  setRunning(false);
+});
+
+// ── Polling ────────────────────────────────────────────────────────────────
+function startPolling(){
+  if (_pollTimer) clearInterval(_pollTimer);
+  poll();
+  _pollTimer = setInterval(poll, 5000);
+}
+
+async function poll(){
+  try {
+    const r = await fetch('/api/pt/status', {cache:'no-store'});
+    const d = await r.json();
+    if (!d.ok) return;
+    render(d);
+  } catch(e){}
+}
+
+// ── Main render ────────────────────────────────────────────────────────────
+function render(d){
+  setRunning(d.running);
+
+  // Nav meta
+  if (d.log_path){
+    document.getElementById('navMeta').textContent = '· ' + d.log_path.split('/').pop();
+  }
+
+  // Poll info
+  if (d.poll_count){
+    const t = d.last_poll_et ? d.last_poll_et.slice(11,19) : '';
+    document.getElementById('pollInfo').textContent = `poll #${d.poll_count}${t ? '  ' + t + ' ET' : ''}`;
+  }
+
+  // Session stats
+  const totalR = Number(d.total_r || 0);
+  document.getElementById('statTrades').textContent  = d.trade_count || 0;
+  document.getElementById('statWins').textContent    = d.wins || 0;
+  document.getElementById('statLosses').textContent  = d.losses || 0;
+  const rEl = document.getElementById('totalR');
+  rEl.textContent = (totalR >= 0 ? '+' : '') + totalR.toFixed(2) + 'R';
+  rEl.className = 'total-r-val ' + (totalR > 0 ? 'pos' : totalR < 0 ? 'neg' : 'zero');
+
+  // Open badges
+  document.getElementById('openBadge').textContent   = (d.open_trades || []).length;
+  document.getElementById('closedBadge').textContent = (d.closed_trades || []).length;
+
+  // Watchlist
+  const wl = d.watchlist_syms || [];
+  const wlCard = document.getElementById('wlCard');
+  if (wl.length){
+    wlCard.style.display = '';
+    document.getElementById('wlChips').innerHTML = wl.map(s =>
+      `<span class="wl-chip">${esc(s)}</span>`).join('');
+  } else { wlCard.style.display = 'none'; }
+
+  // Gate blocks
+  const gb = d.gate_blocks || {};
+  const gateCard = document.getElementById('gateCard');
+  const gateKeys = Object.keys(gb).sort((a,b) => gb[b]-gb[a]);
+  if (gateKeys.length){
+    gateCard.style.display = '';
+    document.getElementById('gateList').innerHTML = gateKeys.map(k =>
+      `<div class="gate-row"><span class="gate-name">${esc(k)}</span><span class="gate-n">${gb[k]}</span></div>`
+    ).join('');
+  } else { gateCard.style.display = 'none'; }
+
+  // Market context
+  const ctx = d.last_context || {};
+  const ctxCard = document.getElementById('ctxCard');
+  const ctxItems = [
+    ['SPY', ctx.spy_trend || '—'],
+    ['QQQ', ctx.qqq_trend || '—'],
+    ['Risk-on', ctx.risk_on != null ? Number(ctx.risk_on).toFixed(2) : '—'],
+    ['Breadth', ctx.breadth != null ? Number(ctx.breadth).toFixed(2) : '—'],
+  ];
+  if (ctx.spy_trend || ctx.qqq_trend){
+    ctxCard.style.display = '';
+    document.getElementById('ctxGrid').innerHTML = ctxItems.map(([k,v]) =>
+      `<div class="ctx-item"><div class="ctx-k">${k}</div><div class="ctx-v">${esc(String(v))}</div></div>`
+    ).join('');
+  }
+
+  // Open positions table
+  renderOpenTrades(d.open_trades || []);
+
+  // Closed blotter
+  renderClosedTrades(d.closed_trades || []);
+
+  // Live feed — only append new events
+  appendFeedEvents(d.feed_events || []);
+}
+
+// ── Open positions ─────────────────────────────────────────────────────────
+function renderOpenTrades(trades){
+  const tbody = document.getElementById('openBody');
+  if (!trades.length){
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No open positions.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = trades.map(t => `
+    <tr class="open-row">
+      <td><span class="sym">${esc(t.symbol||'')}</span></td>
+      <td><span class="${t.side==='short'?'short':'long'}">${(t.side||'long').toUpperCase()}</span></td>
+      <td>$${fmt(t.entry_ref)}</td>
+      <td>$${fmt(t.stop_ref)}</td>
+      <td>$${fmt(t.target_2r)}</td>
+      <td>${fmt(t.ml_score,3)}</td>
+      <td>${fmtTape(t.tape_live_at_trigger)}</td>
+      <td>${timeOf(t.opened_at_et)}</td>
+      <td style="color:var(--muted2);font-size:11px;">${esc(t.playbook||'—')}</td>
+    </tr>`).join('');
+}
+
+// ── Closed blotter ─────────────────────────────────────────────────────────
+function renderClosedTrades(trades){
+  const tbody = document.getElementById('closedBody');
+  if (!trades.length){
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="11">No closed trades this session.</td></tr>';
+    return;
+  }
+  // Show most recent first
+  const rows = [...trades].reverse();
+  tbody.innerHTML = rows.map(t => `
+    <tr>
+      <td><span class="sym">${esc(t.symbol||'')}</span></td>
+      <td><span class="${t.side==='short'?'short':'long'}">${(t.side||'long').toUpperCase()}</span></td>
+      <td>$${fmt(t.entry_ref)}</td>
+      <td>$${fmt(t.exit_price)}</td>
+      <td>${fmtR(t.result_r)}</td>
+      <td>${fmtLabel(t.result_label)}</td>
+      <td>${fmt(t.ml_score,3)}</td>
+      <td>${fmtTape(t.tape_live_at_trigger)}</td>
+      <td>${timeOf(t.opened_at_et)}</td>
+      <td>${timeOf(t.exit_at_et)}</td>
+      <td style="color:var(--muted2);font-size:11px;">${esc(t.playbook||'—')}</td>
+    </tr>`).join('');
+}
+
+// ── Live feed ──────────────────────────────────────────────────────────────
+function appendFeedEvents(events){
+  if (!events.length) return;
+  // Use timestamp comparison instead of array-index slicing: the server returns
+  // feed_events[-150:] (a sliding window), so an index-based counter stalls once
+  // it reaches 150 — new events appear at the front of the window and the slice
+  // always returns [].
+  const newEvents = _lastFeedTs
+    ? events.filter(e => (e.ts || '') > _lastFeedTs)
+    : events;
+  if (!newEvents.length) return;
+  _lastFeedTs = newEvents[newEvents.length - 1].ts || _lastFeedTs;
+
+  const scroll = document.getElementById('feedScroll');
+  const empty = document.getElementById('feedEmpty');
+  if (empty) empty.remove();
+
+  const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
+
+  newEvents.forEach(e => {
+    const ev = e.event;
+    const t = timeOf(e.ts_et || e.ts || '');
+    let cls = 'trans';
+    let msg = '';
+
+    if (ev === 'paper_trade_open'){
+      cls = 'open';
+      msg = `📋 OPENED ${e.symbol}  ${(e.side||'long').toUpperCase()}  entry=$${e.entry_ref}  stop=$${e.stop_ref}  2R=$${e.target_2r}  ML=${fmt(e.ml_score,3)}`;
+    } else if (ev === 'paper_trade_close'){
+      const r = Number(e.result_r || 0);
+      cls = r >= 0.9 ? 'close-w' : r < -0.15 ? 'close-l' : 'close-s';
+      const arrow = r >= 0.9 ? '✅' : r < -0.15 ? '❌' : '〰️';
+      msg = `${arrow} CLOSED ${e.symbol}  exit=$${e.exit_price}  ${r >= 0 ? '+' : ''}${r.toFixed(2)}R  [${e.result_label||'?'}]`;
+    } else if (ev === 'entry_gate_blocked'){
+      cls = 'gate';
+      msg = `🚫 BLOCKED ${e.symbol}  ${e.reason||''}`;
+    } else if (ev === 'state_transition'){
+      cls = 'trans';
+      msg = `▶ ${e.symbol}  ${e.from_state} → ${e.to_state}  tape=${e.tape_live ? 'live' : 'STALE'}  spread=${e.spread_pct||'?'}%`;
+    } else {
+      return;
+    }
+
+    const line = document.createElement('div');
+    line.className = `fl ${cls}`;
+    line.innerHTML = `<span class="fl-t">${esc(t)}</span><span class="fl-m">${esc(msg)}</span>`;
+    scroll.appendChild(line);
+  });
+
+  if (atBottom) scroll.scrollTop = scroll.scrollHeight;
+}
+
+document.getElementById('clearFeedBtn').addEventListener('click', () => {
+  // Keep _lastFeedTs so only events after the clear point will appear going forward.
+  document.getElementById('feedScroll').innerHTML =
+    '<div class="feed-empty" id="feedEmpty">Feed cleared.</div>';
+});
+
+// ── UI state helpers ───────────────────────────────────────────────────────
+function setRunning(on){
+  _running = on;
+  const pill = document.getElementById('statusPill');
+  pill.className = 'pill ' + (on ? 'pill-run' : 'pill-stop');
+  pill.innerHTML = on
+    ? '<span class="dot dot-pulse"></span> RUNNING'
+    : '<span class="dot"></span> STOPPED';
+  document.getElementById('startBtn').disabled = on;
+  document.getElementById('stopBtn').disabled  = !on;
+}
+
+// ── EOD Validation ─────────────────────────────────────────────────────────
+async function startValidation(noBars){
+  const btn  = document.getElementById('validateBtn');
+  const btn2 = document.getElementById('validateNoBarsBtn');
+  const stat = document.getElementById('validateStatus');
+  const wrap = document.getElementById('validateOutWrap');
+  const out  = document.getElementById('validateOut');
+
+  btn.disabled = btn2.disabled = true;
+  stat.textContent = 'Running…';
+  out.textContent = '';
+  wrap.style.display = 'block';
+
+  try {
+    const r = await fetch('/api/pt/validate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({no_bars: noBars}),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'start failed');
+  } catch(e){
+    stat.textContent = '❌ ' + e.message;
+    btn.disabled = btn2.disabled = false;
+    return;
+  }
+
+  if (_valPollTimer) clearInterval(_valPollTimer);
+  _valPollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/pt/validate/status', {cache:'no-store'});
+      const d = await r.json();
+      out.textContent = (d.lines||[]).join('\n');
+      out.scrollTop = out.scrollHeight;
+      if (d.done){
+        clearInterval(_valPollTimer);
+        stat.textContent = d.error ? ('❌ ' + d.error) : '✅ Complete — report saved to Desktop';
+        btn.disabled = btn2.disabled = false;
+      }
+    } catch(e){}
+  }, 1500);
+}
+
+document.getElementById('validateBtn').addEventListener('click', () => startValidation(false));
+document.getElementById('validateNoBarsBtn').addEventListener('click', () => startValidation(true));
+
+// ── Init ───────────────────────────────────────────────────────────────────
+// Start polling immediately (pick up any running session)
+startPolling();
+})();
+</script>
+</body>
+</html>

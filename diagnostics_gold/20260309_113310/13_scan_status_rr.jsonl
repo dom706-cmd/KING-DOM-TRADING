@@ -1,0 +1,61 @@
+== poll RR scan ==
+----- poll 1 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070432.219071,"chunk_timeout_s":30.0,"chunks_done":0,"chunks_total":20,"current_chunk":0,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":0},"result":null,"status":"running"}
+
+----- poll 2 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070434.108333,"chunk_timeout_s":30.0,"chunks_done":2,"chunks_total":20,"current_chunk":2,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":200},"result":null,"status":"running"}
+
+----- poll 3 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070436.129865,"chunk_timeout_s":30.0,"chunks_done":4,"chunks_total":20,"current_chunk":4,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":400},"result":null,"status":"running"}
+
+----- poll 4 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070437.813678,"chunk_timeout_s":30.0,"chunks_done":5,"chunks_total":20,"current_chunk":5,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":500},"result":null,"status":"running"}
+
+----- poll 5 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070439.0243258,"chunk_timeout_s":30.0,"chunks_done":6,"chunks_total":20,"current_chunk":6,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":600},"result":null,"status":"running"}
+
+----- poll 6 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070440.797162,"chunk_timeout_s":30.0,"chunks_done":7,"chunks_total":20,"current_chunk":7,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":700},"result":null,"status":"running"}
+
+----- poll 7 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070443.532802,"chunk_timeout_s":30.0,"chunks_done":8,"chunks_total":20,"current_chunk":8,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":800},"result":null,"status":"running"}
+
+----- poll 8 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070444.938632,"chunk_timeout_s":30.0,"chunks_done":9,"chunks_total":20,"current_chunk":9,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":900},"result":null,"status":"running"}
+
+----- poll 9 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070444.938632,"chunk_timeout_s":30.0,"chunks_done":9,"chunks_total":20,"current_chunk":9,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":900},"result":null,"status":"running"}
+
+----- poll 10 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070450.429913,"chunk_timeout_s":30.0,"chunks_done":11,"chunks_total":20,"current_chunk":11,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1100},"result":null,"status":"running"}
+
+----- poll 11 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070451.44868,"chunk_timeout_s":30.0,"chunks_done":12,"chunks_total":20,"current_chunk":12,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1200},"result":null,"status":"running"}
+
+----- poll 12 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070452.965153,"chunk_timeout_s":30.0,"chunks_done":13,"chunks_total":20,"current_chunk":13,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1300},"result":null,"status":"running"}
+
+----- poll 13 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070456.486977,"chunk_timeout_s":30.0,"chunks_done":14,"chunks_total":20,"current_chunk":14,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1400},"result":null,"status":"running"}
+
+----- poll 14 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070458.452817,"chunk_timeout_s":30.0,"chunks_done":16,"chunks_total":20,"current_chunk":16,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1600},"result":null,"status":"running"}
+
+----- poll 15 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070460.32536,"chunk_timeout_s":30.0,"chunks_done":18,"chunks_total":20,"current_chunk":18,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1800},"result":null,"status":"running"}
+
+----- poll 16 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070460.32536,"chunk_timeout_s":30.0,"chunks_done":18,"chunks_total":20,"current_chunk":18,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1800},"result":null,"status":"running"}
+
+----- poll 17 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773070464.154232,"chunk_timeout_s":30.0,"chunks_done":19,"chunks_total":20,"current_chunk":19,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1900},"result":null,"status":"running"}
+
+----- poll 18 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":2000,"ok":true,"progress":{"chunks_done":20,"chunks_total":20,"end_offset":2000,"offset":0,"scanned":2000},"result":{"candidates":[],"candidates_total":0,"chunks":20,"count":0,"data_failures":{"count":20,"stage_chunk":20},"end_offset":2000,"mode":"until","prefilter_counts":{},"prefilter_samples":[],"provider":"alpaca","reject_counts":{},"scanned":2000,"shortlisted":0,"thresholds_used":{"chunk_size":100,"exec_style":"retest","limit":25,"max_price":20.0,"max_symbols":2000,"min_avg20_dollar_vol":1000000.0,"min_price":1.0,"min_rvol":0.5,"min_today_dollar_vol":200000.0,"offset":0,"range_band_k":2.0,"range_window_min":60,"rr_stop_sigma_mult":0.75,"rr_touch_lookback_min":15,"strategy":"rr","use_catalyst":true,"use_ml":true,"use_sentiment":true},"universe_size":12359},"status":"done"}
+
+----- poll 19 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":2000,"ok":true,"progress":{"chunks_done":20,"chunks_total":20,"end_offset":2000,"offset":0,"scanned":2000},"result":{"candidates":[],"candidates_total":0,"chunks":20,"count":0,"data_failures":{"count":20,"stage_chunk":20},"end_offset":2000,"mode":"until","prefilter_counts":{},"prefilter_samples":[],"provider":"alpaca","reject_counts":{},"scanned":2000,"shortlisted":0,"thresholds_used":{"chunk_size":100,"exec_style":"retest","limit":25,"max_price":20.0,"max_symbols":2000,"min_avg20_dollar_vol":1000000.0,"min_price":1.0,"min_rvol":0.5,"min_today_dollar_vol":200000.0,"offset":0,"range_band_k":2.0,"range_window_min":60,"rr_stop_sigma_mult":0.75,"rr_touch_lookback_min":15,"strategy":"rr","use_catalyst":true,"use_ml":true,"use_sentiment":true},"universe_size":12359},"status":"done"}
+
+----- poll 20 -----
+{"error":null,"job_id":"af5853eb6e304b009b79ed8cd64e3a3a","next_offset":2000,"ok":true,"progress":{"chunks_done":20,"chunks_total":20,"end_offset":2000,"offset":0,"scanned":2000},"result":{"candidates":[],"candidates_total":0,"chunks":20,"count":0,"data_failures":{"count":20,"stage_chunk":20},"end_offset":2000,"mode":"until","prefilter_counts":{},"prefilter_samples":[],"provider":"alpaca","reject_counts":{},"scanned":2000,"shortlisted":0,"thresholds_used":{"chunk_size":100,"exec_style":"retest","limit":25,"max_price":20.0,"max_symbols":2000,"min_avg20_dollar_vol":1000000.0,"min_price":1.0,"min_rvol":0.5,"min_today_dollar_vol":200000.0,"offset":0,"range_band_k":2.0,"range_window_min":60,"rr_stop_sigma_mult":0.75,"rr_touch_lookback_min":15,"strategy":"rr","use_catalyst":true,"use_ml":true,"use_sentiment":true},"universe_size":12359},"status":"done"}
+

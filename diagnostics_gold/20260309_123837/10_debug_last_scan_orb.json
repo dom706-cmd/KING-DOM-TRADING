@@ -1,0 +1,708 @@
+== debug last scan after ORB ==
+{
+    "current_running_scan": null,
+    "data_failures": {
+        "count": 461,
+        "stage_daily": 92,
+        "stage_intraday": 369
+    },
+    "debug": {
+        "chunk_errors": [],
+        "chunk_timings": [
+            {
+                "chunk_index": 0,
+                "n_symbols": 100,
+                "seconds": 0.605
+            },
+            {
+                "chunk_index": 1,
+                "n_symbols": 100,
+                "seconds": 0.451
+            },
+            {
+                "chunk_index": 2,
+                "n_symbols": 100,
+                "seconds": 0.647
+            },
+            {
+                "chunk_index": 3,
+                "n_symbols": 100,
+                "seconds": 1.001
+            },
+            {
+                "chunk_index": 4,
+                "n_symbols": 100,
+                "seconds": 0.94
+            }
+        ],
+        "failure_samples": [
+            {
+                "error": "daily_empty",
+                "stage": "daily",
+                "symbol": "CDR$B"
+            },
+            {
+                "error": "daily_empty",
+                "stage": "daily",
+                "symbol": "CDR$C"
+            },
+            {
+                "error": "daily_empty",
+                "stage": "daily",
+                "symbol": "CELG.R"
+            },
+            {
+                "code": "intraday_or_window_missing_open",
+                "error": "intraday_or_window_missing_open",
+                "stage": "intraday",
+                "symbol": "CCU"
+            },
+            {
+                "code": "intraday_or_window_missing_open",
+                "error": "intraday_or_window_missing_open",
+                "stage": "intraday",
+                "symbol": "CCIX"
+            }
+        ],
+        "failure_samples_by_code": {},
+        "session_date_used": "2026-03-06"
+    },
+    "error": null,
+    "job_id": "9a5c02f1441d4b41b286d2e1f0c0479b",
+    "last_completed_scan": {
+        "data_failures": {
+            "count": 461,
+            "stage_daily": 92,
+            "stage_intraday": 369
+        },
+        "debug": {
+            "chunk_errors": [],
+            "chunk_timings": [
+                {
+                    "chunk_index": 0,
+                    "n_symbols": 100,
+                    "seconds": 0.605
+                },
+                {
+                    "chunk_index": 1,
+                    "n_symbols": 100,
+                    "seconds": 0.451
+                },
+                {
+                    "chunk_index": 2,
+                    "n_symbols": 100,
+                    "seconds": 0.647
+                },
+                {
+                    "chunk_index": 3,
+                    "n_symbols": 100,
+                    "seconds": 1.001
+                },
+                {
+                    "chunk_index": 4,
+                    "n_symbols": 100,
+                    "seconds": 0.94
+                }
+            ],
+            "failure_samples": [
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CDR$B"
+                },
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CDR$C"
+                },
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CELG.R"
+                },
+                {
+                    "code": "intraday_or_window_missing_open",
+                    "error": "intraday_or_window_missing_open",
+                    "stage": "intraday",
+                    "symbol": "CCU"
+                },
+                {
+                    "code": "intraday_or_window_missing_open",
+                    "error": "intraday_or_window_missing_open",
+                    "stage": "intraday",
+                    "symbol": "CCIX"
+                }
+            ],
+            "failure_samples_by_code": {},
+            "session_date_used": "2026-03-06"
+        },
+        "error": null,
+        "job_id": "9a5c02f1441d4b41b286d2e1f0c0479b",
+        "prefilter_counts": {
+            "avg20_below_threshold": 333,
+            "avg20_calc_missing": 18,
+            "daily_empty": 92,
+            "daily_ok": 369,
+            "filtered_avg20_dollar_vol": 351,
+            "filtered_price": 1188,
+            "normalized_skipped": 0
+        },
+        "prefilter_samples": [],
+        "provider": "alpaca",
+        "reject_counts": {
+            "avg20_below_threshold": 333,
+            "avg20_calc_missing": 18,
+            "bars_fetch_error_auth": 0,
+            "bars_fetch_error_http_400": 0,
+            "bars_fetch_error_http_404": 0,
+            "bars_fetch_error_network": 0,
+            "bars_fetch_error_parse": 0,
+            "bars_fetch_error_provider": 0,
+            "bars_fetch_error_rate_limit": 0,
+            "bars_fetch_error_timeout": 0,
+            "daily_empty": 92,
+            "daily_ok": 369,
+            "filtered_avg20_dollar_vol": 351,
+            "filtered_no_valid_plan": 0,
+            "filtered_notional": 0,
+            "filtered_or_range": 0,
+            "filtered_price": 902,
+            "filtered_risk_per_share": 0,
+            "filtered_rvol": 0,
+            "filtered_shares": 0,
+            "filtered_today_dollar_vol": 0,
+            "intraday_empty": 1,
+            "intraday_invalid_or_values": 0,
+            "intraday_missing_columns": 0,
+            "intraday_or_window": 2,
+            "intraday_or_window_incomplete": 0,
+            "intraday_or_window_missing_close": 0,
+            "intraday_or_window_missing_open": 361,
+            "intraday_session_filter_empty": 0,
+            "intraday_timezone_convert_failed": 0,
+            "normalized_skipped": 0,
+            "other_data_failures": 0,
+            "plan_build_exception": 0
+        },
+        "result": {
+            "candidates": [],
+            "candidates_total": 0,
+            "chunks": 20,
+            "count": 0,
+            "data_failures": {
+                "count": 461,
+                "stage_daily": 92,
+                "stage_intraday": 369
+            },
+            "debug": {
+                "chunk_errors": [],
+                "chunk_timings": [
+                    {
+                        "chunk_index": 0,
+                        "n_symbols": 100,
+                        "seconds": 0.605
+                    },
+                    {
+                        "chunk_index": 1,
+                        "n_symbols": 100,
+                        "seconds": 0.451
+                    },
+                    {
+                        "chunk_index": 2,
+                        "n_symbols": 100,
+                        "seconds": 0.647
+                    },
+                    {
+                        "chunk_index": 3,
+                        "n_symbols": 100,
+                        "seconds": 1.001
+                    },
+                    {
+                        "chunk_index": 4,
+                        "n_symbols": 100,
+                        "seconds": 0.94
+                    }
+                ],
+                "failure_samples": [
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CDR$B"
+                    },
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CDR$C"
+                    },
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CELG.R"
+                    },
+                    {
+                        "code": "intraday_or_window_missing_open",
+                        "error": "intraday_or_window_missing_open",
+                        "stage": "intraday",
+                        "symbol": "CCU"
+                    },
+                    {
+                        "code": "intraday_or_window_missing_open",
+                        "error": "intraday_or_window_missing_open",
+                        "stage": "intraday",
+                        "symbol": "CCIX"
+                    }
+                ],
+                "failure_samples_by_code": {},
+                "session_date_used": "2026-03-06"
+            },
+            "end_offset": 2000,
+            "mode": "until",
+            "prefilter_counts": {
+                "avg20_below_threshold": 333,
+                "avg20_calc_missing": 18,
+                "daily_empty": 92,
+                "daily_ok": 369,
+                "filtered_avg20_dollar_vol": 351,
+                "filtered_price": 1188,
+                "normalized_skipped": 0
+            },
+            "prefilter_samples": [],
+            "provider": "alpaca",
+            "reject_counts": {
+                "avg20_below_threshold": 333,
+                "avg20_calc_missing": 18,
+                "bars_fetch_error_auth": 0,
+                "bars_fetch_error_http_400": 0,
+                "bars_fetch_error_http_404": 0,
+                "bars_fetch_error_network": 0,
+                "bars_fetch_error_parse": 0,
+                "bars_fetch_error_provider": 0,
+                "bars_fetch_error_rate_limit": 0,
+                "bars_fetch_error_timeout": 0,
+                "daily_empty": 92,
+                "daily_ok": 369,
+                "filtered_avg20_dollar_vol": 351,
+                "filtered_no_valid_plan": 0,
+                "filtered_notional": 0,
+                "filtered_or_range": 0,
+                "filtered_price": 902,
+                "filtered_risk_per_share": 0,
+                "filtered_rvol": 0,
+                "filtered_shares": 0,
+                "filtered_today_dollar_vol": 0,
+                "intraday_empty": 1,
+                "intraday_invalid_or_values": 0,
+                "intraday_missing_columns": 0,
+                "intraday_or_window": 2,
+                "intraday_or_window_incomplete": 0,
+                "intraday_or_window_missing_close": 0,
+                "intraday_or_window_missing_open": 361,
+                "intraday_session_filter_empty": 0,
+                "intraday_timezone_convert_failed": 0,
+                "normalized_skipped": 0,
+                "other_data_failures": 0,
+                "plan_build_exception": 0
+            },
+            "scan_date": "2026-03-06",
+            "scanned": 2000,
+            "shortlisted": 369,
+            "thresholds_used": {
+                "chunk_size": 100,
+                "exec_style": "retest",
+                "limit": 25,
+                "max_price": 20.0,
+                "max_symbols": 2000,
+                "min_avg20_dollar_vol": 1000000.0,
+                "min_price": 1.0,
+                "min_rvol": 0.5,
+                "min_today_dollar_vol": 200000.0,
+                "offset": 0,
+                "range_band_k": 2.0,
+                "range_window_min": 60,
+                "rr_stop_sigma_mult": 0.75,
+                "rr_touch_lookback_min": 15,
+                "strategy": "orb",
+                "use_catalyst": true,
+                "use_ml": true,
+                "use_sentiment": true
+            },
+            "universe_size": 12359
+        },
+        "scan_date": "2026-03-06",
+        "status": "done",
+        "thresholds_used": {
+            "chunk_size": 100,
+            "exec_style": "retest",
+            "limit": 25,
+            "max_price": 20.0,
+            "max_symbols": 2000,
+            "min_avg20_dollar_vol": 1000000.0,
+            "min_price": 1.0,
+            "min_rvol": 0.5,
+            "min_today_dollar_vol": 200000.0,
+            "offset": 0,
+            "range_band_k": 2.0,
+            "range_window_min": 60,
+            "rr_stop_sigma_mult": 0.75,
+            "rr_touch_lookback_min": 15,
+            "strategy": "orb",
+            "use_catalyst": true,
+            "use_ml": true,
+            "use_sentiment": true
+        },
+        "updated_at": 1773074335.642142
+    },
+    "latest": {
+        "data_failures": {
+            "count": 461,
+            "stage_daily": 92,
+            "stage_intraday": 369
+        },
+        "debug": {
+            "chunk_errors": [],
+            "chunk_timings": [
+                {
+                    "chunk_index": 0,
+                    "n_symbols": 100,
+                    "seconds": 0.605
+                },
+                {
+                    "chunk_index": 1,
+                    "n_symbols": 100,
+                    "seconds": 0.451
+                },
+                {
+                    "chunk_index": 2,
+                    "n_symbols": 100,
+                    "seconds": 0.647
+                },
+                {
+                    "chunk_index": 3,
+                    "n_symbols": 100,
+                    "seconds": 1.001
+                },
+                {
+                    "chunk_index": 4,
+                    "n_symbols": 100,
+                    "seconds": 0.94
+                }
+            ],
+            "failure_samples": [
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CDR$B"
+                },
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CDR$C"
+                },
+                {
+                    "error": "daily_empty",
+                    "stage": "daily",
+                    "symbol": "CELG.R"
+                },
+                {
+                    "code": "intraday_or_window_missing_open",
+                    "error": "intraday_or_window_missing_open",
+                    "stage": "intraday",
+                    "symbol": "CCU"
+                },
+                {
+                    "code": "intraday_or_window_missing_open",
+                    "error": "intraday_or_window_missing_open",
+                    "stage": "intraday",
+                    "symbol": "CCIX"
+                }
+            ],
+            "failure_samples_by_code": {},
+            "session_date_used": "2026-03-06"
+        },
+        "error": null,
+        "job_id": "9a5c02f1441d4b41b286d2e1f0c0479b",
+        "prefilter_counts": {
+            "avg20_below_threshold": 333,
+            "avg20_calc_missing": 18,
+            "daily_empty": 92,
+            "daily_ok": 369,
+            "filtered_avg20_dollar_vol": 351,
+            "filtered_price": 1188,
+            "normalized_skipped": 0
+        },
+        "prefilter_samples": [],
+        "provider": "alpaca",
+        "reject_counts": {
+            "avg20_below_threshold": 333,
+            "avg20_calc_missing": 18,
+            "bars_fetch_error_auth": 0,
+            "bars_fetch_error_http_400": 0,
+            "bars_fetch_error_http_404": 0,
+            "bars_fetch_error_network": 0,
+            "bars_fetch_error_parse": 0,
+            "bars_fetch_error_provider": 0,
+            "bars_fetch_error_rate_limit": 0,
+            "bars_fetch_error_timeout": 0,
+            "daily_empty": 92,
+            "daily_ok": 369,
+            "filtered_avg20_dollar_vol": 351,
+            "filtered_no_valid_plan": 0,
+            "filtered_notional": 0,
+            "filtered_or_range": 0,
+            "filtered_price": 902,
+            "filtered_risk_per_share": 0,
+            "filtered_rvol": 0,
+            "filtered_shares": 0,
+            "filtered_today_dollar_vol": 0,
+            "intraday_empty": 1,
+            "intraday_invalid_or_values": 0,
+            "intraday_missing_columns": 0,
+            "intraday_or_window": 2,
+            "intraday_or_window_incomplete": 0,
+            "intraday_or_window_missing_close": 0,
+            "intraday_or_window_missing_open": 361,
+            "intraday_session_filter_empty": 0,
+            "intraday_timezone_convert_failed": 0,
+            "normalized_skipped": 0,
+            "other_data_failures": 0,
+            "plan_build_exception": 0
+        },
+        "result": {
+            "candidates": [],
+            "candidates_total": 0,
+            "chunks": 20,
+            "count": 0,
+            "data_failures": {
+                "count": 461,
+                "stage_daily": 92,
+                "stage_intraday": 369
+            },
+            "debug": {
+                "chunk_errors": [],
+                "chunk_timings": [
+                    {
+                        "chunk_index": 0,
+                        "n_symbols": 100,
+                        "seconds": 0.605
+                    },
+                    {
+                        "chunk_index": 1,
+                        "n_symbols": 100,
+                        "seconds": 0.451
+                    },
+                    {
+                        "chunk_index": 2,
+                        "n_symbols": 100,
+                        "seconds": 0.647
+                    },
+                    {
+                        "chunk_index": 3,
+                        "n_symbols": 100,
+                        "seconds": 1.001
+                    },
+                    {
+                        "chunk_index": 4,
+                        "n_symbols": 100,
+                        "seconds": 0.94
+                    }
+                ],
+                "failure_samples": [
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CDR$B"
+                    },
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CDR$C"
+                    },
+                    {
+                        "error": "daily_empty",
+                        "stage": "daily",
+                        "symbol": "CELG.R"
+                    },
+                    {
+                        "code": "intraday_or_window_missing_open",
+                        "error": "intraday_or_window_missing_open",
+                        "stage": "intraday",
+                        "symbol": "CCU"
+                    },
+                    {
+                        "code": "intraday_or_window_missing_open",
+                        "error": "intraday_or_window_missing_open",
+                        "stage": "intraday",
+                        "symbol": "CCIX"
+                    }
+                ],
+                "failure_samples_by_code": {},
+                "session_date_used": "2026-03-06"
+            },
+            "end_offset": 2000,
+            "mode": "until",
+            "prefilter_counts": {
+                "avg20_below_threshold": 333,
+                "avg20_calc_missing": 18,
+                "daily_empty": 92,
+                "daily_ok": 369,
+                "filtered_avg20_dollar_vol": 351,
+                "filtered_price": 1188,
+                "normalized_skipped": 0
+            },
+            "prefilter_samples": [],
+            "provider": "alpaca",
+            "reject_counts": {
+                "avg20_below_threshold": 333,
+                "avg20_calc_missing": 18,
+                "bars_fetch_error_auth": 0,
+                "bars_fetch_error_http_400": 0,
+                "bars_fetch_error_http_404": 0,
+                "bars_fetch_error_network": 0,
+                "bars_fetch_error_parse": 0,
+                "bars_fetch_error_provider": 0,
+                "bars_fetch_error_rate_limit": 0,
+                "bars_fetch_error_timeout": 0,
+                "daily_empty": 92,
+                "daily_ok": 369,
+                "filtered_avg20_dollar_vol": 351,
+                "filtered_no_valid_plan": 0,
+                "filtered_notional": 0,
+                "filtered_or_range": 0,
+                "filtered_price": 902,
+                "filtered_risk_per_share": 0,
+                "filtered_rvol": 0,
+                "filtered_shares": 0,
+                "filtered_today_dollar_vol": 0,
+                "intraday_empty": 1,
+                "intraday_invalid_or_values": 0,
+                "intraday_missing_columns": 0,
+                "intraday_or_window": 2,
+                "intraday_or_window_incomplete": 0,
+                "intraday_or_window_missing_close": 0,
+                "intraday_or_window_missing_open": 361,
+                "intraday_session_filter_empty": 0,
+                "intraday_timezone_convert_failed": 0,
+                "normalized_skipped": 0,
+                "other_data_failures": 0,
+                "plan_build_exception": 0
+            },
+            "scan_date": "2026-03-06",
+            "scanned": 2000,
+            "shortlisted": 369,
+            "thresholds_used": {
+                "chunk_size": 100,
+                "exec_style": "retest",
+                "limit": 25,
+                "max_price": 20.0,
+                "max_symbols": 2000,
+                "min_avg20_dollar_vol": 1000000.0,
+                "min_price": 1.0,
+                "min_rvol": 0.5,
+                "min_today_dollar_vol": 200000.0,
+                "offset": 0,
+                "range_band_k": 2.0,
+                "range_window_min": 60,
+                "rr_stop_sigma_mult": 0.75,
+                "rr_touch_lookback_min": 15,
+                "strategy": "orb",
+                "use_catalyst": true,
+                "use_ml": true,
+                "use_sentiment": true
+            },
+            "universe_size": 12359
+        },
+        "scan_date": "2026-03-06",
+        "status": "done",
+        "thresholds_used": {
+            "chunk_size": 100,
+            "exec_style": "retest",
+            "limit": 25,
+            "max_price": 20.0,
+            "max_symbols": 2000,
+            "min_avg20_dollar_vol": 1000000.0,
+            "min_price": 1.0,
+            "min_rvol": 0.5,
+            "min_today_dollar_vol": 200000.0,
+            "offset": 0,
+            "range_band_k": 2.0,
+            "range_window_min": 60,
+            "rr_stop_sigma_mult": 0.75,
+            "rr_touch_lookback_min": 15,
+            "strategy": "orb",
+            "use_catalyst": true,
+            "use_ml": true,
+            "use_sentiment": true
+        },
+        "updated_at": 1773074335.642142
+    },
+    "ok": true,
+    "prefilter_counts": {
+        "avg20_below_threshold": 333,
+        "avg20_calc_missing": 18,
+        "daily_empty": 92,
+        "daily_ok": 369,
+        "filtered_avg20_dollar_vol": 351,
+        "filtered_price": 1188,
+        "normalized_skipped": 0
+    },
+    "prefilter_samples": [],
+    "provider": "alpaca",
+    "reject_counts": {
+        "avg20_below_threshold": 333,
+        "avg20_calc_missing": 18,
+        "bars_fetch_error_auth": 0,
+        "bars_fetch_error_http_400": 0,
+        "bars_fetch_error_http_404": 0,
+        "bars_fetch_error_network": 0,
+        "bars_fetch_error_parse": 0,
+        "bars_fetch_error_provider": 0,
+        "bars_fetch_error_rate_limit": 0,
+        "bars_fetch_error_timeout": 0,
+        "daily_empty": 92,
+        "daily_ok": 369,
+        "filtered_avg20_dollar_vol": 351,
+        "filtered_no_valid_plan": 0,
+        "filtered_notional": 0,
+        "filtered_or_range": 0,
+        "filtered_price": 902,
+        "filtered_risk_per_share": 0,
+        "filtered_rvol": 0,
+        "filtered_shares": 0,
+        "filtered_today_dollar_vol": 0,
+        "intraday_empty": 1,
+        "intraday_invalid_or_values": 0,
+        "intraday_missing_columns": 0,
+        "intraday_or_window": 2,
+        "intraday_or_window_incomplete": 0,
+        "intraday_or_window_missing_close": 0,
+        "intraday_or_window_missing_open": 361,
+        "intraday_session_filter_empty": 0,
+        "intraday_timezone_convert_failed": 0,
+        "normalized_skipped": 0,
+        "other_data_failures": 0,
+        "plan_build_exception": 0
+    },
+    "scan_date": "2026-03-06",
+    "status": "done",
+    "thresholds_used": {
+        "chunk_size": 100,
+        "exec_style": "retest",
+        "limit": 25,
+        "max_price": 20.0,
+        "max_symbols": 2000,
+        "min_avg20_dollar_vol": 1000000.0,
+        "min_price": 1.0,
+        "min_rvol": 0.5,
+        "min_today_dollar_vol": 200000.0,
+        "offset": 0,
+        "range_band_k": 2.0,
+        "range_window_min": 60,
+        "rr_stop_sigma_mult": 0.75,
+        "rr_touch_lookback_min": 15,
+        "strategy": "orb",
+        "use_catalyst": true,
+        "use_ml": true,
+        "use_sentiment": true
+    },
+    "updated_at": 1773074335.642142
+}

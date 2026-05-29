@@ -1,0 +1,51 @@
+== live quotes from app ==
+{
+    "feed": "sip",
+    "ok": true,
+    "quotes": {
+        "AAPL": {
+            "ask": 257.65,
+            "bid": 257.62,
+            "feed": "sip",
+            "last_trade_price": 257.64,
+            "last_trade_ts": "2026-03-09T16:06:33.337575+00:00",
+            "mid": 257.635,
+            "ok": true,
+            "stale_reason": null,
+            "symbol": "AAPL"
+        },
+        "ENGN": {
+            "ask": 7.65,
+            "bid": 7.26,
+            "feed": "sip",
+            "last_trade_price": 7.6,
+            "last_trade_ts": "2026-03-09T16:06:08.153110+00:00",
+            "mid": 7.455,
+            "ok": true,
+            "stale_reason": null,
+            "symbol": "ENGN"
+        },
+        "NVDA": {
+            "ask": 179.65,
+            "bid": 179.64,
+            "feed": "sip",
+            "last_trade_price": 179.645,
+            "last_trade_ts": "2026-03-09T16:06:33.859200+00:00",
+            "mid": 179.64499999999998,
+            "ok": true,
+            "stale_reason": null,
+            "symbol": "NVDA"
+        },
+        "SPY": {
+            "ask": 669.74,
+            "bid": 669.73,
+            "feed": "sip",
+            "last_trade_price": 669.7225,
+            "last_trade_ts": "2026-03-09T16:06:33.806151+00:00",
+            "mid": 669.735,
+            "ok": true,
+            "stale_reason": null,
+            "symbol": "SPY"
+        }
+    }
+}

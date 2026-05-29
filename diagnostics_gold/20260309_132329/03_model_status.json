@@ -1,0 +1,63 @@
+== model status ==
+{
+    "active_models": {
+        "entry_now_pm": {
+            "exists": true,
+            "load_error": null,
+            "loadable_ok": true,
+            "mtime_utc": "2026-03-07T06:26:56+00:00",
+            "path": "/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/models/entry_now_30m_pm.pkl",
+            "sha256": "7b0d2df184d8063b5d9184214db1cfc8a0471d7c7789dc2d0ade955656211a53"
+        },
+        "entry_now_rth": {
+            "exists": true,
+            "load_error": null,
+            "loadable_ok": true,
+            "mtime_utc": "2026-03-07T06:26:56+00:00",
+            "path": "/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/models/entry_now_30m_rth.pkl",
+            "sha256": "c5f51cc22dbd759555bc280edee21ed20ec9b12225df86843dda2966151ed3f3"
+        },
+        "orb_ge_30": {
+            "exists": true,
+            "load_error": null,
+            "loadable_ok": true,
+            "mtime_utc": "2026-03-07T06:26:56+00:00",
+            "path": "/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/models/model_a_liquid.pkl",
+            "sha256": "fda51f109c97805e7d17650106567ade1b5b9f7e933c14ef903330d18af1f639"
+        },
+        "orb_under_30": {
+            "exists": true,
+            "load_error": null,
+            "loadable_ok": true,
+            "mtime_utc": "2026-03-07T06:26:56+00:00",
+            "path": "/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/models/model_b_outlier.pkl",
+            "sha256": "e48b2029f3043dfcaf7c49ce1aac12cc39826d11c6424d21542e2d198f232d77"
+        },
+        "rr_gold": {
+            "exists": true,
+            "load_error": null,
+            "loadable_ok": true,
+            "mtime_utc": "2026-03-07T06:26:56+00:00",
+            "path": "/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/models/range_reversion_gold.pkl",
+            "sha256": "cb1ab03434a6f57a4a1446f0319f8038972a9b000ddef8c2743c77c3137b7539"
+        }
+    },
+    "ok": true,
+    "retired_models": [
+        "models/orb_ranker.pkl",
+        "models/orb_ranker_b_under20.pkl",
+        "models/orb_ranker_liquid.pkl",
+        "models/orb_ranker_outlier.pkl",
+        "models/orb_ranker_5k_90d.pkl",
+        "models/orb_ranker_part1.pkl",
+        "models/orb_ranker_part2.pkl",
+        "models/entry_now_30m.pkl",
+        "models/entry_now_30m_smoke.pkl",
+        "models/SMOKE_liquid_time.pkl"
+    ],
+    "strict": {
+        "entry_now": true,
+        "orb": true,
+        "rr": true
+    }
+}

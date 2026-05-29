@@ -1,0 +1,29 @@
+# Local environment for KingDom Trading / scanner app
+# This file is loaded automatically by app.py at startup if present.
+# Fill in the values below with your Alpaca credentials.
+# Do NOT commit this file.
+
+# Prefer Alpaca's APCA_* naming, but the app now accepts either APCA_* or ALPACA_*.
+APCA_API_KEY_ID=AKFUD27C65MKBGFDUSYIODQUKK
+APCA_API_SECRET_KEY=83Pz31Z6NtMxuZ8HYUjgjEhrxocnKyyLsMdSiV1WJ4wP
+
+# Valid values: iex or sip
+ALPACA_DATA_FEED=sip
+
+# Optional: set to 1/true/yes for paper base URL behavior where used
+# ALPACA_PAPER=1
+
+# Optional streaming toggles
+# ALPACA_STREAMING=1
+# ALPACA_STREAM_REQUIRED=0
+
+Your active SANDBOX API key is: 77b3c4f0111a8913b8f9d90e8dafcb87, and secret is: 611b8429aaa7e39ba7b9b7167e7faa78ae1d63cc4e6bed6299db39a1ff8dc946.
+Your pending approval PROD API key is: 81edbe95e48b981bee7879676725aac1, and secret is: dd42d3da94a54ae696b200dd5afc6397015e0bf95c76e25b7c48c45d89aefec8. 
+R_PROVIDER=etrade
+
+ETRADE_CONSUMER_KEY=...
+ETRADE_CONSUMER_SECRET=...
+ETRADE_OAUTH_TOKEN=...
+ETRADE_OAUTH_TOKEN_SECRET=...
+ETRADE_ACCOUNT_ID_KEY=...
+ETRADE_SANDBOX=1

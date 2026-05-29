@@ -1,0 +1,28 @@
+== poll RR scan ==
+----- poll 1 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072434.784665,"chunk_timeout_s":30.0,"chunks_done":0,"chunks_total":20,"current_chunk":0,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":0},"result":null,"status":"running"}
+
+----- poll 2 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072436.386354,"chunk_timeout_s":30.0,"chunks_done":1,"chunks_total":20,"current_chunk":1,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":100},"result":null,"status":"running"}
+
+----- poll 3 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072438.6492631,"chunk_timeout_s":30.0,"chunks_done":4,"chunks_total":20,"current_chunk":4,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":400},"result":null,"status":"running"}
+
+----- poll 4 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072440.64974,"chunk_timeout_s":30.0,"chunks_done":6,"chunks_total":20,"current_chunk":6,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":600},"result":null,"status":"running"}
+
+----- poll 5 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072442.238165,"chunk_timeout_s":30.0,"chunks_done":7,"chunks_total":20,"current_chunk":7,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":700},"result":null,"status":"running"}
+
+----- poll 6 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072442.238165,"chunk_timeout_s":30.0,"chunks_done":7,"chunks_total":20,"current_chunk":7,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":700},"result":null,"status":"running"}
+
+----- poll 7 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072446.695389,"chunk_timeout_s":30.0,"chunks_done":8,"chunks_total":20,"current_chunk":8,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":800},"result":null,"status":"running"}
+
+----- poll 8 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072448.918387,"chunk_timeout_s":30.0,"chunks_done":9,"chunks_total":20,"current_chunk":9,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":900},"result":null,"status":"running"}
+
+----- poll 9 -----
+{"error":null,"job_id":"52dbca8b9ca143ea859f3da9d2c01b47","next_offset":null,"ok":true,"progress":{"chunk_started_at":1773072450.406132,"chunk_timeout_s":30.0,"chunks_done":10,"chunks_total":20,"current_chunk":10,"current_chunk_size":100,"end_offset":2000,"offset":0,"scanned":1000},"result":null,"status":"running"}
+

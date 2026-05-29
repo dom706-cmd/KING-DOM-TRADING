@@ -1,0 +1,23 @@
+{
+  "samples": 743514,
+  "pos_rate": 0.21524544258749667,
+  "auc": 0.6953290252433512,
+  "features": [
+    "side_long",
+    "entry",
+    "stop_dist_pct",
+    "vwap_delta_pct",
+    "trend_slope_pct",
+    "trend_state_up",
+    "trend_state_down",
+    "trend_state_chop",
+    "or_range_pct",
+    "dist_orh_pct",
+    "dist_orl_pct",
+    "today_dollar_vol_so_far",
+    "avg20_dollar_vol",
+    "rvol_now",
+    "minutes_since_open"
+  ],
+  "failures": 0
+}

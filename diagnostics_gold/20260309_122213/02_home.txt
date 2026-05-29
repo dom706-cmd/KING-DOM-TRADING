@@ -1,0 +1,2 @@
+== homepage + routes smoke ==
+GET / code=200 total=0.031716s

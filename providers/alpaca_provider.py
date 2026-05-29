@@ -912,3 +912,24 @@ class AlpacaProvider(MarketDataProvider):
             start=start,
             end=end,
         ).get((symbol or "").strip().upper(), [])
+
+    def get_market_news(
+        self,
+        *,
+        limit: int = 50,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch recent market-wide news (no symbol filter) — returns flat list sorted desc."""
+        url = "https://data.alpaca.markets/v1beta1/news"
+        params: dict[str, Any] = {"limit": min(1000, max(1, limit)), "sort": "desc"}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        try:
+            payload = self._http_get_json(url, params=params, timeout_s=20.0)
+            items = payload.get("news") or payload.get("articles") or []
+            return [row for row in items if isinstance(row, dict)]
+        except Exception:
+            return []

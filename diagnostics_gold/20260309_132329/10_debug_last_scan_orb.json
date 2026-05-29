@@ -1,0 +1,578 @@
+== debug last scan after ORB ==
+{
+    "current_running_scan": null,
+    "data_failures": {
+        "count": 4,
+        "stage_chunk": 4
+    },
+    "debug": {
+        "chunk_errors": [
+            {
+                "chunk_index": 0,
+                "error": "NameError: name '_append_failure_sample' is not defined",
+                "symbols": [
+                    "A",
+                    "AA",
+                    "AAA",
+                    "AAAA",
+                    "AAAC",
+                    "AAAU",
+                    "AACB",
+                    "AACBR",
+                    "AACBU",
+                    "AACG"
+                ]
+            },
+            {
+                "chunk_index": 1,
+                "error": "NameError: name '_append_failure_sample' is not defined",
+                "symbols": [
+                    "ACI",
+                    "ACIC",
+                    "ACII",
+                    "ACIO",
+                    "ACIU",
+                    "ACIW",
+                    "ACKY",
+                    "ACLC",
+                    "ACLO",
+                    "ACLS"
+                ]
+            },
+            {
+                "chunk_index": 2,
+                "error": "NameError: name '_append_failure_sample' is not defined",
+                "symbols": [
+                    "AEIS",
+                    "AEM",
+                    "AEMD",
+                    "AEMS",
+                    "AENT",
+                    "AENTW",
+                    "AEO",
+                    "AEON",
+                    "AEP",
+                    "AER"
+                ]
+            },
+            {
+                "chunk_index": 3,
+                "error": "NameError: name '_append_failure_sample' is not defined",
+                "symbols": [
+                    "AHL$E",
+                    "AHL$F",
+                    "AHLT",
+                    "AHMA",
+                    "AHR",
+                    "AHRT",
+                    "AHRT$A",
+                    "AHT",
+                    "AHT$D",
+                    "AHT$F"
+                ]
+            }
+        ],
+        "chunk_timings": [],
+        "failure_samples": [
+            {
+                "error": "NameError: name '_append_failure_sample' is not defined",
+                "stage": "chunk",
+                "traceback": "Traceback (most recent call last):\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1738, in _scan_worker\n    raise out_obj\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1706, in _runner\n    q.put(scan_symbols(\n          ^^^^^^^^^^^^^\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/scanner/orb.py\", line 1172, in scan_symbols\n    _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)\n    ^^^^^^^^^^^^^^^^^^^^^^\nNameError: name '_append_failure_sample' is not defined\n"
+            }
+        ],
+        "failure_samples_by_code": {},
+        "session_date_used": null
+    },
+    "error": null,
+    "job_id": "eab2479fbce84ed2938950f12e046e9e",
+    "last_completed_scan": {
+        "data_failures": {
+            "count": 4,
+            "stage_chunk": 4
+        },
+        "debug": {
+            "chunk_errors": [
+                {
+                    "chunk_index": 0,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "A",
+                        "AA",
+                        "AAA",
+                        "AAAA",
+                        "AAAC",
+                        "AAAU",
+                        "AACB",
+                        "AACBR",
+                        "AACBU",
+                        "AACG"
+                    ]
+                },
+                {
+                    "chunk_index": 1,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "ACI",
+                        "ACIC",
+                        "ACII",
+                        "ACIO",
+                        "ACIU",
+                        "ACIW",
+                        "ACKY",
+                        "ACLC",
+                        "ACLO",
+                        "ACLS"
+                    ]
+                },
+                {
+                    "chunk_index": 2,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "AEIS",
+                        "AEM",
+                        "AEMD",
+                        "AEMS",
+                        "AENT",
+                        "AENTW",
+                        "AEO",
+                        "AEON",
+                        "AEP",
+                        "AER"
+                    ]
+                },
+                {
+                    "chunk_index": 3,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "AHL$E",
+                        "AHL$F",
+                        "AHLT",
+                        "AHMA",
+                        "AHR",
+                        "AHRT",
+                        "AHRT$A",
+                        "AHT",
+                        "AHT$D",
+                        "AHT$F"
+                    ]
+                }
+            ],
+            "chunk_timings": [],
+            "failure_samples": [
+                {
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "stage": "chunk",
+                    "traceback": "Traceback (most recent call last):\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1738, in _scan_worker\n    raise out_obj\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1706, in _runner\n    q.put(scan_symbols(\n          ^^^^^^^^^^^^^\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/scanner/orb.py\", line 1172, in scan_symbols\n    _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)\n    ^^^^^^^^^^^^^^^^^^^^^^\nNameError: name '_append_failure_sample' is not defined\n"
+                }
+            ],
+            "failure_samples_by_code": {},
+            "session_date_used": null
+        },
+        "error": null,
+        "job_id": "eab2479fbce84ed2938950f12e046e9e",
+        "prefilter_counts": {},
+        "prefilter_samples": [],
+        "provider": "alpaca",
+        "reject_counts": {},
+        "result": {
+            "candidates": [],
+            "candidates_total": 0,
+            "chunks": 4,
+            "count": 0,
+            "data_failures": {
+                "count": 4,
+                "stage_chunk": 4
+            },
+            "debug": {
+                "chunk_errors": [
+                    {
+                        "chunk_index": 0,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "A",
+                            "AA",
+                            "AAA",
+                            "AAAA",
+                            "AAAC",
+                            "AAAU",
+                            "AACB",
+                            "AACBR",
+                            "AACBU",
+                            "AACG"
+                        ]
+                    },
+                    {
+                        "chunk_index": 1,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "ACI",
+                            "ACIC",
+                            "ACII",
+                            "ACIO",
+                            "ACIU",
+                            "ACIW",
+                            "ACKY",
+                            "ACLC",
+                            "ACLO",
+                            "ACLS"
+                        ]
+                    },
+                    {
+                        "chunk_index": 2,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "AEIS",
+                            "AEM",
+                            "AEMD",
+                            "AEMS",
+                            "AENT",
+                            "AENTW",
+                            "AEO",
+                            "AEON",
+                            "AEP",
+                            "AER"
+                        ]
+                    },
+                    {
+                        "chunk_index": 3,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "AHL$E",
+                            "AHL$F",
+                            "AHLT",
+                            "AHMA",
+                            "AHR",
+                            "AHRT",
+                            "AHRT$A",
+                            "AHT",
+                            "AHT$D",
+                            "AHT$F"
+                        ]
+                    }
+                ],
+                "chunk_timings": [],
+                "failure_samples": [
+                    {
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "stage": "chunk",
+                        "traceback": "Traceback (most recent call last):\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1738, in _scan_worker\n    raise out_obj\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1706, in _runner\n    q.put(scan_symbols(\n          ^^^^^^^^^^^^^\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/scanner/orb.py\", line 1172, in scan_symbols\n    _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)\n    ^^^^^^^^^^^^^^^^^^^^^^\nNameError: name '_append_failure_sample' is not defined\n"
+                    }
+                ],
+                "failure_samples_by_code": {},
+                "session_date_used": null
+            },
+            "end_offset": 400,
+            "mode": "until",
+            "prefilter_counts": {},
+            "prefilter_samples": [],
+            "provider": "alpaca",
+            "reject_counts": {},
+            "scan_date": null,
+            "scanned": 400,
+            "shortlisted": 0,
+            "thresholds_used": {
+                "chunk_size": 100,
+                "exec_style": "retest",
+                "limit": 25,
+                "max_price": 30.0,
+                "max_symbols": 400,
+                "min_avg20_dollar_vol": 1000000.0,
+                "min_price": 1.0,
+                "min_rvol": 1.5,
+                "min_today_dollar_vol": 2000000.0,
+                "offset": 0,
+                "range_band_k": 2.0,
+                "range_window_min": 60,
+                "rr_stop_sigma_mult": 0.75,
+                "rr_touch_lookback_min": 15,
+                "strategy": "orb",
+                "use_catalyst": false,
+                "use_ml": true,
+                "use_sentiment": true
+            },
+            "universe_size": 12359
+        },
+        "scan_date": null,
+        "status": "done",
+        "thresholds_used": {
+            "chunk_size": 100,
+            "exec_style": "retest",
+            "limit": 25,
+            "max_price": 30.0,
+            "max_symbols": 400,
+            "min_avg20_dollar_vol": 1000000.0,
+            "min_price": 1.0,
+            "min_rvol": 1.5,
+            "min_today_dollar_vol": 2000000.0,
+            "offset": 0,
+            "range_band_k": 2.0,
+            "range_window_min": 60,
+            "rr_stop_sigma_mult": 0.75,
+            "rr_touch_lookback_min": 15,
+            "strategy": "orb",
+            "use_catalyst": false,
+            "use_ml": true,
+            "use_sentiment": true
+        },
+        "updated_at": 1773077049.721676
+    },
+    "latest": {
+        "data_failures": {
+            "count": 4,
+            "stage_chunk": 4
+        },
+        "debug": {
+            "chunk_errors": [
+                {
+                    "chunk_index": 0,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "A",
+                        "AA",
+                        "AAA",
+                        "AAAA",
+                        "AAAC",
+                        "AAAU",
+                        "AACB",
+                        "AACBR",
+                        "AACBU",
+                        "AACG"
+                    ]
+                },
+                {
+                    "chunk_index": 1,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "ACI",
+                        "ACIC",
+                        "ACII",
+                        "ACIO",
+                        "ACIU",
+                        "ACIW",
+                        "ACKY",
+                        "ACLC",
+                        "ACLO",
+                        "ACLS"
+                    ]
+                },
+                {
+                    "chunk_index": 2,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "AEIS",
+                        "AEM",
+                        "AEMD",
+                        "AEMS",
+                        "AENT",
+                        "AENTW",
+                        "AEO",
+                        "AEON",
+                        "AEP",
+                        "AER"
+                    ]
+                },
+                {
+                    "chunk_index": 3,
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "symbols": [
+                        "AHL$E",
+                        "AHL$F",
+                        "AHLT",
+                        "AHMA",
+                        "AHR",
+                        "AHRT",
+                        "AHRT$A",
+                        "AHT",
+                        "AHT$D",
+                        "AHT$F"
+                    ]
+                }
+            ],
+            "chunk_timings": [],
+            "failure_samples": [
+                {
+                    "error": "NameError: name '_append_failure_sample' is not defined",
+                    "stage": "chunk",
+                    "traceback": "Traceback (most recent call last):\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1738, in _scan_worker\n    raise out_obj\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1706, in _runner\n    q.put(scan_symbols(\n          ^^^^^^^^^^^^^\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/scanner/orb.py\", line 1172, in scan_symbols\n    _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)\n    ^^^^^^^^^^^^^^^^^^^^^^\nNameError: name '_append_failure_sample' is not defined\n"
+                }
+            ],
+            "failure_samples_by_code": {},
+            "session_date_used": null
+        },
+        "error": null,
+        "job_id": "eab2479fbce84ed2938950f12e046e9e",
+        "prefilter_counts": {},
+        "prefilter_samples": [],
+        "provider": "alpaca",
+        "reject_counts": {},
+        "result": {
+            "candidates": [],
+            "candidates_total": 0,
+            "chunks": 4,
+            "count": 0,
+            "data_failures": {
+                "count": 4,
+                "stage_chunk": 4
+            },
+            "debug": {
+                "chunk_errors": [
+                    {
+                        "chunk_index": 0,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "A",
+                            "AA",
+                            "AAA",
+                            "AAAA",
+                            "AAAC",
+                            "AAAU",
+                            "AACB",
+                            "AACBR",
+                            "AACBU",
+                            "AACG"
+                        ]
+                    },
+                    {
+                        "chunk_index": 1,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "ACI",
+                            "ACIC",
+                            "ACII",
+                            "ACIO",
+                            "ACIU",
+                            "ACIW",
+                            "ACKY",
+                            "ACLC",
+                            "ACLO",
+                            "ACLS"
+                        ]
+                    },
+                    {
+                        "chunk_index": 2,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "AEIS",
+                            "AEM",
+                            "AEMD",
+                            "AEMS",
+                            "AENT",
+                            "AENTW",
+                            "AEO",
+                            "AEON",
+                            "AEP",
+                            "AER"
+                        ]
+                    },
+                    {
+                        "chunk_index": 3,
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "symbols": [
+                            "AHL$E",
+                            "AHL$F",
+                            "AHLT",
+                            "AHMA",
+                            "AHR",
+                            "AHRT",
+                            "AHRT$A",
+                            "AHT",
+                            "AHT$D",
+                            "AHT$F"
+                        ]
+                    }
+                ],
+                "chunk_timings": [],
+                "failure_samples": [
+                    {
+                        "error": "NameError: name '_append_failure_sample' is not defined",
+                        "stage": "chunk",
+                        "traceback": "Traceback (most recent call last):\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1738, in _scan_worker\n    raise out_obj\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/app.py\", line 1706, in _runner\n    q.put(scan_symbols(\n          ^^^^^^^^^^^^^\n  File \"/Users/dominicaleandri/orb_10.56_beast_dev_cleaned/scanner/orb.py\", line 1172, in scan_symbols\n    _append_failure_sample(failure_samples_by_code, code=code, item=fail_item)\n    ^^^^^^^^^^^^^^^^^^^^^^\nNameError: name '_append_failure_sample' is not defined\n"
+                    }
+                ],
+                "failure_samples_by_code": {},
+                "session_date_used": null
+            },
+            "end_offset": 400,
+            "mode": "until",
+            "prefilter_counts": {},
+            "prefilter_samples": [],
+            "provider": "alpaca",
+            "reject_counts": {},
+            "scan_date": null,
+            "scanned": 400,
+            "shortlisted": 0,
+            "thresholds_used": {
+                "chunk_size": 100,
+                "exec_style": "retest",
+                "limit": 25,
+                "max_price": 30.0,
+                "max_symbols": 400,
+                "min_avg20_dollar_vol": 1000000.0,
+                "min_price": 1.0,
+                "min_rvol": 1.5,
+                "min_today_dollar_vol": 2000000.0,
+                "offset": 0,
+                "range_band_k": 2.0,
+                "range_window_min": 60,
+                "rr_stop_sigma_mult": 0.75,
+                "rr_touch_lookback_min": 15,
+                "strategy": "orb",
+                "use_catalyst": false,
+                "use_ml": true,
+                "use_sentiment": true
+            },
+            "universe_size": 12359
+        },
+        "scan_date": null,
+        "status": "done",
+        "thresholds_used": {
+            "chunk_size": 100,
+            "exec_style": "retest",
+            "limit": 25,
+            "max_price": 30.0,
+            "max_symbols": 400,
+            "min_avg20_dollar_vol": 1000000.0,
+            "min_price": 1.0,
+            "min_rvol": 1.5,
+            "min_today_dollar_vol": 2000000.0,
+            "offset": 0,
+            "range_band_k": 2.0,
+            "range_window_min": 60,
+            "rr_stop_sigma_mult": 0.75,
+            "rr_touch_lookback_min": 15,
+            "strategy": "orb",
+            "use_catalyst": false,
+            "use_ml": true,
+            "use_sentiment": true
+        },
+        "updated_at": 1773077049.721676
+    },
+    "ok": true,
+    "prefilter_counts": {},
+    "prefilter_samples": [],
+    "provider": "alpaca",
+    "reject_counts": {},
+    "scan_date": null,
+    "status": "done",
+    "thresholds_used": {
+        "chunk_size": 100,
+        "exec_style": "retest",
+        "limit": 25,
+        "max_price": 30.0,
+        "max_symbols": 400,
+        "min_avg20_dollar_vol": 1000000.0,
+        "min_price": 1.0,
+        "min_rvol": 1.5,
+        "min_today_dollar_vol": 2000000.0,
+        "offset": 0,
+        "range_band_k": 2.0,
+        "range_window_min": 60,
+        "rr_stop_sigma_mult": 0.75,
+        "rr_touch_lookback_min": 15,
+        "strategy": "orb",
+        "use_catalyst": false,
+        "use_ml": true,
+        "use_sentiment": true
+    },
+    "updated_at": 1773077049.721676
+}

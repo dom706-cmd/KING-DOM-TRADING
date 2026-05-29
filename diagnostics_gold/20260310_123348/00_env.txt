@@ -1,0 +1,10 @@
+== env ==
+PWD=/Users/dominicaleandri/orb_plat
+PYTHON3=/Users/dominicaleandri/.venv/bin/python3
+Python 3.13.10
+ALPACA_DATA_FEED=sip
+ORB_STRICT_ML=<unset>
+RR_STRICT_ML=<unset>
+PORT_8050_LISTENERS:
+COMMAND   PID            USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python  68695 dominicaleandri    3u  IPv4 0x90e63e17f382109e      0t0  TCP 127.0.0.1:8050 (LISTEN)

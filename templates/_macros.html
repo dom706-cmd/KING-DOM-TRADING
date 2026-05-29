@@ -1,0 +1,30 @@
+{% macro fmt_num(v, digits=2, suffix="") -%}
+  {%- if v is not none -%}
+    {{ ("%." ~ digits ~ "f")|format(v) }}{{ suffix }}
+  {%- else -%}
+    N/A
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_currency(v, digits=2) -%}
+  {%- if v is not none -%}
+    ${{ ("%." ~ digits ~ "f")|format(v) }}
+  {%- else -%}
+    N/A
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro fmt_pct(v, digits=1) -%}
+  {%- if v is not none -%}
+    {{ ("%." ~ digits ~ "f")|format(v) }}%
+  {%- else -%}
+    N/A
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro color_posneg(v) -%}
+  {%- if v is none -%}text-gray-600
+  {%- elif v > 0 -%}text-green-700
+  {%- else -%}text-red-700
+  {%- endif -%}
+{%- endmacro %}

@@ -1,0 +1,15 @@
+{
+  "symbol": "ABCD",
+  "best_side": "long",
+  "entry": 12.1121,
+  "stop": 11.8881,
+  "target_2r": 12.5601,
+  "target_3r": 12.7841,
+  "last_price": 12.54,
+  "rvol": 7.671429,
+  "today_dollar_vol": 33669900.0,
+  "avg20_dollar_vol": 4305000.0,
+  "orb_retest_ready": false,
+  "orb_retest_distance_r": 1.910268,
+  "tradable_now": true
+}
