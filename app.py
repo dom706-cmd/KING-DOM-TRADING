@@ -4574,6 +4574,132 @@ def api_know_the_trade():
         return jsonify(ok=False, error=str(e)), 500
 
 
+@app.post('/api/ktt_grades_batch')
+def api_ktt_grades_batch():
+    """Batch KTT grading for the watchlist and scanner. Returns {symbol: {grade, score, color}}."""
+    try:
+        from utils.know_the_trade import analyze as _ktt_analyze
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+        body = request.get_json(force=True, silent=True) or {}
+        candidates = body.get('candidates') or []
+        if not candidates:
+            return jsonify(ok=True, grades={})
+
+        halt_map: dict[str, int] = {}
+        try:
+            if _STREAM is not None:
+                evts = _STREAM.recent_halt_resume_events(max_age_sec=86400)
+                for e in evts:
+                    s = str(e.get('symbol', '')).upper()
+                    if e.get('halt_status', '').lower() in ('halted', 'trading_halt', 'h'):
+                        halt_map[s] = halt_map.get(s, 0) + 1
+        except Exception:
+            pass
+
+        _batch_rth_age: float | None = None
+        _batch_et = None
+        try:
+            import pytz as _batch_pytz
+            _batch_et = _batch_pytz.timezone('America/New_York')
+            _batch_now = datetime.now(_batch_et)
+            _batch_open = _batch_now.replace(hour=9, minute=30, second=0, microsecond=0)
+            if _batch_now > _batch_open:
+                _batch_rth_age = round((_batch_now - _batch_open).total_seconds() / 3600, 2)
+        except Exception:
+            pass
+
+        _batch_catalyst_map: dict[str, tuple[str, float]] = {}
+        try:
+            with _SNIPER_LOCK:
+                for _a in _SNIPER_ALERTS:
+                    _asym = str(_a.get('symbol', '')).upper()
+                    if _asym and _asym not in _batch_catalyst_map:
+                        _hl = _a.get('headline') or ''
+                        _ft = float(_a.get('fired_ts') or 0)
+                        if _hl and _ft:
+                            _batch_catalyst_map[_asym] = (_hl, round((time.time() - _ft) / 3600, 2))
+        except Exception:
+            pass
+
+        def _grade_one(c: dict) -> tuple[str, dict]:
+            sym = str(c.get('symbol') or '').upper()
+            if not sym:
+                return sym, {}
+            side = str(c.get('side') or c.get('best_side') or 'long').lower()
+            entry  = _safe_float(c.get('long_entry') if side == 'long' else c.get('short_entry'))
+            stop   = _safe_float(c.get('long_stop')  if side == 'long' else c.get('short_stop'))
+            target = _safe_float(c.get('long_2r')    if side == 'long' else c.get('short_2r'))
+
+            setup_age_hours = _safe_float(c.get('setup_age_hours'))
+            if setup_age_hours is None:
+                try:
+                    scan_ts_raw = c.get('scan_ts')
+                    if scan_ts_raw:
+                        import dateutil.parser as _dp
+                        scanned_at = _dp.parse(str(scan_ts_raw))
+                        if scanned_at.tzinfo is None:
+                            scanned_at = scanned_at.replace(tzinfo=timezone.utc)
+                        if _batch_et is not None:
+                            _scan_et = scanned_at.astimezone(_batch_et)
+                            _rth_open_today = _scan_et.replace(hour=9, minute=30, second=0, microsecond=0)
+                            if _scan_et < _rth_open_today and _batch_rth_age is not None:
+                                setup_age_hours = _batch_rth_age
+                            else:
+                                setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+                        else:
+                            setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
+                except Exception:
+                    pass
+            if setup_age_hours is None:
+                setup_age_hours = _batch_rth_age
+
+            ml_score = _safe_float(c.get('ml_score'))
+            rvol_hint = _safe_float(c.get('rvol'))
+            catalyst_headline = c.get('news_headline') or None
+            catalyst_age_hours = _safe_float(c.get('news_age_hours'))
+            if catalyst_headline is None and sym in _batch_catalyst_map:
+                catalyst_headline, catalyst_age_hours = _batch_catalyst_map[sym]
+
+            setup_status = 'triggered' if (
+                (side == 'long' and c.get('long_triggered')) or
+                (side == 'short' and c.get('short_triggered'))
+            ) else None
+
+            try:
+                result = _ktt_analyze(
+                    symbol=sym, provider=_ALPACA_PROVIDER,
+                    entry=entry, stop=stop, target=target, side=side,
+                    ml_score=ml_score,
+                    catalyst_headline=catalyst_headline,
+                    catalyst_age_hours=catalyst_age_hours,
+                    rvol_hint=rvol_hint,
+                    halt_count=halt_map.get(sym, 0),
+                    setup_age_hours=setup_age_hours,
+                    setup_status=setup_status,
+                    vwap=_safe_float(c.get('vwap_last')),
+                )
+                grade = str(result.get('grade') or '?')
+                score = int(result.get('score') or 0)
+                color = {'A': '#4ade80', 'B': '#fbbf24', 'C': '#f97316', 'D': '#f87171'}.get(grade, '#94a3b8')
+                return sym, {'grade': grade, 'score': score, 'color': color,
+                             'breakdown': result.get('breakdown'), 'components': result.get('components')}
+            except Exception as ex:
+                return sym, {'grade': '?', 'score': 0, 'color': '#94a3b8', 'error': str(ex)}
+
+        grades: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=min(len(candidates), 12)) as pool:
+            futs = {pool.submit(_grade_one, c): c for c in candidates}
+            for fut in _as_completed(futs):
+                sym, data = fut.result()
+                if sym:
+                    grades[sym] = data
+
+        return jsonify(ok=True, grades=grades)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
+
 @app.get('/api/morning_prep')
 def api_morning_prep():
     max_price = float(request.args.get('max_price', 30.0))
