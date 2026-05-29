@@ -4518,6 +4518,38 @@ def api_desk_watchlist_purge_stale():
     return jsonify(ok=True, purged=purged, count=len(purged))
 
 
+@app.post('/api/desk_watchlist/bulk_add')
+def api_desk_watchlist_bulk_add():
+    """Add a list of candidates (already KTT-graded) to the desk watchlist."""
+    data = request.get_json(force=True, silent=True) or {}
+    candidates = data.get('candidates') or []
+    if not candidates:
+        return jsonify(ok=False, error='no candidates'), 400
+    today = datetime.now(_ET).strftime('%Y-%m-%d')
+    added = []
+    for c in candidates:
+        sym = str(c.get('symbol') or '').strip().upper()
+        if not sym:
+            continue
+        side = str(c.get('side') or c.get('best_side') or 'long').lower()
+        entry  = _safe_float(c.get('long_entry')  if side == 'long' else c.get('short_entry'))
+        stop   = _safe_float(c.get('long_stop')   if side == 'long' else c.get('short_stop'))
+        target = _safe_float(c.get('long_2r')     if side == 'long' else c.get('short_2r'))
+        ktt    = c.get('ktt_grade') or '?'
+        score  = c.get('ktt_score') or 0
+        try:
+            _RUNTIME_STORE.desk_watchlist_set(
+                sym, side=side,
+                trigger_price=entry, stop_price=stop, target_price=target,
+                notes=f"scanner auto-add — KTT {ktt} {score}",
+                session_date=today,
+            )
+            added.append(sym)
+        except Exception:
+            pass
+    return jsonify(ok=True, added=added, count=len(added))
+
+
 @app.get('/api/screener_seeds')
 def api_screener_seeds():
     from scanner.orb import _screener_market_movers, _screener_most_actives
@@ -6520,6 +6552,35 @@ def api_spread_alerts():
     with _SPREAD_LOCK:
         alerts = [a for a in _SPREAD_ALERTS if a.get('fired_ts', 0) >= cutoff]
     return jsonify(ok=True, alerts=alerts, count=len(alerts))
+
+
+@app.get('/api/market_events')
+def api_market_events():
+    """Return recent halts, LULD bands, and imbalances for all monitored symbols."""
+    stream = _STREAM
+    halts = []
+    lulds = []
+    imbalances = []
+    try:
+        raw_halts = stream.recent_halt_resume_events(max_age_sec=1800) if stream else []
+        for h in raw_halts:
+            entry = dict(h)
+            rc = str(entry.get('reason_code') or entry.get('status_code') or '')
+            info = _HALT_REASON_MAP.get(rc, {})
+            entry['reason_label'] = info.get('label', rc or 'Unknown')
+            entry['reason_note']  = info.get('note', '')
+            halts.append(entry)
+    except Exception:
+        pass
+    try:
+        lulds = stream.recent_luld_events(max_age_sec=3600) if stream else []
+    except Exception:
+        pass
+    try:
+        imbalances = stream.recent_imbalances(max_age_sec=1800) if stream else []
+    except Exception:
+        pass
+    return jsonify(ok=True, halts=halts, lulds=lulds, imbalances=imbalances)
 
 
 @app.get('/api/halt_resume_predict')
