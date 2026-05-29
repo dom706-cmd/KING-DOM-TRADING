@@ -153,10 +153,11 @@ def _pm_trend(pm_last: float | None, pm_high: float | None,
         elif hold_ratio >= 0.80: label, pts = "Off highs — pulling back",       2
         else:                    label, pts = "Faded significantly — caution",  0
     else:
+        # pm_low is always <= pm_last, so ratio is always <= 1.0 — mirror long logic
         hold_ratio = pm_low / pm_last if pm_last > 0 else 0
-        if   hold_ratio <= 1.03: label, pts = "Holding lows — still fading",   8
-        elif hold_ratio <= 1.10: label, pts = "Near lows — consolidating",     5
-        elif hold_ratio <= 1.20: label, pts = "Off lows — bouncing",           2
+        if   hold_ratio >= 0.97: label, pts = "Holding lows — still fading",   8
+        elif hold_ratio >= 0.90: label, pts = "Near lows — consolidating",     5
+        elif hold_ratio >= 0.80: label, pts = "Off lows — bouncing",           2
         else:                    label, pts = "Recovered significantly — risk", 0
     return {"pts": pts, "label": label, "hold_ratio": round(hold_ratio, 3)}
 
