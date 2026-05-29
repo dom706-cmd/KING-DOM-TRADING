@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 import hashlib
 import json
-import logging
 from collections import deque
 import platform
 import os
@@ -20,8 +19,6 @@ import uuid
 import signal
 import traceback
 from flask import Flask, render_template, request, jsonify, redirect, Response, stream_with_context
-
-log = logging.getLogger(__name__)
 
 
 from werkzeug.exceptions import HTTPException
@@ -357,7 +354,6 @@ def _ensure_stream(
     if _STREAM is None:
         try:
             _STREAM = AlpacaStreamCache(key, sec, feed=_stream_feed())
-            _STREAM._market_event_hook = lambda: _MARKET_EVENTS_EVENT.set()
             _STREAM_ERROR = None
             _MONITOR.configure_runtime(
                 provider=_ALPACA_PROVIDER,
@@ -1481,11 +1477,8 @@ def api_analyze():
 
 
 def _entry_now_request_values() -> tuple[str, str, bool, bool]:
-    data = request.get_json(silent=True) or {}
-    symbol      = str(data.get("symbol") or request.args.get("symbol") or "").strip().upper()
-    side_req    = str(data.get("side")   or request.args.get("side")   or "long").strip().lower()
-    include_prepost = str(data.get("include_prepost") or request.args.get("include_prepost") or "0").lower() in ("1","true","yes")
-    want_sent   = str(data.get("sentiment") or request.args.get("sentiment") or "0").lower() in ("1","true","yes")
+    symbol, side_req, include_prepost, want_sent = _entry_now_request_values()
+
     return symbol, side_req, include_prepost, want_sent
 
 
@@ -2070,12 +2063,7 @@ def _scan_worker(jid: str):
         _raw_today = _safe_float(params.get("min_today_dollar_vol", params.get("min_today_dvol")))
         min_today_dollar_vol = 2_000_000.0 if _raw_today is None else _raw_today
         _raw_avg20 = _safe_float(params.get("min_avg20_dollar_vol", params.get("min_avg20_dvol")))
-        # Parabolic plays are small-caps — their avg20 dollar vol is typically $250K-750K.
-        # ORB/other strategies need $1M (liquid tape). Don't apply the ORB floor to parabolic.
-        _is_para_strategy = str(strategy).strip().lower() in {"parabolic", "para", "parabolic_watch"}
-        min_avg20_dollar_vol = (_raw_avg20 if _raw_avg20 is not None
-                                else 250_000.0 if _is_para_strategy
-                                else 1_000_000.0)
+        min_avg20_dollar_vol = 1_000_000.0 if _raw_avg20 is None else _raw_avg20
         min_price = _param_float(params, "min_price", 1.0)
         # Default max_price should match ORBConfig() default unless caller overrides
         max_price = _param_float(params, "max_price", 30.0)
@@ -2564,140 +2552,6 @@ def _scan_worker(jid: str):
             if isinstance(_row, dict):
                 _row["strategy"] = _row.get("strategy") or params.get("strategy")
                 _row["provider"] = _row.get("provider") or getattr(provider, "name", "alpaca")
-
-        # ── Post-scan KTT quality gate ────────────────────────────────────────
-        # Run live KTT grades on all top candidates in parallel immediately
-        # after the scan. Only B+(score≥56) survive into top; D-grade stocks
-        # are demoted to rejected so the scanner only surfaces real trades.
-        try:
-            from utils.know_the_trade import analyze as _ktt_scan_analyze
-            from concurrent.futures import ThreadPoolExecutor as _KttPool, as_completed as _ktt_as_completed
-            import dateutil.parser as _ktt_dp
-
-            _ktt_halt_map: dict[str, int] = {}
-            try:
-                if _STREAM is not None:
-                    for _ktt_e in (_STREAM.recent_halt_resume_events(max_age_sec=86400) or []):
-                        _ktt_s = str(_ktt_e.get('symbol', '')).upper()
-                        if _ktt_e.get('halt_status', '').lower() in ('halted', 'trading_halt', 'h'):
-                            _ktt_halt_map[_ktt_s] = _ktt_halt_map.get(_ktt_s, 0) + 1
-            except Exception:
-                pass
-
-            def _ktt_grade_scan_cand(c: dict) -> dict:
-                _sym = str(c.get('symbol') or '').upper()
-                _side = str(c.get('best_side') or c.get('side') or 'long').lower()
-                _entry  = _safe_float(c.get('long_entry')  if _side == 'long' else c.get('short_entry'))
-                _stop   = _safe_float(c.get('long_stop')   if _side == 'long' else c.get('short_stop'))
-                _target = _safe_float(c.get('long_2r')     if _side == 'long' else c.get('short_2r'))
-                _age = None
-                try:
-                    _ts = c.get('scan_ts')
-                    if _ts:
-                        _scanned = _ktt_dp.parse(str(_ts))
-                        if _scanned.tzinfo is None:
-                            _scanned = _scanned.replace(tzinfo=timezone.utc)
-                        _age = (datetime.now(timezone.utc) - _scanned).total_seconds() / 3600
-                except Exception:
-                    pass
-                _status = 'triggered' if (
-                    (_side == 'long' and c.get('long_triggered')) or
-                    (_side == 'short' and c.get('short_triggered'))
-                ) else None
-                # Catalyst: scanner headline → sniper buffer → live Alpaca news
-                _cat_hl  = c.get('news_headline') or None
-                _cat_age = _safe_float(c.get('news_age_hours'))
-                if not _cat_hl:
-                    try:
-                        with _SNIPER_LOCK:
-                            for _sa in _SNIPER_ALERTS:
-                                if str(_sa.get('symbol', '')).upper() == _sym and _sa.get('headline'):
-                                    _cat_hl  = str(_sa['headline'])
-                                    _sa_ft   = float(_sa.get('fired_ts') or 0)
-                                    if _sa_ft:
-                                        _cat_age = round((time.time() - _sa_ft) / 3600, 2)
-                                    break
-                    except Exception:
-                        pass
-                if not _cat_hl and provider is not None:
-                    try:
-                        _now_utc   = datetime.now(timezone.utc)
-                        _start_iso = (_now_utc - timedelta(hours=4)).strftime('%Y-%m-%dT%H:%M:%SZ')
-                        _arts      = provider.get_news(_sym, limit=5, start=_start_iso)
-                        if _arts:
-                            _art = _arts[0]
-                            _cat_hl = _art.get('headline') or _art.get('title') or None
-                            _pub = _art.get('created_at') or _art.get('published_at')
-                            if _pub and _cat_hl:
-                                try:
-                                    _pub_dt  = _ktt_dp.parse(str(_pub))
-                                    if _pub_dt.tzinfo is None:
-                                        _pub_dt = _pub_dt.replace(tzinfo=timezone.utc)
-                                    _cat_age = (_now_utc - _pub_dt).total_seconds() / 3600
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
-                try:
-                    _res = _ktt_scan_analyze(
-                        symbol=_sym, provider=provider,
-                        entry=_entry, stop=_stop, target=_target, side=_side,
-                        ml_score=_safe_float(c.get('ml_score')),
-                        catalyst_headline=_cat_hl,
-                        catalyst_age_hours=_cat_age,
-                        rvol_hint=_safe_float(c.get('rvol')),
-                        halt_count=_ktt_halt_map.get(_sym, 0),
-                        setup_age_hours=_age,
-                        setup_status=_status,
-                        vwap=_safe_float(c.get('vwap_last')),
-                        setup_type=str(c.get('strategy') or '').lower() or None,
-                    )
-                    _g  = str(_res.get('grade') or 'D')
-                    _sc = int(_res.get('score') or 0)
-                    c['ktt_grade'] = _g
-                    c['ktt_score'] = _sc
-                    c['ktt_color'] = {'A': '#4ade80', 'B': '#fbbf24', 'C': '#f97316', 'D': '#f87171'}.get(_g, '#94a3b8')
-                except Exception:
-                    c.setdefault('ktt_grade', '?')
-                    c.setdefault('ktt_score', 0)
-                    c.setdefault('ktt_color', '#94a3b8')
-                return c
-
-            if top:
-                with _KttPool(max_workers=min(len(top), 16)) as _ktt_ex:
-                    _ktt_futs = {_ktt_ex.submit(_ktt_grade_scan_cand, c): c for c in top}
-                    top = [_f.result() for _f in _ktt_as_completed(_ktt_futs)]
-                # Stamp scan-time grade so UI filter can use it even after batch regrade decays scores
-                for _c in top:
-                    _c['ktt_score_at_scan'] = _c.get('ktt_score') or 0
-                top.sort(key=lambda _c: _c.get('ktt_score') or 0, reverse=True)
-                rejected_candidates_all = rejected_candidates_all[:max(limit * 3, 100)]
-
-                # Auto-add all surviving B+ candidates to the desk watchlist
-                _today_str = datetime.now(_ET).strftime('%Y-%m-%d')
-                for _wc in top:
-                    try:
-                        _wsym  = str(_wc.get('symbol') or '').upper()
-                        _wside = str(_wc.get('best_side') or _wc.get('side') or 'long').lower()
-                        _wentry = _safe_float(_wc.get('long_entry') if _wside == 'long' else _wc.get('short_entry'))
-                        _wstop  = _safe_float(_wc.get('long_stop')  if _wside == 'long' else _wc.get('short_stop'))
-                        _wtgt   = _safe_float(_wc.get('long_2r')    if _wside == 'long' else _wc.get('short_2r'))
-                        if not _wsym:
-                            continue
-                        _RUNTIME_STORE.desk_watchlist_set(
-                            _wsym,
-                            side=_wside,
-                            trigger_price=_wentry,
-                            stop_price=_wstop,
-                            target_price=_wtgt,
-                            notes=f"auto-added by scanner — KTT {_wc.get('ktt_grade','?')} {_wc.get('ktt_score',0)}",
-                            session_date=_today_str,
-                        )
-                    except Exception:
-                        pass
-        except Exception:
-            pass
 
         primary_candidates, primary_mode, primary_message = select_primary_candidates(
             {
@@ -3737,25 +3591,14 @@ def api_positions_daily_summary():
 def api_broker_snapshot():
     provider = _BROKER_PROVIDER
     if provider is None:
-        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
-                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='broker_provider_unavailable'), 503
+        return jsonify(ok=False, error=(_BROKER_PROVIDER_ERROR or "provider_not_initialized"), broker=_BROKER_PROVIDER_NAME), 503
     if not hasattr(provider, "get_broker_snapshot"):
-        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
-                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'), note='get_broker_snapshot_not_implemented'), 503
+        return jsonify(ok=False, error="broker_snapshot_not_supported"), 501
     try:
         snap = provider.get_broker_snapshot()
-        # Validate snapshot has actual data before claiming ok=True
-        eq = float(snap.get('equity') or 0)
-        bp = float(snap.get('buying_power') or 0)
-        if eq == 0 and bp == 0:
-            return jsonify(ok=False, degraded=True, snapshot=snap,
-                           broker=(_BROKER_PROVIDER_NAME or 'alpaca'),
-                           note='equity_and_buying_power_zero_check_credentials'), 503
         return jsonify(ok=True, snapshot=snap)
     except Exception as e:
-        return jsonify(ok=False, degraded=True, buying_power=0, equity=0,
-                       broker=(_BROKER_PROVIDER_NAME or 'alpaca'),
-                       note=f'broker_snapshot_failed: {e}'), 503
+        return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
 
 
 @app.post("/api/broker_action")
@@ -4675,38 +4518,6 @@ def api_desk_watchlist_purge_stale():
     return jsonify(ok=True, purged=purged, count=len(purged))
 
 
-@app.post('/api/desk_watchlist/bulk_add')
-def api_desk_watchlist_bulk_add():
-    """Add a list of candidates (already KTT-graded) to the desk watchlist."""
-    data = request.get_json(force=True, silent=True) or {}
-    candidates = data.get('candidates') or []
-    if not candidates:
-        return jsonify(ok=False, error='no candidates'), 400
-    today = datetime.now(_ET).strftime('%Y-%m-%d')
-    added = []
-    for c in candidates:
-        sym = str(c.get('symbol') or '').strip().upper()
-        if not sym:
-            continue
-        side = str(c.get('side') or c.get('best_side') or 'long').lower()
-        entry  = _safe_float(c.get('long_entry')  if side == 'long' else c.get('short_entry'))
-        stop   = _safe_float(c.get('long_stop')   if side == 'long' else c.get('short_stop'))
-        target = _safe_float(c.get('long_2r')     if side == 'long' else c.get('short_2r'))
-        ktt    = c.get('ktt_grade') or '?'
-        score  = c.get('ktt_score') or 0
-        try:
-            _RUNTIME_STORE.desk_watchlist_set(
-                sym, side=side,
-                trigger_price=entry, stop_price=stop, target_price=target,
-                notes=f"scanner B+ auto-add — KTT {ktt} {score}",
-                session_date=today,
-            )
-            added.append(sym)
-        except Exception:
-            pass
-    return jsonify(ok=True, added=added, count=len(added))
-
-
 @app.get('/api/screener_seeds')
 def api_screener_seeds():
     from scanner.orb import _screener_market_movers, _screener_most_actives
@@ -4741,293 +4552,24 @@ def api_know_the_trade():
         return jsonify(ok=False, error='symbol required'), 400
     try:
         from utils.know_the_trade import analyze
-        # Count today's halts for this symbol from the stream cache
-        halt_count = 0
-        try:
-            if _STREAM is not None:
-                evts = _STREAM.recent_halt_resume_events(max_age_sec=86400)
-                halt_count = sum(1 for e in evts
-                                 if e.get('symbol','').upper() == sym
-                                 and e.get('halt_status','').lower() in ('halted','trading_halt','h'))
-        except Exception:
-            pass
-
-        _entry  = _safe_float(request.args.get('entry'))
-        _stop   = _safe_float(request.args.get('stop'))
-        _target = _safe_float(request.args.get('target'))
-        _side   = request.args.get('side') or 'long'
-
-        # ── Auto-compute live RVOL from snapshot when not provided ────────────
-        _rvol_hint = _safe_float(request.args.get('rvol_hint'))
-        _live_price_for_ml = None
-        if _rvol_hint is None and _ALPACA_PROVIDER is not None:
-            try:
-                _snaps = _ALPACA_PROVIDER.get_snapshots([sym], feed='sip', timeout_s=6.0) or {}
-                _snap = _snaps.get(sym) or {}
-                _daily = _snap.get('daily_bar') or {}
-                _avg_vol = float(_snap.get('avg_daily_volume') or 0)
-                _today_vol = float(_daily.get('volume') or 0)
-                if _today_vol > 0 and _avg_vol > 0:
-                    _rvol_hint = round(_today_vol / _avg_vol, 2)
-                # grab last trade price for ML scoring
-                _lt2 = _snap.get('latest_trade') or {}
-                _lp2 = float(_lt2.get('price') or 0)
-                if _lp2 > 0:
-                    _live_price_for_ml = _lp2
-            except Exception:
-                pass
-
-        # ── Auto-compute ML score when not supplied ───────────────────────────
-        _ml_score = _safe_float(request.args.get('ml_score'))
-        if _ml_score is None and _ALPACA_PROVIDER is not None:
-            try:
-                from ml.orb_model_service import score_orb_symbol as _ktt_score_ml
-                _px_for_ml = _live_price_for_ml or _entry or 0
-                if _px_for_ml and _px_for_ml > 0:
-                    _ml_out = _ktt_score_ml(sym, last_price=float(_px_for_ml), provider=_ALPACA_PROVIDER, rvol=_rvol_hint)
-                    if _ml_out.get('score') is not None:
-                        _ml_score = float(_ml_out['score'])
-            except Exception:
-                pass
-
-        # ── Auto-fetch catalyst from sniper buffer when not supplied ──────────
-        _catalyst = request.args.get('catalyst_headline') or None
-        _cat_age  = _safe_float(request.args.get('catalyst_age_hours'))
-        if _catalyst is None:
-            try:
-                with _SNIPER_LOCK:
-                    _recent = [a for a in _SNIPER_ALERTS if str(a.get('symbol','')).upper() == sym]
-                if _recent:
-                    _best = _recent[0]
-                    _catalyst = _best.get('headline') or None
-                    _fired_ts = _best.get('fired_ts')
-                    if _fired_ts and _catalyst:
-                        _cat_age = round((time.time() - float(_fired_ts)) / 3600, 2)
-            except Exception:
-                pass
-
-        # ── Auto-infer setup_age_hours from time since RTH open ──────────────
-        _setup_age = _safe_float(request.args.get('setup_age_hours'))
-        if _setup_age is None:
-            try:
-                import pytz as _pytz_ktt
-                _et_ktt = _pytz_ktt.timezone('America/New_York')
-                _now_et = datetime.now(_et_ktt)
-                _rth_open = _now_et.replace(hour=9, minute=30, second=0, microsecond=0)
-                if _now_et > _rth_open:
-                    _setup_age = round((_now_et - _rth_open).total_seconds() / 3600, 2)
-            except Exception:
-                pass
-
-        # Target-hit guard
-        if _target is not None and _ALPACA_PROVIDER is not None:
-            try:
-                _lt = _ALPACA_PROVIDER.get_latest_trade(sym) or {}
-                _live = float(_lt.get('price') or 0)
-                if _live > 0:
-                    target_hit = (_side == 'long' and _live >= _target) or \
-                                 (_side == 'short' and _live <= _target)
-                    if target_hit:
-                        return jsonify(
-                            ok=True,
-                            symbol=sym, grade='X', grade_color='#64748b',
-                            score=0,
-                            grade_advice='Target already hit — setup is expired. Do not enter.',
-                            breakdown={},
-                            sizing={'tiers': [], 'note': 'Setup expired'},
-                            target_hit=True,
-                            live_price=_live,
-                        )
-            except Exception:
-                pass
-
         result = analyze(
             symbol=sym,
             provider=_ALPACA_PROVIDER,
-            entry=_entry,
-            stop=_stop,
-            target=_target,
-            side=_side,
+            entry=_safe_float(request.args.get('entry')),
+            stop=_safe_float(request.args.get('stop')),
+            target=_safe_float(request.args.get('target')),
+            side=request.args.get('side') or 'long',
             pm_last=_safe_float(request.args.get('pm_last')),
             pm_high=_safe_float(request.args.get('pm_high')),
             pm_low=_safe_float(request.args.get('pm_low')),
             pm_vol=int(float(request.args.get('pm_vol') or 0)) or None,
             pm_move_pct=_safe_float(request.args.get('pm_move_pct')),
-            ml_score=_ml_score,
-            catalyst_headline=_catalyst,
-            catalyst_age_hours=_cat_age,
-            rvol_hint=_rvol_hint,
-            halt_count=halt_count,
-            ssr_active=request.args.get('ssr_active', '').lower() in ('1', 'true', 'yes'),
-            stop_capped=request.args.get('stop_capped', '').lower() in ('1', 'true', 'yes'),
-            stop_cap=_safe_float(request.args.get('stop_cap')),
-            setup_age_hours=_setup_age,
-            setup_status=request.args.get('setup_status') or None,
-            gap_fill_rate=_safe_float(request.args.get('gap_fill_rate')),
-            vwap=_safe_float(request.args.get('vwap')),
+            ml_score=_safe_float(request.args.get('ml_score')),
+            catalyst_headline=request.args.get('catalyst_headline') or None,
+            catalyst_age_hours=_safe_float(request.args.get('catalyst_age_hours')),
+            rvol_hint=_safe_float(request.args.get('rvol_hint')),
         )
         return jsonify(ok=True, **result)
-    except Exception as e:
-        return jsonify(ok=False, error=str(e)), 500
-
-
-@app.post('/api/ktt_grades_batch')
-def api_ktt_grades_batch():
-    """Batch KTT grading for the scanner list view. Returns {symbol: {grade, score, color}}."""
-    try:
-        from utils.know_the_trade import analyze as _ktt_analyze
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
-
-        body = request.get_json(force=True, silent=True) or {}
-        candidates = body.get('candidates') or []
-        if not candidates:
-            # Help callers who send the wrong key
-            alt_keys = [k for k in ('setups', 'symbols', 'items', 'data') if body.get(k)]
-            if alt_keys:
-                return jsonify(ok=False, error=f"wrong payload key '{alt_keys[0]}' — use 'candidates'"), 400
-            return jsonify(ok=True, grades={})
-
-        halt_map: dict[str, int] = {}
-        try:
-            if _STREAM is not None:
-                evts = _STREAM.recent_halt_resume_events(max_age_sec=86400)
-                for e in evts:
-                    s = str(e.get('symbol', '')).upper()
-                    if e.get('halt_status', '').lower() in ('halted', 'trading_halt', 'h'):
-                        halt_map[s] = halt_map.get(s, 0) + 1
-        except Exception:
-            pass
-
-        # ── Pre-compute RTH age once for all candidates ──────────────────────
-        _batch_rth_age: float | None = None
-        _batch_et = None
-        try:
-            import pytz as _batch_pytz
-            _batch_et = _batch_pytz.timezone('America/New_York')
-            _batch_now = datetime.now(_batch_et)
-            _batch_open = _batch_now.replace(hour=9, minute=30, second=0, microsecond=0)
-            if _batch_now > _batch_open:
-                _batch_rth_age = round((_batch_now - _batch_open).total_seconds() / 3600, 2)
-        except Exception:
-            pass
-
-        # ── Pre-index sniper alerts for catalyst lookup ───────────────────────
-        _batch_catalyst_map: dict[str, tuple[str, float]] = {}
-        try:
-            with _SNIPER_LOCK:
-                for _a in _SNIPER_ALERTS:
-                    _asym = str(_a.get('symbol', '')).upper()
-                    if _asym and _asym not in _batch_catalyst_map:
-                        _hl = _a.get('headline') or ''
-                        _ft = float(_a.get('fired_ts') or 0)
-                        if _hl and _ft:
-                            _batch_catalyst_map[_asym] = (_hl, round((time.time() - _ft) / 3600, 2))
-        except Exception:
-            pass
-
-        def _grade_one(c: dict) -> tuple[str, dict]:
-            sym = str(c.get('symbol') or '').upper()
-            if not sym:
-                return sym, {}
-            side = str(c.get('side') or c.get('best_side') or 'long').lower()
-            entry  = _safe_float(c.get('long_entry') if side == 'long' else c.get('short_entry'))
-            stop   = _safe_float(c.get('long_stop')  if side == 'long' else c.get('short_stop'))
-            target = _safe_float(c.get('long_2r')    if side == 'long' else c.get('short_2r'))
-
-            # setup_age_hours: prefer explicit → scan_ts (capped at RTH age for pre-market scans) → RTH elapsed
-            setup_age_hours = _safe_float(c.get('setup_age_hours'))
-            if setup_age_hours is None:
-                try:
-                    scan_ts_raw = c.get('scan_ts')
-                    if scan_ts_raw:
-                        import dateutil.parser as _dp
-                        scanned_at = _dp.parse(str(scan_ts_raw))
-                        if scanned_at.tzinfo is None:
-                            scanned_at = scanned_at.replace(tzinfo=timezone.utc)
-                        # Pre-market scan: decay from RTH open, not scan time
-                        # A stock scanned at 6 AM shouldn't get 4h penalty at 10 AM — setup window opens at 9:30
-                        if _batch_et is not None:
-                            _scan_et = scanned_at.astimezone(_batch_et)
-                            _rth_open_today = _scan_et.replace(hour=9, minute=30, second=0, microsecond=0)
-                            if _scan_et < _rth_open_today and _batch_rth_age is not None:
-                                setup_age_hours = _batch_rth_age
-                            else:
-                                setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
-                        else:
-                            setup_age_hours = (datetime.now(timezone.utc) - scanned_at).total_seconds() / 3600
-                except Exception:
-                    pass
-            if setup_age_hours is None:
-                setup_age_hours = _batch_rth_age
-
-            # rvol: prefer candidate value, else auto-fetch
-            rvol_hint = _safe_float(c.get('rvol'))
-
-            # ml_score: prefer candidate value, else auto-score
-            ml_score = _safe_float(c.get('ml_score'))
-            if ml_score is None and _ALPACA_PROVIDER is not None:
-                try:
-                    from ml.orb_model_service import score_orb_symbol as _b_score_ml
-                    _px = entry or 0
-                    if _px > 0:
-                        _b_ml_out = _b_score_ml(sym, last_price=float(_px), provider=_ALPACA_PROVIDER, rvol=rvol_hint)
-                        if _b_ml_out.get('score') is not None:
-                            ml_score = float(_b_ml_out['score'])
-                except Exception:
-                    pass
-            if rvol_hint is None and _ALPACA_PROVIDER is not None:
-                try:
-                    _b_snaps = _ALPACA_PROVIDER.get_snapshots([sym], feed='sip', timeout_s=5.0) or {}
-                    _b_snap  = _b_snaps.get(sym) or {}
-                    _b_daily = _b_snap.get('daily_bar') or {}
-                    _b_avg   = float(_b_snap.get('avg_daily_volume') or 0)
-                    _b_vol   = float(_b_daily.get('volume') or 0)
-                    if _b_vol > 0 and _b_avg > 0:
-                        rvol_hint = round(_b_vol / _b_avg, 2)
-                except Exception:
-                    pass
-
-            # catalyst: prefer candidate value, else sniper buffer
-            catalyst_headline = c.get('news_headline') or None
-            catalyst_age_hours = _safe_float(c.get('news_age_hours'))
-            if catalyst_headline is None and sym in _batch_catalyst_map:
-                catalyst_headline, catalyst_age_hours = _batch_catalyst_map[sym]
-
-            setup_status = 'triggered' if (
-                (side == 'long' and c.get('long_triggered')) or
-                (side == 'short' and c.get('short_triggered'))
-            ) else None
-            try:
-                result = _ktt_analyze(
-                    symbol=sym, provider=_ALPACA_PROVIDER,
-                    entry=entry, stop=stop, target=target, side=side,
-                    ml_score=ml_score,
-                    catalyst_headline=catalyst_headline,
-                    catalyst_age_hours=catalyst_age_hours,
-                    rvol_hint=rvol_hint,
-                    halt_count=halt_map.get(sym, 0),
-                    setup_age_hours=setup_age_hours,
-                    setup_status=setup_status,
-                    vwap=_safe_float(c.get('vwap_last')),
-                    setup_type=str(c.get('strategy') or '').lower() or None,
-                )
-                grade = str(result.get('grade') or '?')
-                score = int(result.get('score') or 0)
-                color = {'A': '#4ade80', 'B': '#fbbf24', 'C': '#f97316', 'D': '#f87171'}.get(grade, '#94a3b8')
-                return sym, {'grade': grade, 'score': score, 'color': color,
-                             'ml_score': ml_score, 'rvol': result.get('live_rvol')}
-            except Exception as ex:
-                return sym, {'grade': '?', 'score': 0, 'color': '#94a3b8', 'error': str(ex)}
-
-        grades: dict[str, dict] = {}
-        with ThreadPoolExecutor(max_workers=min(len(candidates), 12)) as pool:
-            futs = {pool.submit(_grade_one, c): c for c in candidates}
-            for fut in _as_completed(futs):
-                sym, data = fut.result()
-                if sym:
-                    grades[sym] = data
-
-        return jsonify(ok=True, grades=grades)
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
@@ -5412,14 +4954,6 @@ def api_premarket_gap_orders():
             pm_mask = (idx_et >= pm_open_t) & (idx_et < pm_close_t)
             pm_bars = bars[pm_mask]
             if pm_bars.empty:
-                # Fallback to RTH bars for symbols that skip premarket
-                _rth_open_t2 = datetime.combine(trade_date, datetime.min.time()).replace(
-                    hour=9, minute=30, second=0, microsecond=0, tzinfo=_ET)
-                _rth_close_t2 = datetime.combine(trade_date, datetime.min.time()).replace(
-                    hour=16, minute=0, second=0, microsecond=0, tzinfo=_ET)
-                _rth_mask2 = (idx_et >= _rth_open_t2) & (idx_et <= _rth_close_t2)
-                pm_bars = bars[_rth_mask2]
-            if pm_bars.empty:
                 return None, {'symbol': sym, 'error': 'no_premarket_bars'}
 
             prev_close = None
@@ -5665,12 +5199,10 @@ def api_gap_watchlist_analysis():
     rows = []
     errors = []
 
-    # Process each symbol concurrently — 3 network calls per symbol (bars, daily, latest_trade)
-    # stack linearly when serial; parallelism cuts wall time to ~1 slowest symbol
-    def _analyze_one(entry):
+    for entry in entries:
         sym = (entry.get('symbol') or '').strip().upper()
         if not sym:
-            return
+            continue
 
         saved_side    = entry.get('side') or 'long'
         saved_entry   = _safe_float(entry.get('trigger_price'))
@@ -5685,7 +5217,7 @@ def api_gap_watchlist_analysis():
             )
             if bars is None or bars.empty:
                 errors.append({'symbol': sym, 'error': 'no_bars'})
-                return
+                continue
 
             idx    = bars.index
             if hasattr(idx, 'tz') and idx.tz is None:
@@ -5748,98 +5280,6 @@ def api_gap_watchlist_analysis():
             except Exception:
                 pass
 
-            # ── Float-adjusted RVOL (float turnover %) ───────────────────────
-            float_shares = None
-            float_turnover_pct = None
-            try:
-                from scanner.orb import _fetch_float_shares as _ffs
-                float_shares = _ffs(sym, getattr(_ALPACA_PROVIDER, '_store', None))
-                if float_shares and float_shares > 0 and pm_vol > 0:
-                    float_turnover_pct = round(pm_vol / float_shares * 100.0, 2)
-            except Exception:
-                pass
-
-            # ── Historical gap-fill rate (last 90 sessions, two-tier: close-fill vs wick-fill) ──
-            gap_fill_rate = None
-            gap_fill_rate_close = None
-            gap_fill_n = 0
-            try:
-                if daily is not None and not daily.empty and len(prior) >= 10:
-                    _gf = prior.sort_index().iloc[-90:]
-                    _go = _gf['Open'].astype(float).values
-                    _gc = _gf['Close'].astype(float).values
-                    _gh = _gf['High'].astype(float).values
-                    _gl = _gf['Low'].astype(float).values
-                    _gaps_found = 0
-                    _gaps_filled_wick = 0   # intraday wick touched prev close (within 0.5%)
-                    _gaps_filled_close = 0  # session closed on the fill side of prev close
-                    for _gi in range(1, len(_gf)):
-                        _pc = _gc[_gi - 1]
-                        if _pc <= 0:
-                            continue
-                        _g = (_go[_gi] - _pc) / _pc * 100.0
-                        if abs(_g) < 1.0:
-                            continue
-                        _gaps_found += 1
-                        if _g > 0:
-                            # Gap up: filled if low wicked back to within 0.5% of prev close
-                            if _gl[_gi] <= _pc * 1.005:
-                                _gaps_filled_wick += 1
-                            # Close fill: session closed at or below prev close
-                            if _gc[_gi] <= _pc:
-                                _gaps_filled_close += 1
-                        else:
-                            # Gap down: filled if high wicked back to within 0.5% of prev close
-                            if _gh[_gi] >= _pc * 0.995:
-                                _gaps_filled_wick += 1
-                            # Close fill: session closed at or above prev close
-                            if _gc[_gi] >= _pc:
-                                _gaps_filled_close += 1
-                    if _gaps_found >= 3:
-                        gap_fill_rate = round(_gaps_filled_wick / _gaps_found, 3)
-                        gap_fill_rate_close = round(_gaps_filled_close / _gaps_found, 3)
-                        gap_fill_n = _gaps_found
-            except Exception:
-                pass
-
-            # ── 5-day historical context ──────────────────────────────────────
-            atr_5 = high_5d = low_5d = trend_5d = accum_score_5d = vol_trend_5d = None
-            try:
-                if daily is not None and not daily.empty and len(prior) >= 2:
-                    _d5 = prior.iloc[-5:] if len(prior) >= 5 else prior
-                    _h5 = _d5['High'].astype(float)
-                    _l5 = _d5['Low'].astype(float)
-                    _c5 = _d5['Close'].astype(float)
-                    high_5d = round(float(_h5.max()), 2)
-                    low_5d  = round(float(_l5.min()), 2)
-                    # ATR(5): mean true range over last 5 sessions
-                    _trs = []
-                    for _i5 in range(len(_d5)):
-                        _h = _h5.iloc[_i5]; _l = _l5.iloc[_i5]
-                        _pc = _c5.iloc[_i5 - 1] if _i5 > 0 else _c5.iloc[_i5]
-                        _trs.append(max(_h - _l, abs(_h - _pc), abs(_l - _pc)))
-                    atr_5 = round(sum(_trs) / len(_trs), 3) if _trs else None
-                    # Trend: count up vs down closes
-                    _up = sum(1 for _i5 in range(1, len(_c5)) if _c5.iloc[_i5] > _c5.iloc[_i5 - 1])
-                    _dn = (len(_c5) - 1) - _up
-                    trend_5d = 'uptrend' if _up >= _dn + 2 else ('downtrend' if _dn >= _up + 2 else 'sideways')
-                    # Accumulation score: avg position of close in day range (1=HOD, 0=LOD)
-                    _cvr = []
-                    for _i5 in range(len(_d5)):
-                        _rng = _h5.iloc[_i5] - _l5.iloc[_i5]
-                        if _rng > 0:
-                            _cvr.append((_c5.iloc[_i5] - _l5.iloc[_i5]) / _rng)
-                    accum_score_5d = round(sum(_cvr) / len(_cvr), 3) if _cvr else None
-                    # Volume trend
-                    if 'Volume' in _d5.columns and len(_d5) >= 4:
-                        _vols = _d5['Volume'].astype(float).tolist()
-                        _v1 = sum(_vols[:len(_vols)//2]); _v2 = sum(_vols[len(_vols)//2:])
-                        vol_trend_5d = 'rising' if _v2 > _v1 * 1.1 else ('falling' if _v2 < _v1 * 0.9 else 'flat')
-            except Exception:
-                pass
-
-            ssr_active = False  # updated after pm_last is known; closure captures by ref
-
             def _eod_row_base():
                 return {
                     'symbol':            sym,
@@ -5860,61 +5300,30 @@ def api_gap_watchlist_analysis():
                     'rvol_eod':          rvol_eod,
                     'catalyst_age_hours': None,   # filled after loop via batch news fetch
                     'catalyst_headline':  None,
-                    # Reg SHO SSR flag
-                    'ssr_active':          ssr_active,
-                    # Float-adjusted RVOL
-                    'float_shares':        int(float_shares) if float_shares else None,
-                    'float_turnover_pct':  float_turnover_pct,
-                    # Historical gap-fill rate (wick=intraday touch, close=session close fill)
-                    'gap_fill_rate':       gap_fill_rate,
-                    'gap_fill_rate_close': gap_fill_rate_close,
-                    'gap_fill_n':          gap_fill_n,
-                    # 5-day historical context
-                    'atr_5':             atr_5,
-                    'high_5d':           high_5d,
-                    'low_5d':            low_5d,
-                    'trend_5d':          trend_5d,
-                    'accum_score_5d':    accum_score_5d,
-                    'vol_trend_5d':      vol_trend_5d,
                 }
 
             if pm_bars.empty:
-                # Fallback: use RTH bars (9:30–16:00) for stocks that don't trade premarket
-                _rth_open_t = datetime.combine(trade_date, datetime.min.time()).replace(
-                    hour=9, minute=30, second=0, microsecond=0, tzinfo=_ET)
-                _rth_close_t = datetime.combine(trade_date, datetime.min.time()).replace(
-                    hour=16, minute=0, second=0, microsecond=0, tzinfo=_ET)
-                _rth_mask = (idx_et >= _rth_open_t) & (idx_et <= _rth_close_t)
-                pm_bars = bars[_rth_mask]
-                if pm_bars.empty:
-                    row = _eod_row_base()
-                    row.update({
-                        'pm_last': None, 'pm_high': None, 'pm_low': None, 'pm_vol': 0,
-                        'pm_move_pct': None, 'move_from_entry': None,
-                        'status': 'no_pm_data', 'status_label': 'No PM data yet',
-                        'ml_score': None,
-                    })
-                    rows.append(row)
-                    return
+                row = _eod_row_base()
+                row.update({
+                    'pm_last': None, 'pm_high': None, 'pm_low': None, 'pm_vol': 0,
+                    'pm_move_pct': None, 'move_from_entry': None,
+                    'status': 'no_pm_data', 'status_label': 'No PM data yet',
+                    'ml_score': None,
+                })
+                rows.append(row)
+                continue
 
             pm_bars  = pm_bars.sort_index()  # ensure chronological; iloc[-1] must be latest bar
             from core.plan_integrity import validate_bars_input as _vbi
             _bar_chk = _vbi(pm_bars, symbol=sym, require_sorted=True, min_bars=1)
             if not _bar_chk.valid:
                 errors.append({'symbol': sym, 'error': f'bars_invalid: {_bar_chk.violations}'})
-                return
+                continue
 
             pm_high  = float(pm_bars['High'].max())
             pm_low   = float(pm_bars['Low'].min())
             pm_last  = float(pm_bars['Close'].iloc[-1])
             pm_vol   = int(pm_bars['Volume'].sum())
-
-            # Reg SHO SSR: stock down ≥10% from prior close restricts shorting to uptick only
-            try:
-                if prev_close and prev_close > 0:
-                    ssr_active = ((pm_last - prev_close) / prev_close * 100.0) <= -10.0
-            except Exception:
-                pass
 
             # ML score using PM bars + entry_now_30m_pm.pkl
             ml_score = None
@@ -5971,7 +5380,7 @@ def api_gap_watchlist_analysis():
                         'today_dollar_vol_so_far': float(_dv_so_far),
                         'avg20_dollar_vol': float(_avg20_dv),
                         'rvol_now': float(_rvol),
-                        'minutes_since_open': float((_sess.index[_i].astimezone(_ET).hour * 60 + _sess.index[_i].astimezone(_ET).minute) - (4 * 60)) if _i < len(_sess) else float(_i),  # Fix #18: clock minutes from 4am ET
+                        'minutes_since_open': float(_i),
                     }
                     _X = _pd.DataFrame([_feat])
                     if _ml_feat_names:
@@ -6000,21 +5409,18 @@ def api_gap_watchlist_analysis():
                 fresh_side = saved_side  # preserve EOD conviction when PM move is trivial
             if fresh_side == 'long':
                 fresh_entry = round(pm_high + 0.01, 2)
-                fresh_stop  = round(pm_low, 2)   # natural stop = PM low
+                fresh_stop  = round(pm_low, 2)
             else:
                 fresh_entry = round(pm_low - 0.01, 2)
-                fresh_stop  = round(pm_high, 2)  # natural stop = PM high
+                fresh_stop  = round(pm_high, 2)
             fresh_risk = round(abs(fresh_entry - fresh_stop), 4)
-            _max_risk_a = round(fresh_entry * 0.07, 4)  # unified with gap_orders cap
-            stop_capped = False
-            fresh_stop_cap = None  # informational display only — sizing/target use natural stop
+            _max_risk_a = round(fresh_entry * 0.07, 4)
             if fresh_risk > _max_risk_a:
-                stop_capped = True
                 if fresh_side == 'long':
-                    fresh_stop_cap = round(fresh_entry - _max_risk_a, 2)
+                    fresh_stop = round(fresh_entry - _max_risk_a, 2)
                 else:
-                    fresh_stop_cap = round(fresh_entry + _max_risk_a, 2)
-                # fresh_stop and fresh_risk stay as natural — target and sizing both use real stop
+                    fresh_stop = round(fresh_entry + _max_risk_a, 2)
+                fresh_risk = round(abs(fresh_entry - fresh_stop), 4)
             if fresh_risk >= 0.05:
                 fresh_target = round(fresh_entry + 2.0 * fresh_risk, 2) if fresh_side == 'long' \
                                else round(fresh_entry - 2.0 * fresh_risk, 2)
@@ -6029,111 +5435,37 @@ def api_gap_watchlist_analysis():
                 if not _chk_a.valid:
                     fresh_entry = fresh_stop = fresh_target = None
 
-            # ── Rebuilt plan from last 30-min PM bars (for invalidated setups) ─
-            # When the full-session PM range is blown (price past stop), rebuild from
-            # the most recent 30-min consolidation so the user gets a valid setup for open.
-            rebuilt_entry = rebuilt_stop = rebuilt_target = rebuilt_side = None
-            try:
-                if len(pm_bars) >= 5:
-                    # Anchor to 9:00-9:30 AM window only.
-                    # pm_close_t is 8 PM when trade_date is yesterday, so pm_mask spans the full
-                    # extended session. We must clamp both ends to get the true pre-open range.
-                    _rth_open_t = datetime.combine(trade_date, datetime.min.time()).replace(
-                        hour=9, minute=30, second=0, microsecond=0, tzinfo=_ET)
-                    _cutoff_30 = _rth_open_t - timedelta(minutes=30)
-                    _recent_idx = idx_et[pm_mask]
-                    _recent_mask_inner = (_recent_idx >= _cutoff_30) & (_recent_idx < _rth_open_t)
-                    _recent_pm = pm_bars[_recent_mask_inner]
-                    if len(_recent_pm) >= 3:
-                        _r_high = float(_recent_pm['High'].max())
-                        _r_low  = float(_recent_pm['Low'].min())
-                        _r_last = float(_recent_pm['Close'].iloc[-1])
-                        _r_gap  = (_r_last - prev_close) / prev_close * 100.0 if prev_close and prev_close > 0 else 0.0
-                        rebuilt_side = 'long' if _r_gap > 0 else 'short'
-                        if rebuilt_side == 'long':
-                            rebuilt_entry = round(_r_high + 0.01, 2)
-                            rebuilt_stop  = round(_r_low, 2)
-                        else:
-                            rebuilt_entry = round(_r_low - 0.01, 2)
-                            rebuilt_stop  = round(_r_high, 2)
-                        _r_risk = round(abs(rebuilt_entry - rebuilt_stop), 4)
-                        _r_max  = round(rebuilt_entry * 0.07, 4)
-                        if _r_risk > _r_max:
-                            if rebuilt_side == 'long':
-                                rebuilt_stop = round(rebuilt_entry - _r_max, 2)
-                            else:
-                                rebuilt_stop = round(rebuilt_entry + _r_max, 2)
-                            _r_risk = round(abs(rebuilt_entry - rebuilt_stop), 4)
-                        if _r_risk >= 0.05:
-                            rebuilt_target = round(rebuilt_entry + 2.0 * _r_risk, 2) if rebuilt_side == 'long' \
-                                             else round(rebuilt_entry - 2.0 * _r_risk, 2)
-                            from core.plan_integrity import validate_plan as _vp_r
-                            # Use _r_last (9:00-9:30 AM close) not live price — rebuilt plan is
-                            # a historical anchor, live price is irrelevant to its structural validity
-                            _r_chk = _vp_r(side=rebuilt_side, entry=rebuilt_entry, stop=rebuilt_stop,
-                                           target=rebuilt_target, current_price=None, symbol=sym)
-                            if not _r_chk.valid:
-                                log.debug(f"rebuilt_plan [{sym}] invalid: {_r_chk.violations}")
-                                rebuilt_entry = rebuilt_stop = rebuilt_target = rebuilt_side = None
-                        else:
-                            rebuilt_entry = rebuilt_stop = rebuilt_target = rebuilt_side = None
-            except Exception as _re:
-                log.warning(f"rebuilt_plan [{sym}]: {_re}")
-
-            # After 9:30 use live trade price for status — pm_last is stale once RTH opens.
-            # Fallback priority if get_latest_trade fails:
-            #   1. Last 1-min bar close (at most ~1 min stale, already in memory)
-            #   2. pm_last (only if bars also unavailable — hours stale, last resort)
+            # After 9:30 use live trade price for status — pm_last is stale once RTH opens
             _now_et_s = datetime.now(_ET)
             _is_rth = (_now_et_s.hour > 9 or (_now_et_s.hour == 9 and _now_et_s.minute >= 30)) \
                       and _now_et_s.hour < 16
             _live_price = pm_last
             if _is_rth:
-                # Best fallback: last close from already-fetched 1-min bars (~1 min stale max)
-                try:
-                    _last_bar_close = float(bars.iloc[-1]['Close'])
-                    if _last_bar_close > 0:
-                        _live_price = _last_bar_close
-                except Exception:
-                    pass
-                # Override with true latest trade if available (zero latency)
                 try:
                     _lt = _ALPACA_PROVIDER.get_latest_trade(sym) or {}
                     _lp = float(_lt.get('price') or 0)
                     if _lp > 0:
                         _live_price = _lp
                 except Exception:
-                    pass  # keep last bar close set above
+                    pass
 
-            # How far has price moved toward/past the fresh entry (fresh_entry matches displayed Entry column)
+            # How far has price moved toward/past the saved entry
             move_from_entry = None
-            _ref_entry = saved_entry if saved_entry is not None else fresh_entry
-            _ref_side  = saved_side or fresh_side
-            if _ref_entry and _ref_entry > 0:
-                if _ref_side == 'long':
-                    move_from_entry = round((_live_price - _ref_entry) / _ref_entry * 100.0, 2)
+            if saved_entry and saved_entry > 0:
+                if saved_side == 'long':
+                    move_from_entry = round((_live_price - saved_entry) / saved_entry * 100.0, 2)
                 else:
-                    move_from_entry = round((_ref_entry - _live_price) / _ref_entry * 100.0, 2)
+                    move_from_entry = round((saved_entry - _live_price) / saved_entry * 100.0, 2)
 
-            # Setup status — saved levels from the scanner are authoritative.
-            # fresh_* (re-derived from PM bars) is only used when no saved levels exist.
-            # This ensures a scanner entry of $9.86 isn't silently replaced by the
-            # PM-recomputed $7.64 when the user added the setup from an intraday scan.
-            _eval_entry  = saved_entry  if saved_entry  is not None else fresh_entry
-            _eval_target = saved_target if saved_target is not None else fresh_target
-            _eval_side   = saved_side or fresh_side or 'long'
-            # Stop check uses saved_stop when available (the scanner's structural stop).
-            # PM low/high is only a fallback when no stop was explicitly saved.
-            # Using pm_low as the primary stop caused false invalidations when live
-            # price dipped below PM low but was still above the scanner's actual stop.
-            _pm_natural_stop = float(pm_low) if _eval_side == 'long' else float(pm_high)
-            _eval_stop = saved_stop if saved_stop is not None else _pm_natural_stop
-            if _eval_entry is not None:
+            # Setup status — evaluate against fresh levels (always available when
+            # PM bars exist); fall back to saved levels only if fresh failed.
+            _eval_entry = fresh_entry if fresh_entry is not None else saved_entry
+            _eval_stop  = fresh_stop  if fresh_stop  is not None else saved_stop
+            _eval_side  = fresh_side or saved_side or 'long'
+            if _eval_entry is not None and _eval_stop is not None:
                 if _eval_side == 'long':
-                    if _eval_target is not None and _live_price >= _eval_target:
-                        status, label = 'target_hit', 'Target already hit — setup complete, do not chase'
-                    elif _live_price <= _eval_stop:
-                        status, label = 'stopped_out', 'Stop violated — setup invalidated'
+                    if _live_price <= _eval_stop:
+                        status, label = 'stopped_out', 'Below stop — setup invalidated'
                     elif _live_price >= _eval_entry:
                         status, label = 'triggered', 'At/above entry — already triggered'
                     elif _live_price >= _eval_entry * 0.995:
@@ -6141,10 +5473,8 @@ def api_gap_watchlist_analysis():
                     else:
                         status, label = 'intact', 'Setup intact — waiting for entry'
                 else:
-                    if _eval_target is not None and _live_price <= _eval_target:
-                        status, label = 'target_hit', 'Target already hit — setup complete, do not chase'
-                    elif _live_price >= _eval_stop:
-                        status, label = 'stopped_out', 'Stop violated — setup invalidated'
+                    if _live_price >= _eval_stop:
+                        status, label = 'stopped_out', 'Above stop — setup invalidated'
                     elif _live_price <= _eval_entry:
                         status, label = 'triggered', 'At/below entry — already triggered'
                     elif _live_price <= _eval_entry * 1.005:
@@ -6153,19 +5483,6 @@ def api_gap_watchlist_analysis():
                         status, label = 'intact', 'Setup intact — waiting for entry'
             else:
                 status, label = 'no_levels', 'No entry/stop saved'
-
-            # Time decay: hours since PM close, same-day RTH only
-            _setup_age_hours = None
-            try:
-                from datetime import time as _dtime
-                _now_age = datetime.now(_ET)
-                _pm_close_tod = datetime.combine(_now_age.date(), _dtime(9, 30), tzinfo=_ET)
-                _is_rth_now = (_now_age.hour > 9 or (_now_age.hour == 9 and _now_age.minute >= 30)) \
-                              and _now_age.hour < 16
-                if _is_rth_now and trade_date == _now_age.date():
-                    _setup_age_hours = round((_now_age - _pm_close_tod).total_seconds() / 3600.0, 2)
-            except Exception:
-                pass
 
             row = _eod_row_base()
             row.update({
@@ -6179,26 +5496,15 @@ def api_gap_watchlist_analysis():
                 'fresh_entry':     fresh_entry,
                 'fresh_stop':      fresh_stop,
                 'fresh_target':    fresh_target,
-                'rebuilt_side':    rebuilt_side,
-                'rebuilt_entry':   rebuilt_entry,
-                'rebuilt_stop':    rebuilt_stop,
-                'rebuilt_target':  rebuilt_target,
                 'move_from_entry': move_from_entry,
                 'status':          status,
                 'status_label':    label,
                 'ml_score':        ml_score,
-                'stop_capped':     stop_capped,
-                'fresh_stop_cap':  fresh_stop_cap,
-                'setup_age_hours': _setup_age_hours,
             })
             rows.append(row)
 
         except Exception as exc:
             errors.append({'symbol': sym, 'error': str(exc)})
-
-    from concurrent.futures import ThreadPoolExecutor as _AnalysisPool
-    with _AnalysisPool(max_workers=8) as _pool:
-        list(_pool.map(_analyze_one, entries))
 
     # Batch news fetch — fills catalyst_age_hours + catalyst_headline for all rows
     if rows:
@@ -6214,14 +5520,7 @@ def api_gap_watchlist_analysis():
         except Exception:
             pass
 
-    # Fix #16: status-priority sort (intact > near_entry > triggered > stopped_out/target_hit)
-    # then by magnitude within each priority group
-    _status_priority = {'intact': 0, 'near_entry': 1, 'triggered': 2,
-                        'no_levels': 3, 'target_hit': 4, 'stopped_out': 5, 'no_pm_data': 6}
-    rows.sort(key=lambda r: (
-        _status_priority.get(r.get('status', 'no_pm_data'), 9),
-        -abs(r.get('pm_move_pct') or 0),
-    ))
+    rows.sort(key=lambda r: abs(r.get('pm_move_pct') or 0), reverse=True)
     return jsonify(ok=True, rows=rows, errors=errors, trade_date=str(trade_date))
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -6512,16 +5811,13 @@ def api_pt_validate_status():
 # ── Live News Sentiment Feed ──────────────────────────────────────────────────
 
 _NEWS_SEEN_IDS: set[str] = set()
-_NEWS_SEEN_IDS_MAX = 5000  # evict oldest half when full
 _NEWS_FEED_LOCK = threading.Lock()
-_NEWS_POLL_INTERVAL = 15  # seconds — fast poll; WS stream requires Algo Trader Plus
+_NEWS_POLL_INTERVAL = 45  # seconds
 _NEWS_REFRESH_EVENT = threading.Event()  # set() to wake the news thread immediately
-_MARKET_EVENTS_EVENT = threading.Event()  # set() to wake market-events SSE listeners
 
 # ── News Sniper — fires the instant a NEW catalyst headline drops ─────────────
 _SNIPER_ALERTS: deque = deque(maxlen=50)
 _SNIPER_LOCK = threading.Lock()
-_SNIPER_WL_COOLDOWN: dict[str, float] = {}  # sym → last watchlist-add timestamp
 
 # Catalyst tags that warrant an immediate sniper alert
 _SNIPER_CATALYST_TAGS = frozenset({
@@ -6531,10 +5827,9 @@ _SNIPER_CATALYST_TAGS = frozenset({
 # Minimum sentiment confidence to fire (avoids noise from weak articles)
 _SNIPER_MIN_CONFIDENCE = 40.0
 
-def _emit_sniper_alert(sym: str, article: dict, bundle, price: float | None, *, plan: dict | None = None) -> None:
+def _emit_sniper_alert(sym: str, article: dict, bundle, price: float | None) -> None:
     """Push a sniper alert to the ring buffer when a new catalyst headline drops."""
     tags = list(getattr(bundle, 'tags', []) or [])
-    _plan = plan or {}
     alert = {
         'symbol':      sym,
         'headline':    article.get('headline') or article.get('title') or '',
@@ -6549,122 +5844,10 @@ def _emit_sniper_alert(sym: str, article: dict, bundle, price: float | None, *, 
         'strength':    round(float(getattr(bundle, 'strength', 0) or 0), 4),
         'price':       price,
         'direction':   'LONG' if (getattr(bundle, 'score', 0) or 0) > 0 else ('SHORT' if (getattr(bundle, 'score', 0) or 0) < 0 else 'NEUTRAL'),
-        # Entry plan levels — available immediately in the banner, used by _bg_grade without watchlist lookup
-        'entry':       _plan.get('entry'),
-        'stop':        _plan.get('stop'),
-        'target':      _plan.get('target_2r'),
-        'risk_per_share': _plan.get('risk_per_share'),
     }
     with _SNIPER_LOCK:
         _SNIPER_ALERTS.appendleft(alert)
     _NEWS_REFRESH_EVENT.set()   # wake any SSE listeners
-
-    # Auto-add to desk watchlist — 5-minute cooldown per symbol to prevent flip-flopping
-    direction = alert['direction']
-    if direction in ('LONG', 'SHORT') and alert['confidence'] >= _SNIPER_MIN_CONFIDENCE:
-        side = direction.lower()
-        _now_ts = time.time()
-        _last_add = _SNIPER_WL_COOLDOWN.get(sym, 0)
-        if _now_ts - _last_add >= 300:  # 5-minute gate per symbol
-            _SNIPER_WL_COOLDOWN[sym] = _now_ts
-            try:
-                _RUNTIME_STORE.desk_watchlist_set(
-                    sym,
-                    side=side,
-                    trigger_price=_plan.get('entry'),
-                    stop_price=_plan.get('stop'),
-                    target_price=_plan.get('target_2r'),
-                    notes=f"\U0001f4f0 {alert['headline'][:120]}",
-                )
-            except Exception:
-                pass
-
-        def _bg_grade(a=alert, s=side, h=alert['headline'], px=price):
-            import logging as _log
-            _lg = _log.getLogger(__name__)
-            try:
-                live_px = px
-                if not live_px and _STREAM is not None:
-                    try:
-                        snap = _STREAM.latest_quote(a['symbol'])
-                        if snap:
-                            bp = snap.get('bp') or snap.get('bid_price') or 0
-                            ap = snap.get('ap') or snap.get('ask_price') or 0
-                            if bp and ap:
-                                live_px = (bp + ap) / 2
-                            elif bp:
-                                live_px = float(bp)
-                            elif ap:
-                                live_px = float(ap)
-                    except Exception as _qe:
-                        _lg.warning('_bg_grade quote fallback failed %s: %s', a.get('symbol'), _qe)
-                # Fix #15: pass actual halt count from stream cache
-                _halt_count = 0
-                try:
-                    if _STREAM is not None:
-                        _halt_evts = _STREAM.recent_halt_resume_events(max_age_sec=86400)
-                        _halt_count = sum(1 for _e in _halt_evts
-                                          if str(_e.get('symbol', '')).upper() == a['symbol'].upper()
-                                          and str(_e.get('status_code', '')).upper()
-                                          in ('T1', 'T2', 'T3', 'H', 'HALTED', 'LUDP'))
-                except Exception:
-                    pass
-
-                # Compute real catalyst age from article publish time
-                _catalyst_age = None
-                try:
-                    _pub = a.get('published_at') or a.get('fired_at')
-                    if _pub:
-                        from datetime import datetime as _dt, timezone as _tz
-                        _pub_dt = _dt.fromisoformat(str(_pub).replace('Z', '+00:00'))
-                        _catalyst_age = max(0.0, (_dt.now(_tz.utc) - _pub_dt).total_seconds() / 3600.0)
-                except Exception:
-                    pass
-
-                # Compute setup age from when the alert fired
-                _setup_age = None
-                try:
-                    _fired = float(a.get('fired_ts') or 0)
-                    if _fired > 0:
-                        import time as _time
-                        _setup_age = max(0.0, (_time.time() - _fired) / 3600.0)
-                except Exception:
-                    pass
-
-                # Use entry/stop/target from the alert dict (set at sniper fire time from plan)
-                # This avoids a race condition between watchlist write and _bg_grade thread start
-                _entry  = a.get('entry')
-                _stop   = a.get('stop')
-                _target = a.get('target')
-                _ml     = None
-
-                from utils.know_the_trade import analyze as _ktt
-                ktt = _ktt(
-                    symbol=a['symbol'],
-                    provider=_ALPACA_PROVIDER,
-                    side=s,
-                    pm_last=live_px,
-                    entry=_entry,
-                    stop=_stop,
-                    target=_target,
-                    ml_score=_ml,
-                    catalyst_headline=h,
-                    catalyst_age_hours=_catalyst_age,
-                    setup_age_hours=_setup_age,
-                    halt_count=_halt_count,
-                    sniper_context=False,
-                )
-                a['ktt_grade'] = ktt.get('grade') or '?'
-                a['ktt_score'] = ktt.get('score')
-                a['ktt_advice'] = ktt.get('grade_advice')
-                _lg.debug('_bg_grade OK %s -> %s %s', a.get('symbol'), a['ktt_grade'], a['ktt_score'])
-            except Exception as exc:
-                _lg.warning('_bg_grade failed %s: %s', a.get('symbol'), exc, exc_info=True)
-                a['ktt_grade'] = '?'
-                a['ktt_score'] = None
-            finally:
-                _NEWS_REFRESH_EVENT.set()   # push updated alert to SSE listeners
-        threading.Thread(target=_bg_grade, daemon=True).start()
 
 
 # ── Pre-Halt Spread Explosion Detector ───────────────────────────────────────
@@ -6975,23 +6158,7 @@ def _news_feed_loop() -> None:
             # Use 20h lookback so overnight runs always cover the full prior day.
             start_iso = (now - timedelta(hours=20)).isoformat()
 
-            # ── Market-wide scan: pull top 50 recent articles regardless of watchlist ──
-            # Builds (sym, article) pairs for every symbol tagged in each article.
-            sym_art_pairs: list[tuple[str, dict]] = []
-            try:
-                mkt_arts = _ALPACA_PROVIDER.get_market_news(limit=50, start=start_iso)
-                for art in mkt_arts:
-                    raw_syms = art.get('symbols') or []
-                    if isinstance(raw_syms, str):
-                        raw_syms = [raw_syms]
-                    for s in raw_syms:
-                        s = str(s).strip().upper()
-                        if s:
-                            sym_art_pairs.append((s, art))
-            except Exception:
-                pass
-
-            # ── Watchlist / monitor depth-fetch: more articles per symbol in view ──
+            # Collect symbols: desk watchlist + active monitor session
             syms: set[str] = set()
             try:
                 for entry in _RUNTIME_STORE.desk_watchlist_all():
@@ -7006,89 +6173,86 @@ def _news_feed_loop() -> None:
             except Exception:
                 pass
 
-            if syms:
-                try:
-                    raw_map = _ALPACA_PROVIDER.get_news_batch(
-                        list(syms), limit_per_symbol=5, start=start_iso
-                    )
-                    for sym, articles in raw_map.items():
-                        for art in articles:
-                            sym_art_pairs.append((sym, art))
-                except Exception:
-                    pass
+            if not syms:
+                _NEWS_REFRESH_EVENT.wait(timeout=_NEWS_POLL_INTERVAL)
+                _NEWS_REFRESH_EVENT.clear()
+                continue
 
-            for sym, art in sym_art_pairs:
-                raw_id = str(art.get('id') or art.get('news_id') or '').strip()
-                if not raw_id:
-                    key = f"{sym}:{art.get('headline', '')}:{art.get('created_at', '')}"
-                    raw_id = hashlib.md5(key.encode()).hexdigest()
-                news_id = f"{sym}:{raw_id}"
+            raw_map = _ALPACA_PROVIDER.get_news_batch(
+                list(syms), limit_per_symbol=5, start=start_iso
+            )
 
-                headline = str(art.get('headline') or art.get('title') or '').strip()
-                if not headline:
-                    continue
+            for sym, articles in raw_map.items():
+                for art in articles:
+                    raw_id = str(art.get('id') or art.get('news_id') or '').strip()
+                    if not raw_id:
+                        key = f"{sym}:{art.get('headline', '')}:{art.get('created_at', '')}"
+                        raw_id = hashlib.md5(key.encode()).hexdigest()
+                    news_id = f"{sym}:{raw_id}"
 
-                bundle = svc._score_symbol(sym, [art], now=now)
+                    headline = str(art.get('headline') or art.get('title') or '').strip()
+                    if not headline:
+                        continue
 
-                # ── News Sniper: fire on first sight of a catalyst headline ──
-                is_new_article = news_id not in _NEWS_SEEN_IDS
-                if is_new_article:
-                    if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
-                        _NEWS_SEEN_IDS.clear()
-                    _NEWS_SEEN_IDS.add(news_id)
-                    has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
-                    strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
-                    if has_catalyst_tag and strong_enough:
+                    bundle = svc._score_symbol(sym, [art], now=now)
+
+                    # ── News Sniper: fire on first sight of a catalyst headline ──
+                    is_new_article = news_id not in _NEWS_SEEN_IDS
+                    if is_new_article:
+                        _NEWS_SEEN_IDS.add(news_id)
+                        has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
+                        strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
+                        if has_catalyst_tag and strong_enough:
+                            try:
+                                snap_price: float | None = None
+                                if _ALPACA_PROVIDER is not None:
+                                    t = _ALPACA_PROVIDER.get_latest_trade(sym)
+                                    snap_price = float(t.get('price') or 0) or None
+                            except Exception:
+                                snap_price = None
+                            _emit_sniper_alert(sym, art, bundle, snap_price)
+                    src = art.get('source')
+                    source = src if isinstance(src, str) else ((src or {}).get('name') or '')
+
+                    # For actionable sentiment, compute entry plan + ML
+                    plan: dict = {}
+                    if abs(bundle.score) >= 0.25:
                         try:
-                            snap_price: float | None = None
-                            if _ALPACA_PROVIDER is not None:
-                                t = _ALPACA_PROVIDER.get_latest_trade(sym)
-                                snap_price = float(t.get('price') or 0) or None
+                            plan = _news_entry_plan(sym, bundle.score)
                         except Exception:
-                            snap_price = None
-                        _emit_sniper_alert(sym, art, bundle, snap_price)
-                src = art.get('source')
-                source = src if isinstance(src, str) else ((src or {}).get('name') or '')
+                            plan = {}
 
-                # For actionable sentiment, compute entry plan + ML
-                plan: dict = {}
-                if abs(bundle.score) >= 0.25:
+                    payload = {
+                        'news_id': news_id,
+                        'symbol': sym,
+                        'headline': headline,
+                        'summary': str(art.get('summary') or '')[:300] or None,
+                        'source': source or None,
+                        'url': art.get('url') or None,
+                        'published_at': str(art.get('created_at') or art.get('updated_at') or ''),
+                        'received_at': now.timestamp(),
+                        'sentiment_score': bundle.score,
+                        'catalyst_score': bundle.score,
+                        'freshness_sec': (bundle.freshness_hours * 3600) if bundle.freshness_hours is not None else None,
+                        'tags': bundle.tags,
+                        'confidence': bundle.confidence,
+                        'strength': bundle.strength,
+                        'article_count': 1,
+                        # Entry plan fields (populated for |score| >= 0.25)
+                        'side': plan.get('side'),
+                        'price': plan.get('price'),
+                        'entry': plan.get('entry'),
+                        'stop': plan.get('stop'),
+                        'target_2r': plan.get('target_2r'),
+                        'target_3r': plan.get('target_3r'),
+                        'risk_per_share': plan.get('risk_per_share'),
+                        'ml_score': plan.get('ml_score'),
+                        'combined_score': plan.get('combined_score') if plan else bundle.score,
+                    }
                     try:
-                        plan = _news_entry_plan(sym, bundle.score)
+                        _RUNTIME_STORE.append_news_event(payload)
                     except Exception:
-                        plan = {}
-
-                payload = {
-                    'news_id': news_id,
-                    'symbol': sym,
-                    'headline': headline,
-                    'summary': str(art.get('summary') or '')[:300] or None,
-                    'source': source or None,
-                    'url': art.get('url') or None,
-                    'published_at': str(art.get('created_at') or art.get('updated_at') or ''),
-                    'received_at': now.timestamp(),
-                    'sentiment_score': bundle.score,
-                    'catalyst_score': bundle.score,
-                    'freshness_sec': (bundle.freshness_hours * 3600) if bundle.freshness_hours is not None else None,
-                    'tags': bundle.tags,
-                    'confidence': bundle.confidence,
-                    'strength': bundle.strength,
-                    'article_count': 1,
-                    # Entry plan fields (populated for |score| >= 0.25)
-                    'side': plan.get('side'),
-                    'price': plan.get('price'),
-                    'entry': plan.get('entry'),
-                    'stop': plan.get('stop'),
-                    'target_2r': plan.get('target_2r'),
-                    'target_3r': plan.get('target_3r'),
-                    'risk_per_share': plan.get('risk_per_share'),
-                    'ml_score': plan.get('ml_score'),
-                    'combined_score': plan.get('combined_score') if plan else bundle.score,
-                }
-                try:
-                    _RUNTIME_STORE.append_news_event(payload)
-                except Exception:
-                    pass
+                        pass
 
         except Exception:
             pass
@@ -7100,133 +6264,6 @@ def _news_feed_loop() -> None:
 def _start_news_feed() -> None:
     t = threading.Thread(target=_news_feed_loop, daemon=True, name='news-feed')
     t.start()
-
-
-def _process_news_article(sym: str, art: dict) -> None:
-    """Shared pipeline: score one article, fire sniper if warranted, store in DB."""
-    import hashlib
-    from datetime import timezone as _tz
-    from sentiment.catalyst import CatalystService
-    try:
-        svc = CatalystService(_ALPACA_PROVIDER)
-        now = datetime.now(_tz.utc)
-        raw_id = str(art.get('id') or art.get('news_id') or '').strip()
-        if not raw_id:
-            key = f"{sym}:{art.get('headline', '')}:{art.get('created_at', '')}"
-            raw_id = hashlib.md5(key.encode()).hexdigest()
-        news_id = f"{sym}:{raw_id}"
-        headline = str(art.get('headline') or art.get('title') or '').strip()
-        if not headline:
-            return
-        bundle = svc._score_symbol(sym, [art], now=now)
-        # Compute plan before sniper check so entry/stop/target reach the watchlist immediately
-        plan: dict = {}
-        if abs(bundle.score) >= 0.25:
-            try:
-                plan = _news_entry_plan(sym, bundle.score)
-            except Exception:
-                plan = {}
-        is_new = news_id not in _NEWS_SEEN_IDS
-        if is_new:
-            if len(_NEWS_SEEN_IDS) >= _NEWS_SEEN_IDS_MAX:
-                _NEWS_SEEN_IDS.clear()
-            _NEWS_SEEN_IDS.add(news_id)
-            has_catalyst_tag = bool(_SNIPER_CATALYST_TAGS & set(bundle.tags or []))
-            strong_enough    = float(bundle.confidence or 0) >= _SNIPER_MIN_CONFIDENCE
-            if has_catalyst_tag and strong_enough:
-                try:
-                    snap_price = None
-                    if _ALPACA_PROVIDER is not None:
-                        t = _ALPACA_PROVIDER.get_latest_trade(sym)
-                        snap_price = float(t.get('price') or 0) or None
-                except Exception:
-                    snap_price = None
-                _emit_sniper_alert(sym, art, bundle, snap_price, plan=plan)
-            elif plan and plan.get('entry'):
-                # Directional news below sniper threshold but with an actionable plan
-                _ns_side = plan.get('side') or ('long' if bundle.score > 0 else 'short')
-                try:
-                    _RUNTIME_STORE.desk_watchlist_set(
-                        sym, side=_ns_side,
-                        trigger_price=plan.get('entry'),
-                        stop_price=plan.get('stop'),
-                        target_price=plan.get('target_2r'),
-                        notes=f"\U0001f4f0 {headline[:120]}",
-                    )
-                except Exception:
-                    pass
-        src = art.get('source')
-        source = src if isinstance(src, str) else ((src or {}).get('name') or '')
-        payload = {
-            'news_id': news_id, 'symbol': sym, 'headline': headline,
-            'summary': str(art.get('summary') or '')[:300] or None,
-            'source': source or None, 'url': art.get('url') or None,
-            'published_at': str(art.get('created_at') or art.get('updated_at') or ''),
-            'received_at': now.timestamp(),
-            'sentiment_score': bundle.score, 'catalyst_score': bundle.score,
-            'freshness_sec': (bundle.freshness_hours * 3600) if bundle.freshness_hours is not None else None,
-            'tags': bundle.tags, 'confidence': bundle.confidence, 'strength': bundle.strength,
-            'article_count': 1,
-            'side': plan.get('side'), 'price': plan.get('price'),
-            'entry': plan.get('entry'), 'stop': plan.get('stop'),
-            'target_2r': plan.get('target_2r'), 'target_3r': plan.get('target_3r'),
-            'risk_per_share': plan.get('risk_per_share'),
-            'ml_score': plan.get('ml_score'),
-            'combined_score': plan.get('combined_score') if plan else bundle.score,
-        }
-        try:
-            _RUNTIME_STORE.append_news_event(payload)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
-def _news_ws_loop() -> None:
-    """Background thread: WebSocket news stream — fires the instant Alpaca publishes."""
-    import asyncio
-    import logging
-    log = logging.getLogger('news-ws')
-
-    api_key    = os.getenv('ALPACA_API_KEY', '')
-    secret_key = os.getenv('ALPACA_SECRET_KEY', '')
-    if not api_key or not secret_key:
-        log.warning('news-ws: no Alpaca credentials — WebSocket news stream disabled')
-        return
-
-    try:
-        from alpaca.data.live import NewsDataStream
-        stream = NewsDataStream(api_key=api_key, secret_key=secret_key)
-
-        async def _on_news(article) -> None:
-            try:
-                art = article if isinstance(article, dict) else article.__dict__
-                symbols = art.get('symbols') or art.get('tickers') or []
-                for sym in symbols:
-                    sym = str(sym).strip().upper()
-                    if sym:
-                        _process_news_article(sym, art)
-            except Exception:
-                pass
-
-        stream.subscribe_news(_on_news, '*')
-        log.info('news-ws: connected — streaming all news in real-time')
-        stream.run()
-
-    except Exception as e:
-        err = str(e).lower()
-        if 'connection limit' in err:
-            log.info('news-ws: connection limit reached (SIP Pro allows 1 WebSocket) — '
-                     'using 15s poll fallback. Upgrade to Algo Trader Plus for real-time news stream.')
-        else:
-            log.warning(f'news-ws: failed to connect ({e}) — using poll fallback')
-
-
-def _start_news_feed() -> None:
-    t = threading.Thread(target=_news_feed_loop, daemon=True, name='news-feed')
-    t.start()
-    ws = threading.Thread(target=_news_ws_loop, daemon=True, name='news-ws')
-    ws.start()
 
 
 _start_news_feed()
@@ -7408,106 +6445,6 @@ def api_news_sniper_stream():
             # Heartbeat every 20s to keep connection alive
             _NEWS_REFRESH_EVENT.wait(timeout=20)
             _NEWS_REFRESH_EVENT.clear()
-            yield ': heartbeat\n\n'
-
-    return Response(
-        stream_with_context(_generate()),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-        },
-    )
-
-
-# ── Market Events (Halts / LULD bands) ───────────────────────────────────────
-
-_HALT_REASON_MAP = {
-    'T1':   {'label': 'News Pending',       'note': 'Bullish — news imminent'},
-    'T2':   {'label': 'News Released',      'note': 'News disseminated'},
-    'T5':   {'label': 'Single Stock Pause', 'note': 'Volatility pause'},
-    'LUDP': {'label': 'LULD Pause',         'note': '5-min halt — watch collar'},
-    'T12':  {'label': 'NASDAQ Info Req',    'note': 'Neutral'},
-    'H4':   {'label': 'Non-Compliance',     'note': 'Delisting risk'},
-    'H10':  {'label': 'SEC Suspension',     'note': 'Do not trade'},
-    'IPO1': {'label': 'IPO Not Trading',    'note': 'Watch first print'},
-    'MWC1': {'label': 'Circuit Breaker L1', 'note': '7% market halt'},
-    'MWC2': {'label': 'Circuit Breaker L2', 'note': '13% market halt'},
-    'MWC3': {'label': 'MARKET CLOSED',      'note': '20% — day done'},
-}
-
-
-@app.get('/api/market_events')
-def api_market_events():
-    """Return recent halts, LULD bands, and imbalances for all monitored symbols."""
-    stream = _STREAM
-    halts = []
-    lulds = []
-    imbalances = []
-    try:
-        raw_halts = stream.recent_halt_resume_events(max_age_sec=1800) if stream else []
-        for h in raw_halts:
-            entry = dict(h)
-            rc = str(entry.get('reason_code') or entry.get('status_code') or '')
-            info = _HALT_REASON_MAP.get(rc, {})
-            entry['reason_label'] = info.get('label', rc or 'Unknown')
-            entry['reason_note']  = info.get('note', '')
-            halts.append(entry)
-    except Exception:
-        pass
-    try:
-        lulds = stream.recent_luld_events(max_age_sec=3600) if stream else []
-    except Exception:
-        pass
-    try:
-        imbalances = stream.recent_imbalances(max_age_sec=1800) if stream else []
-    except Exception:
-        pass
-    return jsonify(ok=True, halts=halts, lulds=lulds, imbalances=imbalances)
-
-
-@app.get('/api/market_events/stream')
-def api_market_events_stream():
-    """SSE stream: pushes a 'market_event' event on halt or LULD changes."""
-    def _generate():
-        yield 'data: {"type":"connected"}\n\n'
-        last_poll = time.time()
-        seen_halt_ts: float = last_poll - 30
-        seen_luld_ts: float = last_poll - 30
-        seen_imb_ts:  float = last_poll - 30
-        while True:
-            _MARKET_EVENTS_EVENT.wait(timeout=15)
-            _MARKET_EVENTS_EVENT.clear()
-            try:
-                stream = _STREAM
-                if stream:
-                    new_halts = [
-                        h for h in stream.recent_halt_resume_events(max_age_sec=60)
-                        if float(h.get('received_at', 0)) > seen_halt_ts
-                    ]
-                    new_lulds = [
-                        l for l in stream.recent_luld_events(max_age_sec=60)
-                        if float(l.get('received_at', 0)) > seen_luld_ts
-                    ]
-                    new_imbs = [
-                        i for i in stream.recent_imbalances(max_age_sec=60)
-                        if float(i.get('received_at', 0)) > seen_imb_ts
-                    ]
-                    if new_halts or new_lulds or new_imbs:
-                        for h in new_halts:
-                            seen_halt_ts = max(seen_halt_ts, float(h.get('received_at', 0)))
-                            rc = str(h.get('reason_code') or h.get('status_code') or '')
-                            info = _HALT_REASON_MAP.get(rc, {})
-                            h['reason_label'] = info.get('label', rc or 'Unknown')
-                            h['reason_note']  = info.get('note', '')
-                        for l in new_lulds:
-                            seen_luld_ts = max(seen_luld_ts, float(l.get('received_at', 0)))
-                        for i in new_imbs:
-                            seen_imb_ts = max(seen_imb_ts, float(i.get('received_at', 0)))
-                        payload = {'halts': new_halts, 'lulds': new_lulds, 'imbalances': new_imbs}
-                        yield f'event: market_event\ndata: {json.dumps(payload)}\n\n'
-            except Exception:
-                pass
             yield ': heartbeat\n\n'
 
     return Response(
@@ -7715,57 +6652,6 @@ def api_context_status():
     except Exception:
         ctx = {}
     return jsonify(ok=True, context=ctx)
-
-
-@app.get('/api/alerts_recent')
-def api_alerts_recent():
-    monitor_id = str(request.args.get('monitor_id') or '').strip() or None
-    limit = min(int(request.args.get('limit') or 25), 100)
-    try:
-        alerts = _MONITOR.recent_alerts(monitor_id=monitor_id, limit=limit)
-    except Exception as e:
-        return jsonify(ok=False, error=f"{type(e).__name__}: {e}"), 500
-    return jsonify(ok=True, alerts=alerts)
-
-
-@app.get('/api/alerts_stream')
-def api_alerts_stream():
-    """SSE stream that emits 'alert' events as new monitor alerts arrive.
-
-    Polls in-memory session alerts every 2s and emits any with event_ts > since.
-    Falls back gracefully when no session is active.
-    """
-    import time as _time
-    import json as _json_sse
-
-    monitor_id = str(request.args.get('monitor_id') or '').strip() or None
-    try:
-        since = float(request.args.get('since') or 0)
-    except (TypeError, ValueError):
-        since = 0.0
-
-    def _generate():
-        nonlocal since
-        deadline = _time.time() + 55.0  # close before gunicorn/nginx 60s timeout
-        yield ': ping\n\n'
-        while _time.time() < deadline:
-            try:
-                alerts = _MONITOR.recent_alerts(monitor_id=monitor_id, limit=50)
-                new = [a for a in alerts if float(a.get('event_ts') or 0) > since]
-                new.sort(key=lambda a: float(a.get('event_ts') or 0))
-                for a in new:
-                    since = max(since, float(a.get('event_ts') or 0))
-                    yield f"event: alert\ndata: {_json_sse.dumps(a, separators=(',', ':'), default=str)}\n\n"
-            except Exception:
-                pass
-            _time.sleep(2.0)
-        yield ': close\n\n'
-
-    return Response(
-        stream_with_context(_generate()),
-        mimetype='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-    )
 
 
 @app.get("/api/watchlist_snapshot")
@@ -8462,8 +7348,8 @@ def api_morning_validation():
                 yield _emit("L2 book", "warn", "stream not started", "streaming",
                             "Start monitor to enable L2 order book")
             elif not sc._orderbook_supported:
-                yield _emit("L2 book", "info", "L1 NBBO only (orderbook not in alpaca-py SDK)", "streaming",
-                            "alpaca-py v0.43.x does not implement subscribe_orderbooks. Your plan supports L2 — SDK upgrade needed.")
+                yield _emit("L2 book", "warn", "L1 NBBO only (Algo Trader Plus required for DOM)", "streaming",
+                            "Alpaca orderbook depth feed requires Algo Trader Plus plan. L1 NBBO bid/ask is live.")
             else:
                 sc.ensure_symbols(["SPY"])
                 import asyncio as _asyncio; _asyncio.sleep(0)   # yield to stream thread
@@ -8572,8 +7458,8 @@ def api_morning_validation():
                 grades[g] = grades.get(g, 0) + 1
             total = sum(grades.values())
             if total == 0:
-                yield _emit("ORB grading", "info", "0 candidates", "grade spread A-F",
-                            "No ORB candidates — expected before/after RTH. Pipeline is operational.")
+                yield _emit("ORB grading", "warn", "0 candidates", "grade spread A-F",
+                            "No ORB candidates found — check pre-market hours or market state")
             elif len(grades) >= 2:
                 grade_str = ", ".join(f"{g}:{n}" for g, n in sorted(grades.items()))
                 yield _emit("ORB grading", "pass", grade_str, "multiple grade tiers",
@@ -8607,8 +7493,8 @@ def api_morning_validation():
                 yield _emit("Gap orders", "pass", f"{n} gap candidates", "≥1 candidate",
                             "Gap orders pipeline operational")
             else:
-                yield _emit("Gap orders", "info", "0 gap candidates", "≥1 candidate",
-                            "No gap candidates — expected before RTH. Pipeline is operational.")
+                yield _emit("Gap orders", "warn", "0 gap candidates", "≥1 candidate",
+                            "No gap candidates — expected pre-market or early session")
         except Exception as e:
             yield _emit("Gap orders", "warn", str(e), "≥1 candidate", f"Gap scan failed: {e}")
 
@@ -8631,343 +7517,13 @@ def api_morning_validation():
         except Exception as e:
             yield _emit("Spread alerts", "warn", str(e), "running", f"Spread check failed: {e}")
 
-        # ── 11. Market session / time-of-day gating ───────────────────────
-        yield "data: {\"progress\": \"Checking market session state...\"}\n\n"
-        try:
-            from datetime import datetime as _dt
-            _now_et = _dt.now(_ET)
-            _h, _m = _now_et.hour, _now_et.minute
-            _mins = _h * 60 + _m
-            _PM_OPEN  = 4  * 60       # 4:00 AM
-            _RTH_OPEN = 9  * 60 + 30  # 9:30 AM
-            _RTH_CLOSE= 16 * 60       # 4:00 PM
-            _AH_CLOSE = 20 * 60       # 8:00 PM
-            _wd = _now_et.weekday()
-            if _wd >= 5:
-                yield _emit("Market session", "warn", "weekend — markets closed", "RTH",
-                            "Trading not available Sat/Sun — run validation Monday AM before open")
-            elif _mins < _PM_OPEN:
-                yield _emit("Market session", "warn", "before pre-market (before 4 AM)", "PM or RTH",
-                            "Too early — pre-market opens 4 AM ET")
-            elif _mins < _RTH_OPEN:
-                yield _emit("Market session", "pass", f"pre-market ({_now_et.strftime('%I:%M %p')} ET)", "PM",
-                            "Pre-market active — gap setups are valid, volume building")
-            elif _mins < _RTH_CLOSE:
-                yield _emit("Market session", "pass", f"RTH ({_now_et.strftime('%I:%M %p')} ET)", "RTH",
-                            "Regular trading hours — full liquidity, all features active")
-            elif _mins < _AH_CLOSE:
-                yield _emit("Market session", "warn", f"after-hours ({_now_et.strftime('%I:%M %p')} ET)", "RTH",
-                            "After-hours — spreads wide, thin liquidity, gap setups stale")
-            else:
-                yield _emit("Market session", "warn", "markets closed", "RTH",
-                            "Markets closed — data from last session")
-        except Exception as e:
-            yield _emit("Market session", "warn", str(e), "RTH", f"Session check failed: {e}")
-
-        # ── 12. ML model loaded + producing non-trivial scores ─────────────
-        yield "data: {\"progress\": \"Validating ML model state...\"}\n\n"
-        try:
-            ml_status = _ML_STATE.get("status")
-            ml_err    = _ML_STATE.get("error")
-            has_pm    = bool(_ML_STATE.get("entry_now_pm_path") and Path(_ML_STATE["entry_now_pm_path"]).exists())
-            has_rth   = bool(_ML_STATE.get("entry_now_rth_path") and Path(_ML_STATE["entry_now_rth_path"]).exists())
-            if ml_status == "ready" and (has_pm or has_rth):
-                models = []
-                if has_pm:  models.append("PM")
-                if has_rth: models.append("RTH")
-                yield _emit("ML models", "pass", f"loaded: {', '.join(models)}", "PM + RTH models",
-                            f"ML scoring active — {', '.join(models)} models ready")
-            elif ml_status == "ready":
-                yield _emit("ML models", "warn", "ready but no model files found", "PM + RTH models",
-                            "ML status=ready but model files missing — scores will be absent")
-            elif ml_err:
-                yield _emit("ML models", "warn", f"error: {ml_err[:80]}", "PM + RTH models",
-                            "ML model failed to load — scores will fall back to rule-based")
-            else:
-                yield _emit("ML models", "warn", f"status={ml_status}", "PM + RTH models",
-                            "ML models not ready — scores may be absent. Train a model from Scan settings.")
-        except Exception as e:
-            yield _emit("ML models", "warn", str(e), "loaded", f"ML check failed: {e}")
-
-        # ── 13. Saved setup R:R ratio sanity ──────────────────────────────
-        yield "data: {\"progress\": \"Validating saved setup risk/reward ratios...\"}\n\n"
-        try:
-            _wl = _RUNTIME_STORE.desk_watchlist_all()
-            _rr_ok = _rr_warn = _rr_bad = 0
-            _bad_syms = []
-            for _e in _wl:
-                _en = _safe_float(_e.get("trigger_price"))
-                _st = _safe_float(_e.get("stop_price"))
-                _tg = _safe_float(_e.get("target_price"))
-                _sd = (_e.get("side") or "long").lower()
-                if not (_en and _st and _tg):
-                    continue
-                if _sd == "long":
-                    _risk   = _en - _st
-                    _reward = _tg - _en
-                else:
-                    _risk   = _st - _en
-                    _reward = _en - _tg
-                if _risk <= 0 or _reward <= 0:
-                    _rr_bad += 1; _bad_syms.append(_e.get("symbol", "?") + "(invalid)")
-                    continue
-                _rr = _reward / _risk
-                if _rr >= 2.0:   _rr_ok   += 1
-                elif _rr >= 1.5: _rr_warn += 1
-                else:            _rr_bad  += 1; _bad_syms.append(f"{_e.get('symbol','?')}({_rr:.1f}R)")
-            _total_rr = _rr_ok + _rr_warn + _rr_bad
-            if _total_rr == 0:
-                yield _emit("Setup R:R", "warn", "no levels saved", "≥2:1 on all setups",
-                            "No entry/stop/target saved on watchlist — add levels in Analyze Watchlist")
-            elif _rr_bad == 0 and _rr_warn == 0:
-                yield _emit("Setup R:R", "pass", f"{_rr_ok}/{_total_rr} setups ≥2:1", "≥2:1 on all setups",
-                            f"All setups have clean 2:1+ R:R — edge is properly structured")
-            elif _rr_bad == 0:
-                yield _emit("Setup R:R", "warn", f"{_rr_ok} ok, {_rr_warn} marginal (1.5-2R)", "≥2:1 on all setups",
-                            f"Some setups below 2:1 — consider adjusting target")
-            else:
-                yield _emit("Setup R:R", "fail", f"{_rr_bad} setups <1.5R or invalid: {', '.join(_bad_syms[:4])}", "≥2:1 on all setups",
-                            "Poor R:R setups present — do not trade sub-1.5R. Recalculate levels.")
-        except Exception as e:
-            yield _emit("Setup R:R", "warn", str(e), "≥2:1", f"R:R check failed: {e}")
-
-        # ── 14. Stop distance sanity (not too tight / not too wide) ────────
-        yield "data: {\"progress\": \"Checking stop placement sanity...\"}\n\n"
-        try:
-            _wl2 = _RUNTIME_STORE.desk_watchlist_all()
-            _stop_ok = _stop_tight = _stop_wide = 0
-            _stop_issues = []
-            for _e in _wl2:
-                _en2 = _safe_float(_e.get("trigger_price"))
-                _st2 = _safe_float(_e.get("stop_price"))
-                # Use capped stop for distance check when stop is intentionally wide (natural PM level)
-                _st2_cap = _safe_float(_e.get("fresh_stop_cap")) or _st2
-                _sd2 = (_e.get("side") or "long").lower()
-                if not (_en2 and _st2 and _en2 > 0):
-                    continue
-                _dist_pct = abs(_en2 - (_st2_cap or _st2)) / _en2 * 100.0
-                _sym2 = _e.get("symbol", "?")
-                if _dist_pct < 0.5:
-                    _stop_tight += 1; _stop_issues.append(f"{_sym2}({_dist_pct:.1f}% too tight)")
-                elif _dist_pct > 12.0:
-                    _stop_wide  += 1; _stop_issues.append(f"{_sym2}({_dist_pct:.1f}% too wide)")
-                else:
-                    _stop_ok += 1
-            _tot2 = _stop_ok + _stop_tight + _stop_wide
-            if _tot2 == 0:
-                yield _emit("Stop placement", "warn", "no stops saved", "0.5%–12% from entry",
-                            "No stops saved — always define your stop before entering")
-            elif not _stop_issues:
-                yield _emit("Stop placement", "pass", f"{_stop_ok}/{_tot2} stops in range (0.5–12%)", "0.5–12% of entry",
-                            "All stops reasonably placed — not too tight, not too wide")
-            else:
-                yield _emit("Stop placement", "warn", f"{len(_stop_issues)} issue(s): {', '.join(_stop_issues[:3])}", "0.5–12% of entry",
-                            "Some stops outside 12% — verify these are natural PM levels with cap applied for sizing.")
-        except Exception as e:
-            yield _emit("Stop placement", "warn", str(e), "0.5–12%", f"Stop check failed: {e}")
-
-        # ── 15. Tape / setup direction alignment ─────────────────────────
-        yield "data: {\"progress\": \"Checking tape alignment with saved setups...\"}\n\n"
-        try:
-            _ctx = _CONTEXT_ENGINE.snapshot() if '_CONTEXT_ENGINE' in globals() else {}
-            _spy_t = _ctx.get("spy_trend_state", "unknown")
-            _qqq_t = _ctx.get("qqq_trend_state", "unknown")
-            _wl3 = _RUNTIME_STORE.desk_watchlist_all()
-            _against = []
-            _aligned  = 0
-            for _e3 in _wl3:
-                _sd3 = (_e3.get("side") or "long").lower()
-                _sym3 = _e3.get("symbol", "?")
-                if _sd3 == "long" and _spy_t == "downtrend" and _qqq_t == "downtrend":
-                    _against.append(f"{_sym3}(L vs ↓tape)")
-                elif _sd3 == "short" and _spy_t == "uptrend" and _qqq_t == "uptrend":
-                    _against.append(f"{_sym3}(S vs ↑tape)")
-                else:
-                    _aligned += 1
-            _total3 = _aligned + len(_against)
-            if _spy_t == "unknown":
-                yield _emit("Tape alignment", "warn", "context engine not ready", "setups match tape",
-                            "Market context unavailable — cannot check tape alignment")
-            elif not _against:
-                yield _emit("Tape alignment", "pass",
-                            f"{_aligned}/{_total3 or 1} setups aligned with SPY({_spy_t})/QQQ({_qqq_t})",
-                            "setups match tape",
-                            "All setups trading with the tape — no counter-trend risk")
-            else:
-                yield _emit("Tape alignment", "warn",
-                            f"{len(_against)} counter-tape: {', '.join(_against[:4])}",
-                            "setups match tape",
-                            "Counter-tape setups present. SPY/QQQ direction conflicts with setup side — needs strong catalyst to override.")
-        except Exception as e:
-            yield _emit("Tape alignment", "warn", str(e), "aligned", f"Tape check failed: {e}")
-
-        # ── 16. Halt danger on watchlist symbols ──────────────────────────
-        yield "data: {\"progress\": \"Checking halt history for watchlist symbols...\"}\n\n"
-        try:
-            _sc_h = _STREAM
-            _wl4  = _RUNTIME_STORE.desk_watchlist_all()
-            _wl_syms4 = {(str(_e4.get("symbol") or "")).upper() for _e4 in _wl4 if _e4.get("symbol")}
-            if _sc_h is None or not _wl_syms4:
-                yield _emit("Halt danger", "warn", "stream not active or no watchlist", "0 multi-halt names",
-                            "Start monitor with watchlist symbols to track halt history")
-            else:
-                _halts = _sc_h.recent_halt_resume_events(max_age_sec=86400)
-                _halt_counts: dict[str, int] = {}
-                for _hev in _halts:
-                    _hsym = str(_hev.get("symbol", "")).upper()
-                    if _hsym in _wl_syms4:
-                        _halt_counts[_hsym] = _halt_counts.get(_hsym, 0) + 1
-                _danger = {s: c for s, c in _halt_counts.items() if c >= 2}
-                _single = {s: c for s, c in _halt_counts.items() if c == 1}
-                if _danger:
-                    _d_str = ", ".join(f"{s}({c}x)" for s, c in sorted(_danger.items(), key=lambda x: -x[1]))
-                    yield _emit("Halt danger", "fail", f"multi-halt today: {_d_str}", "0 multi-halt names",
-                                "Symbols with ≥2 halts are erratic — extreme caution or avoid entirely")
-                elif _single:
-                    _s_str = ", ".join(sorted(_single.keys()))
-                    yield _emit("Halt danger", "warn", f"1 halt each: {_s_str}", "0 multi-halt names",
-                                "Halted once today — proceed with extreme caution, honor stops strictly")
-                else:
-                    yield _emit("Halt danger", "pass", f"0 halts on {len(_wl_syms4)} watchlist symbols", "0 multi-halt names",
-                                "No halt events on watchlist — clean trading environment")
-        except Exception as e:
-            yield _emit("Halt danger", "warn", str(e), "0 halts", f"Halt check failed: {e}")
-
-        # ── 17. Catalyst freshness for active setups ──────────────────────
-        yield "data: {\"progress\": \"Checking news catalyst freshness on setups...\"}\n\n"
-        try:
-            _wl5 = _RUNTIME_STORE.desk_watchlist_all()
-            _stale_cat = []
-            _fresh_cat = []
-            _no_cat    = []
-            _cutoff_fresh = time.time() - 4 * 3600    # 4 hours
-            _cutoff_stale = time.time() - 12 * 3600   # 12 hours
-            for _e5 in _wl5:
-                _sym5 = str(_e5.get("symbol") or "").upper()
-                if not _sym5: continue
-                _news5 = _RUNTIME_STORE.recent_news(symbol=_sym5, limit=5)
-                _latest = max(
-                    (float(n.get("received_at") or 0) for n in _news5),
-                    default=0.0
-                )
-                if _latest >= _cutoff_fresh:
-                    _fresh_cat.append(_sym5)
-                elif _latest >= _cutoff_stale:
-                    _stale_cat.append(_sym5)
-                else:
-                    _no_cat.append(_sym5)
-            if not _wl5:
-                yield _emit("Catalyst freshness", "warn", "no watchlist symbols", "≥1 fresh catalyst",
-                            "Add symbols to desk watchlist to check catalyst freshness")
-            elif _stale_cat or _no_cat:
-                _issues5 = _stale_cat[:3] + _no_cat[:3]
-                yield _emit("Catalyst freshness", "warn",
-                            f"{len(_fresh_cat)} fresh, {len(_stale_cat)} stale, {len(_no_cat)} no news",
-                            "all setups with fresh catalyst",
-                            f"Stale/no catalyst: {', '.join(_issues5[:5])} — momentum may have faded")
-            else:
-                yield _emit("Catalyst freshness", "pass",
-                            f"{len(_fresh_cat)}/{len(_wl5)} setups have fresh catalyst (<4h)",
-                            "all setups with fresh catalyst",
-                            "All active setups have a recent catalyst — edge is supported")
-        except Exception as e:
-            yield _emit("Catalyst freshness", "warn", str(e), "fresh", f"Catalyst check failed: {e}")
-
-        # ── 19. Spread quality on active watchlist ─────────────────────────
-        yield "data: {\"progress\": \"Checking spread quality on watchlist...\"}\n\n"
-        try:
-            _sc3 = _STREAM
-            _wl6 = _RUNTIME_STORE.desk_watchlist_all()
-            _wl_syms6 = [str(_e6.get("symbol") or "").upper() for _e6 in _wl6 if _e6.get("symbol")][:10]
-            if _sc3 is None or not _wl_syms6:
-                yield _emit("Spread quality", "warn", "stream inactive or no watchlist", "spread <0.5%",
-                            "Start monitor with watchlist to check live spreads")
-            else:
-                _wide_spreads = []
-                _ok_spreads   = []
-                _missing      = []
-                for _sym6 in _wl_syms6:
-                    try:
-                        _q6 = _sc3.latest_quote(_sym6)
-                        if _q6 is None:
-                            _missing.append(_sym6)
-                            continue
-                        _raw6 = _q6 if isinstance(_q6, dict) else _q6.__dict__
-                        _bid6 = float(_raw6.get("bid_price") or _raw6.get("bp") or 0)
-                        _ask6 = float(_raw6.get("ask_price") or _raw6.get("ap") or 0)
-                        if _bid6 <= 0 or _ask6 <= 0:
-                            _missing.append(_sym6)
-                            continue
-                        _mid6 = (_bid6 + _ask6) / 2.0
-                        _spd6 = (_ask6 - _bid6) / _mid6 * 100.0
-                        if _spd6 > 0.5:
-                            _wide_spreads.append(f"{_sym6}({_spd6:.2f}%)")
-                        else:
-                            _ok_spreads.append(_sym6)
-                    except Exception:
-                        _missing.append(_sym6)
-                if not _ok_spreads and not _wide_spreads:
-                    yield _emit("Spread quality", "warn", f"no quote data for {_wl_syms6}", "spread <0.5%",
-                                "No live quotes available — stream may be warming up")
-                elif not _wide_spreads:
-                    yield _emit("Spread quality", "pass",
-                                f"{len(_ok_spreads)} symbols spread <0.5%", "spread <0.5%",
-                                "All watchlist spreads tight — good execution quality")
-                else:
-                    yield _emit("Spread quality", "warn",
-                                f"wide: {', '.join(_wide_spreads[:4])}", "spread <0.5%",
-                                "Wide spreads detected — execution cost is elevated. Avoid limit orders near mid.")
-        except Exception as e:
-            yield _emit("Spread quality", "warn", str(e), "<0.5%", f"Spread check failed: {e}")
-
-        # ── 20. Context engine freshness ────────────────────────────────────
-        yield "data: {\"progress\": \"Checking market context engine freshness...\"}\n\n"
-        try:
-            _ctx2 = _CONTEXT_ENGINE.snapshot() if '_CONTEXT_ENGINE' in globals() else {}
-            _spy2    = _ctx2.get("spy_trend_state", "unknown")
-            _qqq2    = _ctx2.get("qqq_trend_state", "unknown")
-            _regime2 = _ctx2.get("volatility_regime", "unknown")
-            _spy_mv  = _ctx2.get("spy_move")
-            _qqq_mv  = _ctx2.get("qqq_move")
-            _gen_at  = _ctx2.get("generated_at")
-            _ctx_age = None
-            if _gen_at:
-                try:
-                    from dateutil.parser import parse as _parse_dt
-                    _ctx_age = time.time() - _parse_dt(_gen_at).timestamp()
-                except Exception:
-                    pass
-            _mv_str = ""
-            if _spy_mv is not None and _qqq_mv is not None:
-                _mv_str = f" | SPY {_spy_mv:+.2f}% QQQ {_qqq_mv:+.2f}%"
-            if _spy2 == "unknown" and _qqq2 == "unknown":
-                yield _emit("Market context", "warn", "not populated", "SPY+QQQ trend known",
-                            "Context engine returned unknown states — may need monitor started")
-            elif _ctx_age is not None and _ctx_age > 120:
-                yield _emit("Market context", "warn", f"stale: {int(_ctx_age)}s old", "fresh <120s",
-                            f"Context last updated {int(_ctx_age)}s ago — data may lag live conditions")
-            else:
-                _age_str = f"{int(_ctx_age)}s old" if _ctx_age is not None else "age unknown"
-                yield _emit("Market context", "pass",
-                            f"SPY={_spy2} QQQ={_qqq2} regime={_regime2} ({_age_str}){_mv_str}",
-                            "SPY+QQQ trend + regime",
-                            f"Context engine live — tape ({_spy2}/{_qqq2}), regime ({_regime2})")
-        except Exception as e:
-            yield _emit("Market context", "warn", str(e), "fresh", f"Context check failed: {e}")
-
         # ── Final score ────────────────────────────────────────────────────
-        # Scoring weights: pass=100, info=95 (known/structural), warn=65 (real issue), fail=0
-        # "info" is for checks that are expected non-green (plan limitations, pre-market state).
         n_pass = sum(1 for r in results if r["status"] == "pass")
-        n_info = sum(1 for r in results if r["status"] == "info")
         n_warn = sum(1 for r in results if r["status"] == "warn")
         n_fail = sum(1 for r in results if r["status"] == "fail")
-        score = round((n_pass * 100 + n_info * 95 + n_warn * 65) / max(len(results), 1))
-        grade = "A" if score >= 90 else ("B" if score >= 75 else ("C" if score >= 55 else "D"))
-        _warn_note = f", {n_warn} warn" if n_warn else ""
-        _info_note = f", {n_info} info" if n_info else ""
-        _fail_note = f", {n_fail} fail" if n_fail else ""
-        summary = (f"{n_pass} pass{_info_note}{_warn_note}{_fail_note} — "
+        score = round((n_pass * 100 + n_warn * 50) / max(len(results), 1))
+        grade = "A" if score >= 85 else ("B" if score >= 70 else ("C" if score >= 50 else "D"))
+        summary = (f"{n_pass} pass, {n_warn} warn, {n_fail} fail — "
                    f"System readiness {score}% ({grade})")
         yield f"data: {{\"done\": true, \"score\": {score}, \"grade\": \"{grade}\", "
         yield f"\"n_pass\": {n_pass}, \"n_warn\": {n_warn}, \"n_fail\": {n_fail}, "
