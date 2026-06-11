@@ -82,6 +82,23 @@ def trend_state_1m(df: pd.DataFrame, vw: pd.Series | None = None, lookback: int 
 
     return {"state": state, "vwap_last": vwap_last, "vwap_delta_pct": vwap_delta_pct, "slope_pct_lookback": slope_pct}
 
+def prev_close_vwap_delta(vwap_last: float, prev_close: float) -> float:
+    """Return (vwap_last - prev_close) / prev_close * 100.
+
+    Measures how far intraday VWAP has drifted from yesterday's close — a positive
+    value means institutions have been absorbing supply above prior close (sustained
+    demand); negative means selling pressure dragged VWAP back below prior close.
+    Raises if inputs are invalid.
+    """
+    if not (isinstance(vwap_last, (int, float)) and isinstance(prev_close, (int, float))):
+        raise TypeError("vwap_last and prev_close must be numeric")
+    if prev_close <= 0:
+        raise ValueError(f"prev_close must be > 0, got {prev_close}")
+    if vwap_last <= 0:
+        raise ValueError(f"vwap_last must be > 0, got {vwap_last}")
+    return float((vwap_last - prev_close) / prev_close * 100.0)
+
+
 def avg_daily_volume(daily: pd.DataFrame, window: int = 20) -> float | None:
     if daily is None or daily.empty or len(daily) < window:
         return None

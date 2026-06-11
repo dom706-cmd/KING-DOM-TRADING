@@ -167,6 +167,14 @@ class Candidate:
     extended_gap_warning: bool = False   # True when gap >50% and long grade capped at C
     news_headline: str | None = None
     news_age_hours: float | None = None
+    # Anchored VWAP features
+    prev_close_vwap_delta_pct: float | None = None   # (vwap - prev_close) / prev_close * 100
+    or_midpoint_vs_vwap_pct: float | None = None     # (or_mid - vwap) / vwap * 100
+    # Market context at scan time (SPY/QQQ/breadth from context engine)
+    spy_intraday_ret: float | None = None
+    qqq_intraday_ret: float | None = None
+    market_breadth_score: float | None = None
+    session_archetype: str | None = None
 
 
 @dataclass
@@ -285,7 +293,18 @@ def _stream_orb_candidate(stream_cache: Any, symbol: str, cfg: ORBConfig, *, ses
     elif short_valid and not long_valid:
         best_side = "short"
     else:
-        best_side = "long" if above_vwap else "short"
+        _l_trig = long_valid and last_price >= long_entry
+        _s_trig = short_valid and last_price <= short_entry
+        if _l_trig and not _s_trig:
+            best_side = "long"
+        elif _s_trig and not _l_trig:
+            best_side = "short"
+        elif above_vwap is True:
+            best_side = "long"
+        elif above_vwap is False:
+            best_side = "short"
+        else:
+            best_side = "long" if long_risk <= short_risk else "short"
 
     entry = float(long_entry if best_side == "long" else short_entry)
     stop = float(long_stop if best_side == "long" else short_stop)
@@ -1048,21 +1067,10 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
         ]
         return not opening_band.empty
 
-    if intraday_session.empty or not _has_opening_print(intraday_session):
-        try:
-            fallback = provider.get_bars(
-                BarsRequest(
-                    symbol=symbol,
-                    interval="1m",
-                    period="5d",
-                    include_prepost=False,
-                )
-            )
-        except Exception as e:
-            code, _ = _classify_intraday_exception(e)
-            raise RuntimeError(code) from e
-
-        intraday_session = _normalize_intraday_session(fallback)
+    if intraday_session.empty:
+        raise RuntimeError("intraday_session_empty")
+    if not _has_opening_print(intraday_session):
+        raise RuntimeError("no_opening_print")
 
     if intraday_session.empty:
         if range_err is not None:
@@ -1094,20 +1102,15 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
     if not (cfg.min_or_range_pct <= or_range_pct <= cfg.max_or_range_pct):
         raise ValueError("filtered_or_range")
 
-    try:
-        vw = vwap(intraday)
-        vwap_last = float(vw.iloc[-1])
-        above_vwap = bool(last_price > vwap_last)
-        tr = trend_state_1m(intraday, vw=vw, lookback=15)
-        trend_state = str(tr.get("state"))
-        trend_slope_pct = tr.get("slope_pct_lookback")
-        vwap_delta_pct = tr.get("vwap_delta_pct")
-    except Exception:
-        above_vwap = None
-        vwap_last = None
-        vwap_delta_pct = None
-        trend_state = None
-        trend_slope_pct = None
+    vw = vwap(intraday)
+    if vw is None or vw.empty:
+        raise RuntimeError("vwap_compute_failed")
+    vwap_last = float(vw.iloc[-1])
+    above_vwap = bool(last_price > vwap_last)
+    tr = trend_state_1m(intraday, vw=vw, lookback=15)
+    trend_state = str(tr.get("state"))
+    trend_slope_pct = tr.get("slope_pct_lookback")
+    vwap_delta_pct = tr.get("vwap_delta_pct")
 
     # Daily history for avg20 dollar vol and RVOL
     daily = provider.get_daily_history(symbol, period=cfg.prefilter_period).sort_index()
@@ -1153,6 +1156,17 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
     prev_day_change_pct = ((prev_close - prev_prev_close) / prev_prev_close * 100.0) if (prev_close is not None and prev_prev_close is not None and prev_prev_close > 0) else None
     dist_above_prev_day_high_pct = ((last_price - prev_day_high) / prev_day_high * 100.0) if (prev_day_high is not None and prev_day_high > 0) else None
     dist_above_20d_high_pct = ((last_price - recent_20d_high) / recent_20d_high * 100.0) if (recent_20d_high is not None and recent_20d_high > 0) else None
+
+    # Anchored VWAP features
+    from scanner.indicators import prev_close_vwap_delta
+    _prev_close_vwap_delta_pct: float | None = None
+    if prev_close is not None and prev_close > 0 and vwap_last is not None and vwap_last > 0:
+        _prev_close_vwap_delta_pct = prev_close_vwap_delta(vwap_last, prev_close)
+    _or_mid = (or_high + or_low) / 2.0
+    _or_midpoint_vs_vwap_pct: float | None = (
+        (_or_mid - vwap_last) / vwap_last * 100.0
+        if vwap_last is not None and vwap_last > 0 else None
+    )
 
     # Dual-side ORB plans (breakout + breakdown)
     buf_h = _buffer(or_high, cfg)
@@ -1206,15 +1220,19 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
             raise ValueError("filtered_risk_per_share")
         soft_fail_reasons.append("filtered_no_valid_plan")
 
-    # Choose best side (simple heuristic: prefer side with larger RVOL alignment)
-    # If both valid, prefer above-VWAP for long, below-VWAP for short; otherwise prefer tighter risk.
+    # Choose best side: prefer the triggered side; use VWAP as tiebreaker only.
     if long_seed_valid and not short_seed_valid:
         best_side = "long"
     elif short_seed_valid and not long_seed_valid:
         best_side = "short"
     else:
-        # both seed-valid
-        if above_vwap is True:
+        _l_trig = long_seed_valid and last_price >= long_entry
+        _s_trig = short_seed_valid and last_price <= short_entry
+        if _l_trig and not _s_trig:
+            best_side = "long"
+        elif _s_trig and not _l_trig:
+            best_side = "short"
+        elif above_vwap is True:
             best_side = "long"
         elif above_vwap is False:
             best_side = "short"
@@ -1395,6 +1413,8 @@ def build_orb_plan(provider: AlpacaProvider, symbol: str, cfg: ORBConfig, *, ses
         prev_day_change_pct=prev_day_change_pct,
         dist_above_prev_day_high_pct=dist_above_prev_day_high_pct,
         dist_above_20d_high_pct=dist_above_20d_high_pct,
+        prev_close_vwap_delta_pct=_prev_close_vwap_delta_pct,
+        or_midpoint_vs_vwap_pct=_or_midpoint_vs_vwap_pct,
     )
 
 def _passes_orb_live_execution_gate(
@@ -1416,7 +1436,7 @@ def _passes_orb_live_execution_gate(
     entry = float(c.entry or 0.0)
     stop = float(c.stop or 0.0)
     price = float(c.last_price or 0.0)
-    ml_score = float(c.ml_score or 0.0) if c.ml_score is not None else 0.0
+    ml_score = float(c.ml_score) if c.ml_score is not None else None
 
     risk = max(abs(entry - stop), 1e-9)
     if side == "long":
@@ -1437,7 +1457,7 @@ def _passes_orb_live_execution_gate(
     if mode == "breakout_now":
         if phase != "open":
             return False, "orb_breakout_phase_blocked"
-        if ml_score < float(breakout_now_min_ml_score):
+        if ml_score is not None and ml_score < float(breakout_now_min_ml_score):
             return False, "orb_breakout_ml_too_low"
         if chase_r > float(breakout_now_max_chase_r):
             return False, "orb_breakout_too_extended"
@@ -1447,7 +1467,7 @@ def _passes_orb_live_execution_gate(
             return False, "orb_breakout_not_triggered"
         return True, None
 
-    if ml_score < float(retest_min_ml_score):
+    if ml_score is not None and ml_score < float(retest_min_ml_score):
         return False, "orb_retest_ml_too_low"
     if chase_r > float(retest_max_chase_r):
         return False, "orb_retest_too_extended"
@@ -1563,8 +1583,10 @@ def _pick_regime_profile(name: str | None, candidates: list[Candidate]) -> dict:
             selected = "powerhour"
     else:
         selected = requested
-    avg_rvol = (sum(float(c.rvol or 0.0) for c in candidates) / len(candidates)) if candidates else 0.0
-    avg_or = (sum(float(c.or_range_pct or 0.0) for c in candidates) / len(candidates)) if candidates else 0.0
+    _rvol_vals = [float(c.rvol) for c in candidates if c.rvol is not None]
+    _or_vals   = [float(c.or_range_pct) for c in candidates if c.or_range_pct is not None]
+    avg_rvol = sum(_rvol_vals) / len(_rvol_vals) if _rvol_vals else 0.0
+    avg_or   = sum(_or_vals)   / len(_or_vals)   if _or_vals   else 0.0
     profiles = {
         "extended": {
             "score_weights": {"ml": 1.0, "sentiment": 0.6, "catalyst": 1.1, "rule": 0.15},
@@ -1754,7 +1776,7 @@ def _passes_orb_directional_gate(
     min_pct_over_vwap: float = 1.0,
     allow_reclaim: bool = True,
     reject_chop: bool = True,
-    min_ml_score: float = 0.35,
+    min_ml_score: float = 0.25,
     max_chase_r: float = 0.35,
 ) -> tuple[bool, str | None]:
     side = (c.best_side or '').lower()
@@ -1839,7 +1861,7 @@ def _passes_orb_discovery_gate(
     min_pct_over_vwap: float = 1.0,
     allow_reclaim: bool = True,
     reject_chop: bool = True,
-    min_ml_score: float = 0.35,
+    min_ml_score: float = 0.25,
     min_combined: float = 0.55,
     min_grade: str = 'B',
 ) -> tuple[bool, list[str]]:
@@ -2107,7 +2129,8 @@ def _apply_orb_enrichment_to_candidate(c: Candidate, *, sentiment_map: dict[str,
 
 
 def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, catalyst_alpha: float, regime_selected: str | None) -> dict[str, float | str | None]:
-    ml_base = float(c.ml_score or 0.0) if use_ml else 0.0
+    has_ml = use_ml and c.ml_score is not None and math.isfinite(float(c.ml_score))
+    ml_base = float(c.ml_score) if has_ml else None
     rule_norm = _candidate_setup_rule_score(c)
     tape_q = _tape_proxy_score(c)
     align_q = _alignment_score(c)
@@ -2138,8 +2161,19 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
     elif category == 'reversal':
         weights.update({'rule': 0.24, 'tape': 0.16, 'align': 0.18, 'sent': 0.02, 'cat': 0.02})
 
+    if ml_base is None:
+        # ML unavailable — redistribute its weight proportionally across rule/tape/align
+        ml_w = weights['ml']
+        non_ml_sum = weights['rule'] + weights['tape'] + weights['align']
+        if non_ml_sum > 0:
+            scale = (non_ml_sum + ml_w) / non_ml_sum
+            weights['rule'] *= scale
+            weights['tape'] *= scale
+            weights['align'] *= scale
+        weights['ml'] = 0.0
+
     score = (
-        weights['ml'] * ml_base +
+        (weights['ml'] * ml_base if ml_base is not None else 0.0) +
         weights['rule'] * rule_norm +
         weights['tape'] * tape_q +
         weights['align'] * align_q +
@@ -2637,7 +2671,7 @@ def scan_symbols(
     ml_scores: Dict[str, float] = {}
     ml_bucket: Dict[str, str] = {}
     if use_ml and candidates:
-        ml_out = score_orb_candidates(candidates, provider=provider)
+        ml_out = score_orb_candidates(candidates, provider=provider, strategy="orb")
         ml_scores = dict(ml_out.get("scores") or {})
         ml_bucket = dict(ml_out.get("bucket_by_symbol") or {})
         data_failures.extend(list(ml_out.get("failures") or []))
@@ -4702,7 +4736,7 @@ def scan_gap_and_go_symbols(
     if use_ml and candidates:
         try:
             from ml.orb_model_service import score_orb_candidates as _score
-            result = _score(candidates, provider=base_provider)
+            result = _score(candidates, provider=base_provider, strategy="gap_and_go")
             ml_scores = result.get("scores", {})
             for orig in candidates:
                 orig.ml_score = ml_scores.get(orig.symbol.upper())
@@ -4716,7 +4750,7 @@ def scan_gap_and_go_symbols(
             sent_map = svc.score_symbols(syms_for_sent) or {}
             for c in candidates:
                 rec = sent_map.get(c.symbol.upper()) or {}
-                c.sentiment_score = float(rec.get("score") or 0.0) or None
+                c.sentiment_score = float(rec.get("score") or 0.0) if rec.get("score") is not None else None
         except Exception:
             pass
 
@@ -5710,7 +5744,7 @@ def scan_atr_expansion_symbols(
     if use_ml and candidates:
         try:
             from ml.orb_model_service import score_orb_candidates as _score
-            result = _score(candidates, provider=provider)
+            result = _score(candidates, provider=provider, strategy="atr_expansion")
             ml_scores = result.get("scores", {})
             for c in candidates:
                 c.ml_score = ml_scores.get(c.symbol.upper())
@@ -5724,7 +5758,7 @@ def scan_atr_expansion_symbols(
             sent_map = svc.score_symbols([c.symbol for c in candidates]) or {}
             for c in candidates:
                 rec = sent_map.get(c.symbol.upper()) or {}
-                c.sentiment_score = float(rec.get("score") or 0.0) or None
+                c.sentiment_score = float(rec.get("score") or 0.0) if rec.get("score") is not None else None
         except Exception:
             pass
 
@@ -6051,7 +6085,7 @@ def scan_eod_momentum_symbols(
     if use_ml and top:
         try:
             from ml.orb_model_service import score_orb_candidates as _score_ml
-            ml_result = _score_ml(top, provider=provider)
+            ml_result = _score_ml(top, provider=provider, strategy="eod_momentum")
             ml_scores = ml_result.get("scores", {})
             for c in top:
                 c.ml_score = ml_scores.get(c.symbol.upper())
@@ -6064,7 +6098,7 @@ def scan_eod_momentum_symbols(
             sent_map = svc.score_symbols([c.symbol for c in top]) or {}
             for c in top:
                 rec = sent_map.get(c.symbol.upper()) or {}
-                c.sentiment_score = float(rec.get("score") or 0.0) or None
+                c.sentiment_score = float(rec.get("score") or 0.0) if rec.get("score") is not None else None
         except Exception:
             pass
 

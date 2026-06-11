@@ -173,6 +173,10 @@ def resolve_orb_bucket_path(price: float, *, rvol: float | None = None) -> Path:
     return resolve_orb_model_b_path() if float(price) < 30.0 else resolve_orb_model_a_path()
 
 
+def resolve_orb_outcomes_path() -> Path:
+    return resolve_model_path("ORB_MODEL_OUTCOMES_PATH", "models/orb_ranker_outcomes.pkl")
+
+
 def resolve_rr_model_path() -> Path:
     return resolve_model_path("RR_MODEL_PATH", "models/range_reversion_gold.pkl")
 

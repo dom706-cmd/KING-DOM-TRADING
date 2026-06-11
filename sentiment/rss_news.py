@@ -1,14 +1,13 @@
-
 from __future__ import annotations
 
-import time
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 import requests
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from xml.etree import ElementTree as ET
+
+from sentiment.finbert_sentiment import score_headlines
 
 
 @dataclass
@@ -19,16 +18,16 @@ class RSSItem:
 
 
 class RSSNewsSentiment:
-    """Free sentiment via Google News RSS + VADER.
+    """Financial sentiment via Google News RSS + FinBERT.
 
     Tenants:
       - Real scrape or real failure (raises on HTTP errors)
+      - FinBERT scoring — no VADER, no bag-of-words
       - No fake data
     """
 
     def __init__(self, session: requests.Session | None = None):
         self.session = session or requests.Session()
-        self.analyzer = SentimentIntensityAnalyzer()
 
     @staticmethod
     def _rss_url(symbol: str) -> str:
@@ -58,10 +57,7 @@ class RSSNewsSentiment:
     def score(self, symbol: str, limit: int = 10) -> Tuple[float, List[Dict[str, Any]]]:
         items = self.fetch_headlines(symbol, limit=limit)
         if not items:
-            # No news isn't fake; treat as neutral with empty headlines.
-            return 0.0, []
-        scores = []
-        for it in items:
-            s = self.analyzer.polarity_scores(it["title"])["compound"]
-            scores.append(float(s))
-        return float(sum(scores) / max(1, len(scores))), items
+            raise RuntimeError(f"No news found for {symbol}")
+        titles = [it["title"] for it in items]
+        s = score_headlines(titles)
+        return float(s), items

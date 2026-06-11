@@ -62,3 +62,31 @@ class SentimentService:
 
     def get(self, symbol: str) -> SentimentBundle:
         return self.fetch(symbol, limit=10)
+
+    def score_symbols(self, symbols: list, limit: int = 5) -> dict:
+        """Return {SYMBOL: {"score": float, "provider": str}, ...} for each symbol.
+        Symbols that fail or have no news return a neutral score of 0.0.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        result: dict = {}
+        syms = [s.strip().upper() for s in (symbols or []) if s and s.strip()]
+        if not syms:
+            return result
+
+        def _score_one(sym: str):
+            try:
+                bundle = self.fetch(sym, limit=limit)
+                return sym, {"score": float(bundle.score), "provider": bundle.provider}
+            except Exception:
+                return sym, {"score": None, "provider": "error"}
+
+        workers = min(len(syms), 12)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(_score_one, s): s for s in syms}
+            for fut in as_completed(futs):
+                try:
+                    sym, rec = fut.result()
+                    result[sym] = rec
+                except Exception:
+                    pass
+        return result

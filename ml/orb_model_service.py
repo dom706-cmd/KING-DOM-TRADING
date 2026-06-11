@@ -3,8 +3,53 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
-from ml.model_registry import env_orb_strict_ml, resolve_orb_bucket_path
+from ml.model_registry import env_orb_strict_ml, resolve_orb_bucket_path, resolve_orb_outcomes_path
 from ml.ranker import ORBRanker, RankerConfig
+
+
+_STRATEGY_MODEL_NAMES: dict[str, str] = {
+    "orb": "orb_ranker_outcomes.pkl",
+    "parabolic": "parabolic_ranker_outcomes.pkl",
+    "atr_expansion": "atr_expansion_ranker_outcomes.pkl",
+    "eod_momentum": "eod_momentum_ranker_outcomes.pkl",
+}
+
+
+def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
+    """Return path to the strategy-specific outcomes model if usable (AUC >= 0.52, n >= 30).
+
+    Falls back to the generic orb outcomes model if no strategy-specific one exists.
+    """
+    import joblib
+
+    def _check(path: Path) -> Path | None:
+        if not path.exists():
+            return None
+        try:
+            blob = joblib.load(path)
+            if not isinstance(blob, dict) or "model" not in blob or "feature_names" not in blob:
+                return None
+            cv_score = blob.get("cv_roc_auc_mean")
+            if cv_score is not None and float(cv_score) < 0.52:
+                return None
+            if int(blob.get("n_samples", 0)) < 30:
+                return None
+            return path
+        except Exception:
+            return None
+
+    _models_dir = resolve_orb_outcomes_path().parent
+
+    # Try strategy-specific model first
+    strat_key = (strategy or "orb").lower().strip()
+    filename = _STRATEGY_MODEL_NAMES.get(strat_key)
+    if filename:
+        p = _check(_models_dir / filename)
+        if p is not None:
+            return p
+
+    # Fall back to generic orb outcomes model
+    return _check(resolve_orb_outcomes_path())
 
 
 class OrbModelSelectionError(RuntimeError):
@@ -61,9 +106,12 @@ def _normalize_candidate_ref(item: Any) -> dict[str, Any]:
     }
 
 
-def score_orb_candidates(candidates: Iterable[Any], *, provider: Any) -> dict[str, Any]:
+def score_orb_candidates(candidates: Iterable[Any], *, provider: Any, strategy: str = "orb") -> dict[str, Any]:
     normalized = [_normalize_candidate_ref(c) for c in candidates]
     strict = bool(env_orb_strict_ml())
+
+    # Use strategy-specific outcomes model if available and validated
+    outcomes_path = _outcomes_model_is_usable(strategy=strategy)
 
     grouped: dict[tuple[str, Path], list[str]] = {}
     bucket_by_symbol: dict[str, str] = {}
@@ -71,8 +119,12 @@ def score_orb_candidates(candidates: Iterable[Any], *, provider: Any) -> dict[st
 
     for item in normalized:
         symbol = str(item["symbol"])
-        bucket = str(item["bucket"])
-        model_path = Path(item["model_path"]).resolve()
+        if outcomes_path is not None:
+            bucket = "outcomes"
+            model_path = outcomes_path.resolve()
+        else:
+            bucket = str(item["bucket"])
+            model_path = Path(item["model_path"]).resolve()
         bucket_by_symbol[symbol] = bucket
         model_path_by_symbol[symbol] = str(model_path)
         grouped.setdefault((bucket, model_path), []).append(symbol)
