@@ -104,8 +104,8 @@ def scan_parabolic_symbols(
             import time as _time_mod
             all_syms = [s for s in fetch_us_equity_symbols(UniverseConfig()) if s not in seen]
             _universe_size = len(all_syms)
-            SNAP_BATCH = 200  # smaller batches — discard each after extracting movers
-            TIME_BUDGET = 180.0  # seconds
+            SNAP_BATCH = 1000  # Alpaca supports up to 1000 per snapshot call
+            TIME_BUDGET = 600.0  # 10 minutes — enough to cover full ~13k universe
             t0 = _time_mod.monotonic()
             move_map: dict[str, float] = {}
             _snap_checked = 0
@@ -115,7 +115,7 @@ def scan_parabolic_symbols(
                 batch = all_syms[i:i + SNAP_BATCH]
                 _snap_checked += len(batch)
                 try:
-                    snaps = base_provider.get_snapshots(batch, feed="sip", timeout_s=10.0)
+                    snaps = base_provider.get_snapshots(batch, feed="sip", timeout_s=30.0)
                 except Exception:
                     snaps = {}
                 # Extract movers then immediately discard the full snapshot dict
