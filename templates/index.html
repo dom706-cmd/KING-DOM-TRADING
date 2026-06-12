@@ -1121,7 +1121,7 @@ th {
           <span class="tag">Category</span>
           <select id="candCategoryFilter"><option value="all">All</option><option value="momentum">Momentum</option><option value="news">News</option><option value="reversal">Reversal</option><option value="liquidity">Liquidity</option></select>
           <span class="tag">Min Grade</span>
-          <select id="candMinGradeFilter"><option value="0">All</option><option value="35">C+ (35)</option><option value="56" selected>B+ (56)</option><option value="78">A only (78)</option></select>
+          <select id="candMinGradeFilter"><option value="0" selected>All</option><option value="35">C+ (35)</option><option value="56">B+ (56)</option><option value="78">A only (78)</option></select>
           <button type="button" id="addAllBPlusBtn" title="Add all B+ grade candidates to the desk watchlist" style="margin-left:12px;padding:4px 14px;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;">+ Add All B+ to Watchlist</button>
           <span id="addAllBPlusStatus" style="font-size:11px;margin-left:8px;color:#94a3b8;"></span>
           <button type="button" id="audioAlertToggle" title="Toggle audio alerts" style="margin-left:10px;padding:4px 10px;background:rgba(99,202,183,0.1);color:#6cc7b4;border:1px solid rgba(99,202,183,0.3);border-radius:5px;cursor:pointer;font-size:13px;">🔔</button>
@@ -1791,7 +1791,7 @@ window.PositionDeskSeed = [
     const limitRaw = String((limEl && limEl.value) || localStorage.getItem(CAND_FILTER_LIMIT_KEY) || "10").toLowerCase();
     const limit = (limitRaw === "all") ? "all" : (String(parseInt(limitRaw,10) || 10));
     const category = String((catEl && catEl.value) || localStorage.getItem(CAND_FILTER_CATEGORY_KEY) || "all").toLowerCase();
-    const minGrade = parseInt((mgEl && mgEl.value) || localStorage.getItem(CAND_FILTER_MINGRADE_KEY) || "56", 10);
+    const minGrade = parseInt((mgEl && mgEl.value != null ? mgEl.value : null) ?? localStorage.getItem(CAND_FILTER_MINGRADE_KEY) ?? "0", 10);
     return { side: (side==="long"||side==="short"||side==="all")?side:"all", query, limit, category, minGrade };
   }
 
@@ -4383,6 +4383,10 @@ async function poll(jobId) {
       runCandidates = resSummary.candidates.map(normalizeScanCandidate).filter(c => c.symbol);
     } else if (found) {
       runCandidates = await fetchCandidatesForJob(jobId);
+    }
+    // When trade-ready=0, fall through to seed_candidates so they still appear in the table
+    if (!runCandidates.length && Array.isArray(resSummary.seed_candidates) && resSummary.seed_candidates.length){
+      runCandidates = resSummary.seed_candidates.map(normalizeScanCandidate).filter(c => c.symbol);
     }
     // Merge: existing candidates persist; new scan results update or add to them.
     (window.mergeCandidatesIntoCache || window.saveCandidatesCache || (()=>{}))(runCandidates);
