@@ -6012,15 +6012,16 @@ def scan_eod_momentum_symbols(
                 reject_counts["filtered_mixed_signal"] += 1
                 continue
 
-            # Entry plan around Friday's range
+            # Entry: break above/below prior session's range (0.5% buffer = real confirmation)
+            # Stop: far side of prior session's range + 0.5% buffer
             if direction == "LONG":
-                entry          = round(high * 1.001, 4)
-                stop           = round(low, 4)
+                entry          = round(high * 1.005, 4)
+                stop           = round(low * 0.995, 4)
                 risk_per_share = entry - stop
                 target_2r      = round(entry + 2 * risk_per_share, 4)
             else:
-                entry          = round(low * 0.999, 4)
-                stop           = round(high, 4)
+                entry          = round(low * 0.995, 4)
+                stop           = round(high * 1.005, 4)
                 risk_per_share = stop - entry
                 target_2r      = round(entry - 2 * risk_per_share, 4)
 
