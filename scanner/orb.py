@@ -5873,6 +5873,7 @@ def scan_eod_momentum_symbols(
     On Saturdays, resolve_session_date() returns Friday automatically.
     """
     from datetime import datetime, timezone, timedelta
+    import numpy as np
 
     if session_date is None:
         session_date = resolve_session_date(provider)
@@ -6012,16 +6013,28 @@ def scan_eod_momentum_symbols(
                 reject_counts["filtered_mixed_signal"] += 1
                 continue
 
-            # Entry: break above/below prior session's range (0.5% buffer = real confirmation)
-            # Stop: far side of prior session's range + 0.5% buffer
+            # ATR from the lookback window — used for entry/stop so they're always a
+            # meaningful distance from close regardless of close's position in the range
+            lb_h = lb["high"].astype(float).values
+            lb_l = lb["low"].astype(float).values
+            lb_c = lb["close"].astype(float).values
+            if len(lb_c) >= 2:
+                _tr = np.maximum(lb_h[1:] - lb_l[1:],
+                      np.maximum(np.abs(lb_h[1:] - lb_c[:-1]),
+                                 np.abs(lb_l[1:] - lb_c[:-1])))
+                atr20 = float(_tr.mean()) if len(_tr) > 0 else close * 0.02
+            else:
+                atr20 = close * 0.02
+
+            # Entry: 0.5 ATR beyond close; stop: 1.5 ATR on the other side
             if direction == "LONG":
-                entry          = round(high * 1.005, 4)
-                stop           = round(low * 0.995, 4)
+                entry          = round(close + 0.5 * atr20, 4)
+                stop           = round(close - 1.5 * atr20, 4)
                 risk_per_share = entry - stop
                 target_2r      = round(entry + 2 * risk_per_share, 4)
             else:
-                entry          = round(low * 0.995, 4)
-                stop           = round(high * 1.005, 4)
+                entry          = round(close - 0.5 * atr20, 4)
+                stop           = round(close + 1.5 * atr20, 4)
                 risk_per_share = stop - entry
                 target_2r      = round(entry - 2 * risk_per_share, 4)
 
