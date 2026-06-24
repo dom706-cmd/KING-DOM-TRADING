@@ -1422,9 +1422,9 @@ def _passes_orb_live_execution_gate(
     *,
     exec_style: str = "retest",
     min_minutes_after_open: int = 10,
-    breakout_now_min_ml_score: float = 0.45,
+    breakout_now_min_ml_score: float = 0.15,
     breakout_now_max_chase_r: float = 0.10,
-    retest_min_ml_score: float = 0.40,
+    retest_min_ml_score: float = 0.15,
     retest_max_chase_r: float = 0.20,
     retest_max_distance_r: float = 0.20,
 ) -> tuple[bool, str | None]:
@@ -1894,9 +1894,9 @@ def _passes_orb_trade_ready_gate(
     *,
     exec_style: str = "retest",
     min_minutes_after_open: int = 10,
-    breakout_now_min_ml_score: float = 0.45,
+    breakout_now_min_ml_score: float = 0.15,
     breakout_now_max_chase_r: float = 0.10,
-    retest_min_ml_score: float = 0.40,
+    retest_min_ml_score: float = 0.15,
     retest_max_chase_r: float = 0.20,
     directional_max_chase_r: float = 0.35,
 ) -> tuple[bool, list[str]]:
@@ -2181,7 +2181,7 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
         weights['cat'] * cat_term
     )
     c.regime_profile = str(regime_selected)
-    c.regime_adjustment = float(round(score - ml_base, 6))
+    c.regime_adjustment = float(round(score - (ml_base if ml_base is not None else 0.0), 6))
     c.combined_score = float(round(score, 6))
 
     _cconf = c.catalyst_confidence
@@ -2218,7 +2218,7 @@ def _score_orb_candidate(c: Candidate, *, use_ml: bool, sentiment_alpha: float, 
         c.extended_gap_warning = False
 
     return {
-        'ml_base': round(ml_base, 6),
+        'ml_base': round(ml_base, 6) if ml_base is not None else None,
         'rule_norm': round(rule_norm, 6),
         'tape_q': round(tape_q, 6),
         'align_q': round(align_q, 6),
@@ -2721,11 +2721,11 @@ def scan_symbols(
     min_vwap_enabled = bool(kwargs.get("min_vwap_enabled", True))
     min_vwap_value = float(kwargs.get("min_pct_over_vwap", 1.0))
     orb_min_minutes_after_open_value = int(kwargs.get("orb_min_minutes_after_open", 10))
-    orb_breakout_now_min_ml_value = float(kwargs.get("orb_breakout_now_min_ml_score", 0.45))
+    orb_breakout_now_min_ml_value = float(kwargs.get("orb_breakout_now_min_ml_score", 0.15))
     orb_breakout_now_max_chase_r_value = float(kwargs.get("orb_breakout_now_max_chase_r", 0.10))
-    orb_retest_min_ml_value = float(kwargs.get("orb_retest_min_ml_score", 0.40))
+    orb_retest_min_ml_value = float(kwargs.get("orb_retest_min_ml_score", 0.15))
     orb_retest_max_chase_r_value = float(kwargs.get("orb_retest_max_chase_r", 0.20))
-    orb_min_ml_value = float(kwargs.get("orb_min_ml_score", 0.35))
+    orb_min_ml_value = float(kwargs.get("orb_min_ml_score", 0.10))
     orb_max_chase_r_value = float(kwargs.get("orb_max_chase_r", 0.35))
 
     monitor_first_mode = bool(kwargs.get("monitor_first_mode", True))
@@ -5117,10 +5117,15 @@ def scan_halt_resume_symbols(
                                               from_d=session_date, to_d=session_date)
         except Exception:
             pass
-        # Try live price first, fall back to last bar close
+        # Try live price first (age-checked, real-time only), fall back to last bar close.
         last_price: float | None = None
-        if stream_cache is not None and hasattr(stream_cache, "latest_trade_price"):
-            last_price = stream_cache.latest_trade_price(sym)
+        if stream_cache is not None:
+            try:
+                _tp = latest_trade_payload(stream_cache, sym, max_age_sec=45.0)
+                last_price = float(_tp["price"])
+            except Exception:
+                # Stale/missing stream trade — do not use it; fall through to bar close.
+                last_price = None
         if last_price is None and bars_hr is not None and len(bars_hr) > 0:
             last_price = float(bars_hr.iloc[-1]["close"])
         if last_price is None:
@@ -5141,6 +5146,23 @@ def scan_halt_resume_symbols(
         short_entry_hr = round(last_price * 0.998, 4)
         long_risk = abs(long_entry_hr - long_stop_hr)
         short_risk = abs(short_entry_hr - short_stop_hr)
+        # Trade direction from price vs session VWAP — a halt that resumes DOWN
+        # must not default to a long. Mirrors float_rotation/atr_expansion which
+        # pick side by price-vs-VWAP. Fall back to LONG only if VWAP is unavailable.
+        hr_direction = "LONG"
+        try:
+            if bars_hr is not None and len(bars_hr) > 0:
+                _vb = bars_hr.copy()
+                _vb.columns = [str(col).lower() for col in _vb.columns]
+                if {"high", "low", "close", "volume"}.issubset(set(_vb.columns)):
+                    _tp = (_vb["high"].astype(float) + _vb["low"].astype(float) + _vb["close"].astype(float)) / 3.0
+                    _vol = _vb["volume"].astype(float)
+                    _vsum = float(_vol.sum())
+                    if _vsum > 0:
+                        _vwap = float((_tp * _vol).sum() / _vsum)
+                        hr_direction = "SHORT" if last_price < _vwap else "LONG"
+        except Exception:
+            hr_direction = "LONG"
         age_min = round((now - float(ev.get("received_at", now))) / 60.0, 1)
         c = ScanCandidate(
             symbol=sym,
@@ -5149,7 +5171,7 @@ def scan_halt_resume_symbols(
             rvol=None,
             dollar_volume=None,
             or_high=None, or_low=None, or_pct=None,
-            best_direction="LONG",
+            best_direction=hr_direction,
             long_trigger=long_entry_hr,
             short_trigger=short_entry_hr,
             long_stop=long_stop_hr,
@@ -5158,7 +5180,7 @@ def scan_halt_resume_symbols(
             short_target_2r=round(short_entry_hr - 2 * short_risk, 4),
             long_shares=None, short_shares=None,
             long_notional=None, short_notional=None,
-            risk_per_share=round(long_risk, 4),
+            risk_per_share=round(short_risk if hr_direction == "SHORT" else long_risk, 4),
             ml_score=None, combined_score=None, sentiment_score=None,
             tradable_now=True, chase_r=0.0,
             notes=(f"halt_resume code={ev.get('status_code','')} "
@@ -5632,14 +5654,19 @@ def _snapshot_prefilter(
     try:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockSnapshotRequest
+        from alpaca.data.enums import DataFeed
         key, sec = _get_alpaca_creds(provider)
         client = StockHistoricalDataClient(api_key=key, secret_key=sec)
+        # Real-time only: pin SIP (alpaca-py defaults snapshots to IEX, which is
+        # partial/delayed). Honor ALPACA_DATA_FEED if explicitly set, else SIP.
+        _feed_env = (os.getenv("ALPACA_DATA_FEED") or "sip").strip().lower()
+        _snap_feed = DataFeed.IEX if _feed_env == "iex" else DataFeed.SIP
         survivors: list[str] = []
         date_verified = False
         for i in range(0, len(symbols), 100):
             batch = symbols[i:i + 100]
             try:
-                snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch))
+                snaps = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=batch, feed=_snap_feed))
                 for sym, snap in snaps.items():
                     db = snap.daily_bar
                     pb = snap.previous_daily_bar

@@ -165,9 +165,9 @@ def _pm_trend(pm_last: float | None, pm_high: float | None,
 # ── Grade from total score ────────────────────────────────────────────────────
 
 def _letter_grade(score: int) -> dict:
-    if   score >= 72: return {"grade": "A", "color": "#4ade80", "size_mult": 1.00,
+    if   score >= 78: return {"grade": "A", "color": "#4ade80", "size_mult": 1.00,
                                "advice": "Full conviction — lead with this name. Prioritize your max R."}
-    elif score >= 52: return {"grade": "B", "color": "#fbbf24", "size_mult": 0.50,
+    elif score >= 56: return {"grade": "B", "color": "#fbbf24", "size_mult": 0.50,
                                "advice": "Solid setup — half size. Can add on confirmation."}
     elif score >= 35: return {"grade": "C", "color": "#f97316", "size_mult": 0.25,
                                "advice": "Mixed signals — quarter size or watch-only."}

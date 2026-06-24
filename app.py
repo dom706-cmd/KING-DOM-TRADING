@@ -230,7 +230,7 @@ from providers.streaming import AlpacaStreamCache
 from monitor.live_monitor import LiveMonitorManager
 from runtime.state_store import RuntimeStateStore
 from runtime.pubsub import OptionalRedisPublisher
-from runtime.stream_market_data import recent_bars_df, latest_trade_payload, latest_quote_payload
+from runtime.stream_market_data import recent_bars_df, latest_trade_payload, latest_quote_payload, _payload_age_seconds
 from macro.context_engine import MarketContextEngine
 
 import inspect
@@ -2806,8 +2806,8 @@ def api_scan_start():
         data.setdefault("orb_max_chase_r", "0.25")
         data.setdefault("orb_retest_max_chase_r", "0.15")
         data.setdefault("orb_breakout_now_max_chase_r", "0.08")
-        data.setdefault("orb_breakout_now_min_ml_score", "0.50")
-        data.setdefault("orb_retest_min_ml_score", "0.45")
+        data.setdefault("orb_breakout_now_min_ml_score", "0.15")
+        data.setdefault("orb_retest_min_ml_score", "0.15")
         data.setdefault("orb_min_minutes_after_open", "12")
     else:
         data.setdefault("min_combined_score", "0.40")
@@ -2968,6 +2968,38 @@ def _param_int(source, key, default):
     return _safe_int(source.get(key, default), int(default))
 
 
+def _is_rth_now() -> bool:
+    """True during US regular trading hours (Mon-Fri 09:30-16:00 ET). Used to gate
+    intraday staleness flagging so premarket/closed-session scans don't false-alarm."""
+    now = _et_now()
+    if now.weekday() >= 5:
+        return False
+    mins = now.hour * 60 + now.minute
+    return (9 * 60 + 30) <= mins < (16 * 60)
+
+
+# Intraday freshness thresholds (seconds) — flag, do not reject.
+_STALE_TRADE_SEC = 45.0
+_STALE_MINUTE_BAR_SEC = 90.0
+
+
+def _snapshot_freshness_reason(price_source: Any, last_trade_ts: Any, minute_bar_ts: Any) -> str | None:
+    """Return a stale_reason string when the price feeding a recommendation is older
+    than the intraday threshold during RTH, else None. Real-time-only guard (flag mode)."""
+    if not _is_rth_now():
+        return None
+    src = str(price_source or "")
+    if src == "latest_trade":
+        age = _payload_age_seconds(last_trade_ts)
+        if age is not None and age > _STALE_TRADE_SEC:
+            return f"stale_trade:{age:.0f}s"
+    elif src in ("minute_bar_close", "daily_bar_close"):
+        age = _payload_age_seconds(minute_bar_ts)
+        if age is not None and age > _STALE_MINUTE_BAR_SEC:
+            return f"stale_minute_bar:{age:.0f}s"
+    return None
+
+
 def _batch_snapshot_live_states(symbols: list[str] | None) -> dict[str, dict[str, Any]]:
     syms = [str(s or "").strip().upper() for s in (symbols or []) if str(s or "").strip()]
     if not syms:
@@ -3045,24 +3077,29 @@ def _batch_snapshot_live_states(symbols: list[str] | None) -> dict[str, dict[str
         mid = ((bid + ask) / 2.0) if bid is not None and ask is not None else None
 
         err = snap.get("error")
+        _price_source = snap.get("reference_price_source")
+        _lt_ts = latest_trade.get("timestamp") or minute_bar.get("timestamp") or daily_bar.get("timestamp")
+        _mb_ts = minute_bar.get("timestamp")
+        # Real-time guard: flag (don't drop) a price that is stale during RTH.
+        _stale = err or _snapshot_freshness_reason(_price_source, _lt_ts, _mb_ts)
         out[sym] = {
             "symbol": sym,
             "ok": bool(price is not None or bid is not None or ask is not None),
             "provider": "alpaca",
             "feed": feed,
             "source": "snapshot",
-            "price_source": snap.get("reference_price_source"),
+            "price_source": _price_source,
             "last_trade_price": price,
-            "last_trade_ts": latest_trade.get("timestamp") or minute_bar.get("timestamp") or daily_bar.get("timestamp"),
+            "last_trade_ts": _lt_ts,
             "bid": bid,
             "ask": ask,
             "mid": mid,
             "quote_ts": latest_quote.get("timestamp"),
-            "minute_bar_ts": minute_bar.get("timestamp"),
+            "minute_bar_ts": _mb_ts,
             "minute_bar_close": _safe_float(minute_bar.get("close")),
             "daily_bar_close": _safe_float(daily_bar.get("close")),
             "prev_close": _safe_float(prev_daily_bar.get("close")),
-            "stale_reason": err,
+            "stale_reason": _stale,
             "error": err,
         }
     return out
@@ -3219,8 +3256,20 @@ def _normalize_target_rr(row: dict[str, Any]) -> dict[str, Any]:
     stop = _safe_float(r.get("stop"))
     rr = _safe_float(r.get("rr"))
     if rr is None and entry is not None and stop is not None and target is not None:
-        risk = entry - stop
-        reward = target - entry
+        side = str(r.get("best_side") or r.get("side") or r.get("best_direction") or "").strip().lower()
+        if side in ("short", "sell"):
+            risk = stop - entry
+            reward = entry - target
+        elif side in ("long", "buy"):
+            risk = entry - stop
+            reward = target - entry
+        else:
+            # No usable side label — infer from geometry.
+            # long: stop < entry < target ; short: target < entry < stop
+            if stop < entry and target > entry:
+                risk, reward = entry - stop, target - entry
+            else:
+                risk, reward = stop - entry, entry - target
         if risk > 0 and reward > 0:
             r["rr"] = float(reward / risk)
     elif rr is not None:
