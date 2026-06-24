@@ -1165,10 +1165,11 @@ class RuntimeStateStore:
         runner_stop_val = float(runner_stop_val) if runner_stop_val is not None else None
         session_date_str = str(data.get("session_date") or data.get("scan_date") or "")
         with self._lock, self._conn() as conn:
-            # Dedup: same symbol + session_date + entry + direction already tracked?
+            # Dedup: same symbol + strategy + direction + session_date already tracked?
+            strategy_str = str(data.get("strategy") or "unknown")
             existing = conn.execute(
-                "SELECT outcome_id FROM trade_outcomes WHERE symbol=? AND session_date=? AND entry=? AND direction=? LIMIT 1",
-                (sym, session_date_str, entry, direction),
+                "SELECT outcome_id FROM trade_outcomes WHERE symbol=? AND session_date=? AND strategy=? AND direction=? LIMIT 1",
+                (sym, session_date_str, strategy_str, direction),
             ).fetchone()
             if existing:
                 return int(existing["outcome_id"])
@@ -1182,7 +1183,7 @@ class RuntimeStateStore:
                 """,
                 (
                     sym,
-                    str(data.get("strategy") or "unknown"),
+                    strategy_str,
                     direction,
                     entry,
                     stop_val,

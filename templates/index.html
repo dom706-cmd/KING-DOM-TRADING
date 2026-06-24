@@ -1121,9 +1121,11 @@ th {
           <span class="tag">Category</span>
           <select id="candCategoryFilter"><option value="all">All</option><option value="momentum">Momentum</option><option value="news">News</option><option value="reversal">Reversal</option><option value="liquidity">Liquidity</option></select>
           <span class="tag">Min Grade</span>
-          <select id="candMinGradeFilter"><option value="0" selected>All</option><option value="35">C+ (35)</option><option value="56">B+ (56)</option><option value="78">A only (78)</option></select>
+          <select id="candMinGradeFilter"><option value="0" selected>All</option><option value="35">C+ (35)</option><option value="52">B+ (52)</option><option value="72">A only (72)</option></select>
           <button type="button" id="addAllBPlusBtn" title="Add all B+ grade candidates to the desk watchlist" style="margin-left:12px;padding:4px 14px;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.4);border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;">+ Add All B+ to Watchlist</button>
           <span id="addAllBPlusStatus" style="font-size:11px;margin-left:8px;color:#94a3b8;"></span>
+          <button type="button" id="trackAllRBtn" title="Track all visible candidates for R-multiple outcome tracking" style="margin-left:10px;padding:4px 14px;background:rgba(74,222,128,0.12);color:#4ade80;border:1px solid rgba(74,222,128,0.4);border-radius:5px;cursor:pointer;font-size:12px;font-weight:700;" onclick="window.trackAllCandidates()">Track All R</button>
+          <span id="trackAllRStatus" style="font-size:11px;margin-left:8px;color:#94a3b8;"></span>
           <button type="button" id="audioAlertToggle" title="Toggle audio alerts" style="margin-left:10px;padding:4px 10px;background:rgba(99,202,183,0.1);color:#6cc7b4;border:1px solid rgba(99,202,183,0.3);border-radius:5px;cursor:pointer;font-size:13px;">🔔</button>
         </div>
 <div class="tableWrap" id="candidatesWrap"><table>
@@ -2479,6 +2481,7 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
         <td class="notes">${notesOut}</td>
       </tr>`;
     }).join("");
+    window._visibleCandidates = filtered;
     body.innerHTML = rows;
     bindCandidateAddButtons();
     maybeAutoAddPassed();
@@ -3904,6 +3907,7 @@ const notesOut = `${qualityLine}${notesParts.length ? `<div style="margin-top:${
   window.loadCandidatesCache = loadCandidatesCache;
   window.saveCandidatesCache = saveCandidatesCache;
   window.mergeCandidatesIntoCache = mergeCandidatesIntoCache;
+  window.persistCandFiltersFromUI = persistCandFiltersFromUI;
   // Expose renderer so async scan can update the table without reloading
   window.renderCandidatesTable = renderCandidatesTable;
   window.renderHeatPanel = renderHeatPanel;
@@ -6422,8 +6426,8 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}
     }));
 
-    document.getElementById('candCategoryFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
-    document.getElementById('candMinGradeFilter')?.addEventListener('change', () => { persistCandFiltersFromUI(); try { renderCandidatesTable(loadCandidatesCache()); } catch(e){}; });
+    document.getElementById('candCategoryFilter')?.addEventListener('change', () => { if (window.persistCandFiltersFromUI) window.persistCandFiltersFromUI(); if (window.renderCandidatesTable && window.loadCandidatesCache) window.renderCandidatesTable(window.loadCandidatesCache()); });
+    document.getElementById('candMinGradeFilter')?.addEventListener('change', () => { if (window.persistCandFiltersFromUI) window.persistCandFiltersFromUI(); if (window.renderCandidatesTable && window.loadCandidatesCache) window.renderCandidatesTable(window.loadCandidatesCache()); });
 
     // Audio alert toggle
     const audioBtn = document.getElementById('audioAlertToggle');
@@ -6769,6 +6773,68 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
         .then(r => r.json())
         .then(j => { if (j?.ok) { loadOutcomes(); loadShakeoutWatches(); } })
         .catch(() => {});
+    };
+
+    window.trackAllCandidates = function() {
+      const candidates = window._visibleCandidates;
+      if (!Array.isArray(candidates) || !candidates.length) {
+        const st = document.getElementById('trackAllRStatus');
+        if (st) { st.textContent = 'No visible candidates.'; st.style.color = '#f87171'; }
+        return;
+      }
+      const btn = document.getElementById('trackAllRBtn');
+      const st = document.getElementById('trackAllRStatus');
+      if (btn) btn.disabled = true;
+      if (st) { st.textContent = 'Tracking…'; st.style.color = '#94a3b8'; }
+
+      const payloads = [];
+      for (const c of candidates) {
+        const best = (c.best_side || 'long').toLowerCase();
+        const entry = Number(best === 'long' ? (c.long_entry ?? c.entry) : (c.short_entry ?? c.entry));
+        const stop  = Number(best === 'long' ? (c.long_stop  ?? c.stop)  : (c.short_stop  ?? c.stop));
+        if (!Number.isFinite(entry) || !Number.isFinite(stop) || entry <= 0 || stop <= 0) continue;
+        const mlRaw = c.ml_score ?? c.ml ?? c.model_score ?? null;
+        const scoreRaw = c.combined_score ?? c.score ?? c.total_score ?? null;
+        payloads.push({
+          symbol: String(c.symbol || '').toUpperCase(),
+          strategy: String(c.strategy || 'unknown'),
+          direction: best,
+          entry,
+          stop,
+          target_2r: Number(best === 'long' ? (c.long_2r ?? c.target_2r) : (c.short_2r ?? c.target_2r)) || undefined,
+          target_3r: Number(best === 'long' ? (c.long_3r ?? c.target_3r) : (c.short_3r ?? c.target_3r)) || undefined,
+          risk_per_share: Math.abs(entry - stop),
+          session_date: String(c.data_date ?? c.scan_date ?? ''),
+          scan_ts: String(c.scan_ts ?? ''),
+          ml_score: mlRaw,
+          combined_score: scoreRaw,
+        });
+      }
+
+      if (!payloads.length) {
+        if (btn) btn.disabled = false;
+        if (st) { st.textContent = 'Nothing trackable (missing entry/stop).'; st.style.color = '#f87171'; }
+        return;
+      }
+
+      Promise.all(payloads.map(p =>
+        fetch('/api/outcomes/record', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(p),
+          cache: 'no-store',
+        }).then(r => r.json()).catch(() => ({ok: false}))
+      )).then(results => {
+        const tracked = results.filter(r => r?.ok).length;
+        const skipped = results.length - tracked;
+        if (btn) btn.disabled = false;
+        if (st) {
+          st.style.color = tracked > 0 ? '#4ade80' : '#f87171';
+          st.textContent = `${tracked} tracked${skipped > 0 ? `, ${skipped} already logged` : ''}`;
+          setTimeout(() => { if (st) st.textContent = ''; }, 6000);
+        }
+        if (tracked > 0) { loadOutcomes(); loadShakeoutWatches(); }
+      });
     };
 
     window.setRunnerStop = function(outcomeId, sym) {
