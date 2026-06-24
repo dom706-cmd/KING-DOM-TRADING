@@ -3185,6 +3185,19 @@ def _apply_live_state_to_candidate(c: dict[str, Any], live: dict[str, Any] | Non
             if row["live_chase_r"] is not None and float(row["live_chase_r"]) > 0.35:
                 actionable = False
             row["rr_actionable_now"] = actionable
+
+    # Real-time integrity: a plan whose live price has already traded THROUGH its
+    # stop is dead — its entry/stop/target are stale levels, not a live play. This
+    # catches premarket-anchored plans (e.g. parabolic pm_last) that the stock has
+    # since reversed away from. Long: live < stop. Short: live > stop.
+    if live_px is not None and entry is not None and stop is not None and entry != stop:
+        is_long = entry > stop
+        invalidated = (live_px < stop) if is_long else (live_px > stop)
+        row["plan_invalidated"] = bool(invalidated)
+        if invalidated:
+            row["plan_state"] = "INVALIDATED"
+            if not row.get("stale_reason"):
+                row["stale_reason"] = f"price_through_stop:live={live_px:g}_stop={stop:g}_entry={entry:g}"
     return row
 
 
