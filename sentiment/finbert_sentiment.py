@@ -11,8 +11,13 @@ No fallbacks: if the model cannot load or score, raise.
 from __future__ import annotations
 
 import math
+import os
 import threading
 from typing import List
+
+# Avoid the HF tokenizers rust-thread parallelism that can segfault when the
+# pipeline runs inside Python worker threads.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _MODEL_ID = "ProsusAI/finbert"
 _MAX_TOKENS = 512
@@ -21,8 +26,22 @@ _lock = threading.Lock()
 _pipe = None
 
 
+def _finbert_enabled() -> bool:
+    """FinBERT is DISABLED by default. Loading transformers/torch inside the Flask
+    background scan-job worker threads (alongside the loky/sklearn ML workers)
+    segfaults the whole server — a native crash that try/except cannot catch, which
+    repeatedly took the app down mid-session. Until inference is isolated in a
+    subprocess, keep it off. Re-enable explicitly with KINGDOM_FINBERT_ENABLED=1.
+    """
+    return os.getenv("KINGDOM_FINBERT_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _load_pipeline():
     global _pipe
+    if not _finbert_enabled():
+        raise RuntimeError(
+            "FinBERT sentiment disabled for stability (set KINGDOM_FINBERT_ENABLED=1 to enable)"
+        )
     with _lock:
         if _pipe is not None:
             return _pipe
