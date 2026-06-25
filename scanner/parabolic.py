@@ -547,11 +547,12 @@ def scan_parabolic_symbols(
         except Exception:
             pass
 
-    # ── ML + sentiment enrichment (DISPLAY ONLY) ──────────────────────────────
-    # Surface the parabolic-specific ML score and news sentiment on each candidate
-    # for the UI. These deliberately do NOT feed the parabolic composite ranking or
-    # gating, which stays on the momentum `combined_score` above. ML must run before
-    # sentiment so the sentiment top-N pre-ranking can use ml_score.
+    # ── ML enrichment (DISPLAY ONLY) ──────────────────────────────────────────
+    # Surface the parabolic-specific ML score on each candidate for the UI. This
+    # does NOT feed the parabolic composite ranking/gating, which stays on the
+    # momentum `combined_score` above. NOTE: news sentiment is deliberately NOT
+    # wired here — running FinBERT (torch) inside the parabolic scan's background
+    # thread context segfaults the server, which try/except cannot catch.
     if use_ml and candidates:
         try:
             from ml.orb_model_service import score_orb_candidates as _score_para
@@ -565,23 +566,6 @@ def scan_parabolic_symbols(
                     except Exception:
                         pass
             data_failures.extend(list(_ml_out.get("failures") or []))
-        except Exception:
-            pass
-    if use_sentiment and candidates:
-        try:
-            from scanner.orb import _fetch_orb_sentiment_map
-            _sent_map = _fetch_orb_sentiment_map(
-                candidates=candidates, use_ml=use_ml, limit=int(limit),
-                sentiment_provider=sentiment_provider, data_failures=data_failures,
-                env_int_func=lambda name, default: int(os.getenv(name) or default),
-            ) or {}
-            for c in candidates:
-                _s = _sent_map.get(c.symbol)
-                if _s is not None:
-                    try:
-                        c.sentiment_score = float(_s)
-                    except Exception:
-                        pass
         except Exception:
             pass
 
