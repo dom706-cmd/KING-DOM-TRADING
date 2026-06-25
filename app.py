@@ -3152,6 +3152,44 @@ def _apply_live_state_to_candidate(c: dict[str, Any], live: dict[str, Any] | Non
     if live.get("stale_reason"):
         row["stale_reason"] = live.get("stale_reason")
 
+    # Option C — re-anchor parabolic plans to the LIVE price during RTH. Parabolic
+    # builds entry/stop/target from the frozen premarket close (pm_last); intraday
+    # that level is stale, so recompute the levels off the current price (preserving
+    # the strategy's stop fraction and fixed-dollar risk) to make it a live-momentum
+    # continuation. Original premarket levels are kept under pm_* for reference.
+    if str(row.get("strategy") or "").lower() in ("parabolic", "para", "parabolic_watch") and _is_rth_now():
+        _L = _safe_float(row.get("live_price"))
+        _pe = _safe_float(row.get("entry"))
+        _ps = _safe_float(row.get("stop"))
+        if (_L is not None and _L > 0 and _pe is not None and _ps is not None
+                and _pe > _ps and not row.get("levels_reanchored")):
+            _pm_anchor = _pe / 1.003
+            _stop_frac = (1.0 - _ps / _pm_anchor) if _pm_anchor > 0 else None
+            if _stop_frac is not None and 0.0 < _stop_frac < 0.5:
+                row["pm_entry"] = _pe
+                row["pm_stop"] = _ps
+                row["pm_target_2r"] = row.get("target_2r")
+                row["pm_target_3r"] = row.get("target_3r")
+                _ne = round(_L * 1.003, 4)
+                _ns = round(_L * (1.0 - _stop_frac), 4)
+                _nr = max(0.01, _ne - _ns)
+                _old_sh = _safe_float(row.get("shares") or row.get("long_shares"))
+                _old_rps = _safe_float(row.get("risk_per_share"))
+                _risk_dollars = (_old_sh * _old_rps) if (_old_sh and _old_rps) else 50.0
+                row["entry"] = _ne
+                row["stop"] = _ns
+                row["target"] = round(_ne + 2 * _nr, 4)
+                row["target_2r"] = round(_ne + 2 * _nr, 4)
+                row["target_3r"] = round(_ne + 3 * _nr, 4)
+                row["risk_per_share"] = round(_nr, 4)
+                row["rr"] = 2.0
+                row["shares"] = max(1, int(_risk_dollars / _nr))
+                row["notional"] = round(row["shares"] * _ne, 2)
+                row["tradable_now"] = bool(_L >= _ne * 0.998)
+                row["levels_reanchored"] = True
+                row["reanchor_basis"] = "live_rth"
+                row["notes"] = (str(row.get("notes") or "") + " | levels re-anchored to live (RTH)").strip(" |")
+
     touch_ts = row.get("touch_ts")
     try:
         if touch_ts:
