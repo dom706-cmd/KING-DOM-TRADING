@@ -4298,10 +4298,17 @@ async function startScan() {
         const q = bySym[String(c.symbol||'').toUpperCase()];
         if (!q) return c;
         const copy = Object.assign({}, c);
-        if (q.last_trade_price !== undefined && q.last_trade_price !== null){
-          copy.live_price = q.last_trade_price;
-          copy.last_price = q.last_trade_price;
-          copy.price = q.last_trade_price;
+        // /api/live_quotes emits the live trade under `price` (no `last_trade_price`
+        // key). Use price, falling back to last_trade_price/mid, so the candidate
+        // table price actually refreshes between (slow) scans.
+        let lp = null;
+        if (q.price !== undefined && q.price !== null) lp = q.price;
+        else if (q.last_trade_price !== undefined && q.last_trade_price !== null) lp = q.last_trade_price;
+        else if (q.mid !== undefined && q.mid !== null) lp = q.mid;
+        if (lp !== null){
+          copy.live_price = lp;
+          copy.last_price = lp;
+          copy.price = lp;
         }
         copy.live_price_ts = q.last_trade_ts || copy.live_price_ts;
         copy.live_bid = q.bid;
