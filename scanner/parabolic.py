@@ -73,6 +73,9 @@ def scan_parabolic_symbols(
     min_avg20_dollar_vol: float = float(kwargs.get("min_avg20_dollar_vol",  250_000))
     use_catalyst:         bool  = bool( kwargs.get("use_catalyst",          True))
     catalyst_lookback:    int   = int(  kwargs.get("catalyst_lookback_hours", 72))
+    use_ml:               bool  = bool( kwargs.get("use_ml",                False))
+    use_sentiment:        bool  = bool( kwargs.get("use_sentiment",         False))
+    sentiment_provider:   str   = str(  kwargs.get("sentiment_provider",    "auto"))
     store                       = kwargs.get("store")
 
     base_provider = kwargs.get("provider") or AlpacaProvider()
@@ -541,6 +544,44 @@ def scan_parabolic_symbols(
                 cat_factor = 1.3 if (fresh_h is not None and fresh_h < 24) else 1.0
                 c.combined_score    = float(c.combined_score or 0.0) * cat_factor
                 c.confidence_score  = min(100.0, c.combined_score)
+        except Exception:
+            pass
+
+    # ── ML + sentiment enrichment (DISPLAY ONLY) ──────────────────────────────
+    # Surface the parabolic-specific ML score and news sentiment on each candidate
+    # for the UI. These deliberately do NOT feed the parabolic composite ranking or
+    # gating, which stays on the momentum `combined_score` above. ML must run before
+    # sentiment so the sentiment top-N pre-ranking can use ml_score.
+    if use_ml and candidates:
+        try:
+            from ml.orb_model_service import score_orb_candidates as _score_para
+            _ml_out = _score_para(candidates, provider=base_provider, strategy="parabolic") or {}
+            _ml_scores = dict(_ml_out.get("scores") or {})
+            for c in candidates:
+                _p = _ml_scores.get(c.symbol)
+                if _p is not None:
+                    try:
+                        c.ml_score = float(_p)
+                    except Exception:
+                        pass
+            data_failures.extend(list(_ml_out.get("failures") or []))
+        except Exception:
+            pass
+    if use_sentiment and candidates:
+        try:
+            from scanner.orb import _fetch_orb_sentiment_map
+            _sent_map = _fetch_orb_sentiment_map(
+                candidates=candidates, use_ml=use_ml, limit=int(limit),
+                sentiment_provider=sentiment_provider, data_failures=data_failures,
+                env_int_func=lambda name, default: int(os.getenv(name) or default),
+            ) or {}
+            for c in candidates:
+                _s = _sent_map.get(c.symbol)
+                if _s is not None:
+                    try:
+                        c.sentiment_score = float(_s)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
