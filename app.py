@@ -2695,6 +2695,14 @@ def api_scan_start():
     for k, v in request.args.items():
         data.setdefault(k, v)
 
+    # Accept short aliases for the OR-range filter so both forms work — the
+    # canonical keys are min_or_range_pct/max_or_range_pct (mirrors the existing
+    # or_pct -> or_range_pct alias). Canonical key wins if both are supplied.
+    for _short, _canon in (("min_or_pct", "min_or_range_pct"),
+                           ("max_or_pct", "max_or_range_pct")):
+        if _short in data and _canon not in data:
+            data[_canon] = data[_short]
+
     strategy = str(data.get("strategy", data.get("scan_strategy", "orb"))).strip().lower() or "orb"
     exec_style = str(data.get("exec_style", data.get("execution", "retest"))).strip().lower() or "retest"
     offset = _param_int(data, "offset", 0)
