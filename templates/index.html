@@ -4325,6 +4325,11 @@ async function startScan() {
       renderCandidatesTable(merged);
     } catch (e) {}
   }
+  // Expose the REAL refresher on window, overriding the no-op stub defined in an
+  // earlier IIFE. The 10s live-price timer lives in a different IIFE and calls a
+  // bare refreshVisibleQuotes(), which otherwise resolves to that stub — so the
+  // candidate table never refreshed its prices between scans. (Cross-IIFE rule.)
+  window.refreshVisibleQuotes = refreshVisibleQuotes;
 
 async function poll(jobId) {
     if (window._orbScanPollInFlight) return false;
