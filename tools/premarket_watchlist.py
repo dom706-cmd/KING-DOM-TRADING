@@ -531,7 +531,7 @@ def _run_whitehouse_source(*, max_age_hours: float = 48.0) -> dict[str, str]:
     """
     import xml.etree.ElementTree as ET
     import email.utils
-    from datetime import timezone, timedelta
+    from datetime import datetime, timezone, timedelta
 
     print(f"  [whitehouse] Fetching briefing room RSS (last {int(max_age_hours)}h)…")
 

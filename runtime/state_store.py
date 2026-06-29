@@ -824,6 +824,29 @@ class RuntimeStateStore:
                 conn.commit()
         return syms
 
+    def desk_watchlist_purge_aged(self, max_age_days: float) -> list[str]:
+        """Remove entries older than max_age_days based on added_at, regardless
+        of session_date.
+
+        Catches manually-added entries (session_date IS NULL) that were left
+        behind for weeks — desk_watchlist_purge_stale deliberately ignores those.
+        Returns list of purged symbols.
+        """
+        cutoff = float(time.time()) - float(max_age_days) * 86400.0
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT symbol FROM desk_watchlist WHERE added_at < ?",
+                (cutoff,),
+            ).fetchall()
+            syms = [str(r["symbol"]) for r in rows]
+            if syms:
+                conn.execute(
+                    "DELETE FROM desk_watchlist WHERE added_at < ?",
+                    (cutoff,),
+                )
+                conn.commit()
+        return syms
+
     def desk_watchlist_update_side(self, symbol: str, side: str) -> bool:
         """Update only the side column for an existing watchlist entry.
 

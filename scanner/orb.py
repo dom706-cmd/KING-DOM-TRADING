@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Tuple
 from datetime import datetime, time as dtime, date, timedelta, timezone
 
 import math
+import os
 import pandas as pd
 
 from sentiment.multi import SentimentService

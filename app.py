@@ -1,10 +1,11 @@
 from __future__ import annotations
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time as dtime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 import hashlib
 import json
+import logging
 from collections import deque
 import platform
 import os
@@ -18,12 +19,19 @@ import time
 import uuid
 import signal
 import traceback
-from flask import Flask, render_template, request, jsonify, redirect, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, redirect, Response, stream_with_context, send_from_directory
 
 
 from werkzeug.exceptions import HTTPException
 
 _PROJECT_ROOT = Path(__file__).resolve().parent
+
+# Module logger. Referenced by error handlers (log.exception(...)) that
+# previously NameError-ed because `log` was never defined.
+log = logging.getLogger("kingdom")
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 def _load_local_env_files() -> None:
@@ -400,14 +408,9 @@ try:
 except Exception:
     pass
 
-# Repopulate _JOBS from persisted scan jobs so they survive app restarts.
-try:
-    for _sj in _RUNTIME_STORE.scan_jobs_recent(limit=50):
-        _jid = _sj.get("job_id")
-        if _jid and _jid not in _JOBS:
-            _JOBS[_jid] = {"status": "done", "result": _sj["result"], "updated_at": time.time()}
-except Exception:
-    pass
+# NOTE: _JOBS repopulation moved below _JOBS definition (it was referenced here
+# before _JOBS existed, NameError-ing on every startup and silently dropping
+# scan-job persistence). See after `_JOBS = {}`.
 
 _CONTEXT_ENGINE = MarketContextEngine(refresh_interval_s=float(os.getenv("ORB_CONTEXT_REFRESH_S", "10")))
 _CONTEXT_ENGINE.configure(_ALPACA_PROVIDER, store=_RUNTIME_STORE)
@@ -893,6 +896,17 @@ def api_preflight():
 _JOBS = {}
 _JOBS_LOCK = threading.Lock()
 
+# Repopulate _JOBS from persisted scan jobs so they survive app restarts.
+# (Defined here, AFTER _JOBS exists — previously ran at import-time before the
+# definition and NameError-ed silently on every startup.)
+try:
+    for _sj in _RUNTIME_STORE.scan_jobs_recent(limit=50):
+        _jid = _sj.get("job_id")
+        if _jid and _jid not in _JOBS:
+            _JOBS[_jid] = {"status": "done", "result": _sj["result"], "updated_at": time.time()}
+except Exception:
+    pass
+
 def _new_job():
     jid = uuid.uuid4().hex
     with _JOBS_LOCK:
@@ -1339,7 +1353,7 @@ def api_monitor_stop():
 @app.get('/favicon.ico')
 def favicon():
     try:
-        return send_from_directory(str((ROOT / 'static').resolve()), 'icon.png')
+        return send_from_directory(str((_PROJECT_ROOT / 'static').resolve()), 'icon.png')
     except Exception:
         return ('', 204)
 
@@ -6073,6 +6087,46 @@ _NEWS_FEED_LOCK = threading.Lock()
 _NEWS_POLL_INTERVAL = 45  # seconds
 _NEWS_REFRESH_EVENT = threading.Event()  # set() to wake the news thread immediately
 
+# Always-on seed so the news feed is never starved when the desk watchlist is
+# stale and no monitor session is active (e.g. pre-market). Without this the
+# loop only polls watchlist+session symbols and stores nothing for days.
+_NEWS_CORE_SYMBOLS: set[str] = {"SPY", "QQQ", "AAPL", "MSFT", "NVDA"}
+_NEWS_SCAN_TTL = 300  # seconds — re-run the ATR scan seed at most every 5 min
+_NEWS_SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "syms": []}
+
+
+def _news_scanner_symbols(limit: int = 20) -> list[str]:
+    """Top ATR-expansion scanner candidates, cached for _NEWS_SCAN_TTL seconds.
+
+    Keeps the news feed pointed at what the desk is actually scanning, without
+    re-running a full scan on every 45s poll.
+    """
+    now = time.time()
+    if (now - float(_NEWS_SCAN_CACHE.get("ts") or 0)) < _NEWS_SCAN_TTL:
+        return list(_NEWS_SCAN_CACHE.get("syms") or [])
+    syms: list[str] = []
+    try:
+        from scanner.orb import scan_symbols as _scan, ORBConfig as _ORBConfig
+        cfg = _ORBConfig(min_price=1.0, max_price=500.0, min_rvol=0.5,
+                         min_avg20_dollar_vol=0, min_today_dollar_vol=0)
+        result = _scan(
+            symbols=[], cfg=cfg, limit=limit, strategy="atr_expansion",
+            provider=_ALPACA_PROVIDER, min_grade_enabled=False,
+            min_combined_enabled=False,
+            use_ml=False, use_sentiment=False, use_catalyst=False,
+        )
+        cands = (result or {}).get("candidates") or (result or {}).get("all") or []
+        for c in cands:
+            s = c.get("symbol") if isinstance(c, dict) else getattr(c, "symbol", None)
+            if s:
+                syms.append(str(s).strip().upper())
+    except Exception:
+        # On scan failure keep the prior cached seed rather than going dark.
+        return list(_NEWS_SCAN_CACHE.get("syms") or [])
+    _NEWS_SCAN_CACHE["ts"] = now
+    _NEWS_SCAN_CACHE["syms"] = syms
+    return syms
+
 # ── News Sniper — fires the instant a NEW catalyst headline drops ─────────────
 _SNIPER_ALERTS: deque = deque(maxlen=50)
 _SNIPER_LOCK = threading.Lock()
@@ -6431,6 +6485,14 @@ def _news_feed_loop() -> None:
             except Exception:
                 pass
 
+            # Always-on seed: core liquid names + today's scanner candidates.
+            # Ensures news flow even when the watchlist is stale / no session.
+            syms.update(_NEWS_CORE_SYMBOLS)
+            try:
+                syms.update(_news_scanner_symbols())
+            except Exception:
+                pass
+
             if not syms:
                 _NEWS_REFRESH_EVENT.wait(timeout=_NEWS_POLL_INTERVAL)
                 _NEWS_REFRESH_EVENT.clear()
@@ -6545,6 +6607,44 @@ def _outcome_auto_resolve_loop() -> None:
 
 threading.Thread(target=_outcome_auto_resolve_loop, daemon=True, name='outcome-auto-resolve').start()
 
+
+# ── Morning desk-watchlist maintenance ───────────────────────────────────────
+_WATCHLIST_MAX_AGE_DAYS = 3   # auto-clear undated entries older than this
+_WATCHLIST_PURGE_HOUR_ET = 7  # run once per day at/after this ET hour (pre-market)
+
+
+def _morning_watchlist_maintenance_loop() -> None:
+    """Background thread: once each trading morning, clear stale desk-watchlist
+    entries so the news feed and scans aren't anchored to days-old symbols.
+
+    Removes (a) prior-session dated entries (purge_stale) and (b) undated
+    manually-added entries older than _WATCHLIST_MAX_AGE_DAYS (purge_aged).
+    Runs once per ET date at/after the pre-market hour; on a mid-day restart it
+    runs immediately so a stale list is cleaned right away.
+    """
+    import time as _time
+    last_run_date: str | None = None
+    while True:
+        try:
+            now_et = _et_now()
+            today = now_et.date().isoformat()
+            if (now_et.weekday() < 5
+                    and now_et.hour >= _WATCHLIST_PURGE_HOUR_ET
+                    and last_run_date != today):
+                purged = list(_RUNTIME_STORE.desk_watchlist_purge_stale(today))
+                purged += list(_RUNTIME_STORE.desk_watchlist_purge_aged(_WATCHLIST_MAX_AGE_DAYS))
+                last_run_date = today
+                if purged:
+                    print(f"[watchlist] morning auto-clear removed {len(purged)} "
+                          f"stale entries: {', '.join(sorted(set(purged)))}", flush=True)
+        except Exception:
+            pass
+        _time.sleep(300)
+
+
+threading.Thread(target=_morning_watchlist_maintenance_loop, daemon=True,
+                 name='watchlist-maintenance').start()
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -6652,6 +6752,49 @@ def api_spread_alerts():
     with _SPREAD_LOCK:
         alerts = [a for a in _SPREAD_ALERTS if a.get('fired_ts', 0) >= cutoff]
     return jsonify(ok=True, alerts=alerts, count=len(alerts))
+
+
+# Standard UTP/CTA trading-action reason codes → human label + trader note.
+# Keyed by Alpaca `reason_code` (falls back to `status_code`). Unknown codes
+# pass through with the raw code as the label.
+_HALT_REASON_MAP: dict[str, dict[str, str]] = {
+    # ── Halt / pause codes ──
+    "T1":   {"label": "News Pending",                 "note": "Halted pending material news; expect a release before resumption."},
+    "T2":   {"label": "News Disseminated",            "note": "News released; resumes after a quotation-only period."},
+    "T3":   {"label": "News & Resumption Times",       "note": "Resumption times posted following a news halt."},
+    "T5":   {"label": "Single-Stock Pause (LULD)",     "note": "Price-volatility pause; resumes via a 5-minute auction."},
+    "T6":   {"label": "Extraordinary Market Activity", "note": "Halt for extraordinary activity / suspected erroneous trades."},
+    "T7":   {"label": "Quotation-Only Period",         "note": "Single-stock pause quotation period before resumption."},
+    "T8":   {"label": "ETF Component Halt",            "note": "ETF halted because underlying components are halted."},
+    "T12":  {"label": "Info Requested by Listing Mkt", "note": "Halt pending additional info requested by the listing exchange."},
+    "H4":   {"label": "Non-Compliance",                "note": "Halt — issuer not in compliance with listing requirements."},
+    "H9":   {"label": "Filings Not Current",           "note": "Halt — issuer filings not current."},
+    "H10":  {"label": "SEC Trading Suspension",        "note": "Halt — SEC suspension (often multi-day)."},
+    "H11":  {"label": "Regulatory Concern",            "note": "Halt — additional regulatory / extraordinary concern."},
+    "O1":   {"label": "Operational Halt",              "note": "Operational halt on the security."},
+    "IPO1": {"label": "IPO Not Yet Trading",           "note": "New IPO issue not yet open for trading."},
+    "M1":   {"label": "Corporate Action",              "note": "Halt — corporate action."},
+    "M2":   {"label": "Quotation Not Available",        "note": "Quotation not available for the security."},
+    "LUDP": {"label": "LULD Volatility Pause",          "note": "Limit Up-Limit Down pause; 5-min auction to resume."},
+    "LUDS": {"label": "LULD Straddle Pause",            "note": "LULD pause — band straddles the price (straddle condition)."},
+    "MWC1": {"label": "Circuit Breaker L1 (7%)",        "note": "Market-Wide Circuit Breaker Level 1 — 15-min market halt."},
+    "MWC2": {"label": "Circuit Breaker L2 (13%)",       "note": "Market-Wide Circuit Breaker Level 2 — 15-min market halt."},
+    "MWC3": {"label": "Circuit Breaker L3 (20%)",       "note": "Market-Wide Circuit Breaker Level 3 — halted for the day."},
+    "MWC0": {"label": "Circuit Breaker (Carryover)",    "note": "MWCB carried over from the prior session."},
+    # ── Resumption / quotation codes ──
+    "T4":   {"label": "Qualifications Resolved — Resuming", "note": "Qualification issues resolved; trading resuming."},
+    "R1":   {"label": "New Issue Available",            "note": "Resumption — new issue available for trading."},
+    "R2":   {"label": "Issue Available",                "note": "Resumption — issue available for trading."},
+    "R4":   {"label": "Qualifications Resolved",        "note": "Resumption — qualification issues resolved."},
+    "R6":   {"label": "Qualifications Halt Ended",      "note": "Resumption — qualifications halt concluded."},
+    "R9":   {"label": "Filing Requirement Met",         "note": "Resumption — filing requirement satisfied."},
+    "C3":   {"label": "Resumption — Trade",             "note": "Trading resumed."},
+    # ── High-level status_code fallbacks ──
+    "H":    {"label": "Halted",                         "note": "Security is halted."},
+    "P":    {"label": "Paused (LULD)",                  "note": "Security is in an LULD trading pause."},
+    "Q":    {"label": "Quotation Only",                 "note": "Quotation-only period (no trading)."},
+    "T":    {"label": "Trading",                        "note": "Trading resumed / normal trading."},
+}
 
 
 @app.get('/api/market_events')

@@ -135,7 +135,7 @@ def _best_seed_score(c: dict[str, Any]) -> float:
     return 0.0
 
 
-def _compute_monitor_live_score(st: "MonitorSymbolState", *, playbook: "PlaybookEngine", live_state: dict[str, Any], context: dict[str, Any], context_score: float, flags: list[str]) -> float:
+def _compute_monitor_live_score(st: "MonitorSymbolState", *, playbook: "BasePlaybook", live_state: dict[str, Any], context: dict[str, Any], context_score: float, flags: list[str]) -> float:
     freshness_score = 10.0 if st.tape_live else -20.0
     catalyst_component = float(st.catalyst_score or 0.0) * 18.0
     decay_penalty = 0.0
@@ -956,7 +956,7 @@ class WatchlistPlanPlaybook(BasePlaybook):
         return 0.0
 
 
-PLAYBOOKS: dict[str, PlaybookEngine] = {
+PLAYBOOKS: dict[str, BasePlaybook] = {
     OpenDriveORBPlaybook.name: OpenDriveORBPlaybook(),
     RetestReclaimPlaybook.name: RetestReclaimPlaybook(),
     MiddayContinuationPlaybook.name: MiddayContinuationPlaybook(),
