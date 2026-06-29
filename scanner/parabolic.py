@@ -534,6 +534,9 @@ def scan_parabolic_symbols(
                 if rec is None:
                     continue
                 c.catalyst_score           = float(rec.score or 0.0) or None
+                # Surface the same keyword/lexicon score as the UI sentiment value
+                # (0.0 preserved as neutral, not coerced to None/N/A).
+                c.sentiment_score          = float(rec.score or 0.0)
                 c.catalyst_confidence      = float(rec.confidence or 0.0) or None
                 c.catalyst_strength        = float(rec.strength or 0.0) or None
                 c.catalyst_article_count   = rec.article_count
@@ -566,6 +569,27 @@ def scan_parabolic_symbols(
                     except Exception:
                         pass
             data_failures.extend(list(_ml_out.get("failures") or []))
+        except Exception:
+            pass
+
+    # ── Sentiment enrichment (DISPLAY ONLY, FinBERT-free) ─────────────────────
+    # When catalyst scoring didn't run (use_catalyst off — the default), still
+    # surface a news-sentiment score for the UI using the keyword/lexicon
+    # CatalystService — the SAME scorer the live news feed uses. It is pure
+    # Python (no torch/FinBERT), so unlike FinBERT it cannot segfault the scan's
+    # background thread. Display only: does NOT feed combined_score / ranking.
+    # Symbols with no news stay None and render as N/A (honest — no catalyst).
+    if candidates and any(c.sentiment_score is None for c in candidates):
+        try:
+            _sent_svc = CatalystService(provider=base_provider)
+            _need = [c.symbol for c in candidates if c.sentiment_score is None]
+            _sent_map = _sent_svc.fetch_batch(_need, lookback_hours=catalyst_lookback) or {}
+            for c in candidates:
+                if c.sentiment_score is not None:
+                    continue
+                rec = _sent_map.get(c.symbol.upper())
+                if rec is not None:
+                    c.sentiment_score = float(rec.score or 0.0)
         except Exception:
             pass
 
