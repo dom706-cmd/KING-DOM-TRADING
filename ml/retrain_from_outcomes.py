@@ -44,6 +44,14 @@ def _load_outcomes(host: str, strategy: str) -> list[dict]:
     return data["rows"]
 
 
+def _load_outcomes_local(strategy: str) -> list[dict]:
+    """Read training rows straight from the runtime store — no running server needed."""
+    from runtime.state_store import RuntimeStateStore
+    db_path = _ROOT / "runtime" / "runtime_state.db"
+    store = RuntimeStateStore(db_path)
+    return store.export_training_data(strategy=strategy)
+
+
 def _features_for_outcome(provider, sym: str, session_date: date) -> dict[str, float]:
     """Compute ML features for a specific symbol on a specific historical session date."""
     import pandas as pd
@@ -213,11 +221,17 @@ def main() -> int:
     ap.add_argument("--min_samples", type=int, default=30)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--dry_run", action="store_true")
+    ap.add_argument("--local", action="store_true",
+                    help="Read outcomes directly from runtime_state.db instead of the HTTP API")
     ap.add_argument("--out", default=str(_ROOT / "models" / "orb_ranker_outcomes.pkl"))
     args = ap.parse_args()
 
-    print(f"[retrain] Fetching {args.strategy} outcomes from {args.host}...")
-    outcome_rows = _load_outcomes(args.host, args.strategy)
+    if args.local:
+        print(f"[retrain] Loading {args.strategy} outcomes from local DB...")
+        outcome_rows = _load_outcomes_local(args.strategy)
+    else:
+        print(f"[retrain] Fetching {args.strategy} outcomes from {args.host}...")
+        outcome_rows = _load_outcomes(args.host, args.strategy)
     print(f"[retrain] Got {len(outcome_rows)} resolved trades")
 
     if len(outcome_rows) < args.min_samples:

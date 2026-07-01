@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kingdom weekly ML retrain. Install:
+       cp deploy/com.kingdom.weekly-retrain.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.kingdom.weekly-retrain.plist
+     Runs Sundays 08:00 local. Uses a login shell (zsh -lc) so it inherits the same
+     Alpaca credentials the app uses. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.kingdom.weekly-retrain</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>/Users/dominicaleandri/KingDom/scripts/weekly_retrain.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>0</integer>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/dominicaleandri/KingDom/reports/launchd_weekly_retrain.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dominicaleandri/KingDom/reports/launchd_weekly_retrain.err.log</string>
+</dict>
+</plist>

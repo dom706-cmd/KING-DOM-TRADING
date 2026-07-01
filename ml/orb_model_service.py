@@ -14,15 +14,56 @@ _STRATEGY_MODEL_NAMES: dict[str, str] = {
     "eod_momentum": "eod_momentum_ranker_outcomes.pkl",
 }
 
+# Usability gate for outcomes models. An outcomes model is only used for live scoring if its
+# cross-validated ROC-AUC and sample count clear these bars; otherwise scoring falls back to
+# the parquet-trained bucket models (model_a_liquid / model_b_outlier / model_parabolic).
+_DEFAULT_MIN_AUC = 0.52
+_DEFAULT_MIN_SAMPLES = 30
+# Per-strategy overrides. orb's outcomes model is trained on the real-trade win/stop label,
+# whose CV-AUC sits near random (~0.53) even at n=238, while the fallback parquet orb_ranker
+# (synthetic-label AUC ~0.80) is strong — so require a clear signal before a marginal outcomes
+# model is allowed to displace it. Others keep the default gate.
+_STRATEGY_MIN_AUC: dict[str, float] = {
+    "orb": 0.58,
+}
+_STRATEGY_MIN_SAMPLES: dict[str, int] = {}
+
+
+def _min_auc_for(strategy: str) -> float:
+    """Effective AUC gate for a strategy. Env override: ORB_OUTCOMES_MIN_AUC[_<STRATEGY>]."""
+    import os
+    key = (strategy or "orb").lower().strip()
+    env = os.environ.get(f"ORB_OUTCOMES_MIN_AUC_{key.upper()}") or os.environ.get("ORB_OUTCOMES_MIN_AUC")
+    if env:
+        try:
+            return float(env)
+        except ValueError:
+            pass
+    return _STRATEGY_MIN_AUC.get(key, _DEFAULT_MIN_AUC)
+
+
+def _min_samples_for(strategy: str) -> int:
+    """Effective sample-count gate for a strategy. Env override: ORB_OUTCOMES_MIN_SAMPLES[_<STRATEGY>]."""
+    import os
+    key = (strategy or "orb").lower().strip()
+    env = os.environ.get(f"ORB_OUTCOMES_MIN_SAMPLES_{key.upper()}") or os.environ.get("ORB_OUTCOMES_MIN_SAMPLES")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            pass
+    return _STRATEGY_MIN_SAMPLES.get(key, _DEFAULT_MIN_SAMPLES)
+
 
 def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
-    """Return path to the strategy-specific outcomes model if usable (AUC >= 0.52, n >= 30).
+    """Return path to the strategy-specific outcomes model if it clears the per-strategy gate.
 
-    Falls back to the generic orb outcomes model if no strategy-specific one exists.
+    Falls back to the generic orb outcomes model (evaluated against orb's gate) if no
+    strategy-specific model exists or it fails its gate.
     """
     import joblib
 
-    def _check(path: Path) -> Path | None:
+    def _check(path: Path, min_auc: float, min_samples: int) -> Path | None:
         if not path.exists():
             return None
         try:
@@ -30,9 +71,9 @@ def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
             if not isinstance(blob, dict) or "model" not in blob or "feature_names" not in blob:
                 return None
             cv_score = blob.get("cv_roc_auc_mean")
-            if cv_score is not None and float(cv_score) < 0.52:
+            if cv_score is not None and float(cv_score) < min_auc:
                 return None
-            if int(blob.get("n_samples", 0)) < 30:
+            if int(blob.get("n_samples", 0)) < min_samples:
                 return None
             return path
         except Exception:
@@ -40,16 +81,16 @@ def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
 
     _models_dir = resolve_orb_outcomes_path().parent
 
-    # Try strategy-specific model first
+    # Try strategy-specific model first, against that strategy's gate
     strat_key = (strategy or "orb").lower().strip()
     filename = _STRATEGY_MODEL_NAMES.get(strat_key)
     if filename:
-        p = _check(_models_dir / filename)
+        p = _check(_models_dir / filename, _min_auc_for(strat_key), _min_samples_for(strat_key))
         if p is not None:
             return p
 
-    # Fall back to generic orb outcomes model
-    return _check(resolve_orb_outcomes_path())
+    # Fall back to generic orb outcomes model, against orb's gate
+    return _check(resolve_orb_outcomes_path(), _min_auc_for("orb"), _min_samples_for("orb"))
 
 
 class OrbModelSelectionError(RuntimeError):

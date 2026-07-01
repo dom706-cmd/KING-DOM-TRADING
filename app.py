@@ -6946,13 +6946,35 @@ def api_outcomes_list():
                     d['current_r'] = round((entry - cur_price) / risk, 2)
                 d['current_price'] = cur_price
         out.append(d)
-    total_r = sum(float(r.get('outcome_r') or 0) for r in out if r.get('outcome_r') is not None)
-    wins  = sum(1 for r in out if str(r.get('outcome') or '').startswith('hit_'))
-    stops = sum(1 for r in out if r.get('outcome') == 'stopped')
-    return jsonify(ok=True, outcomes=out, count=len(out), stats={
-        "total_r": round(total_r, 2), "wins": wins, "stops": stops,
-        "win_rate": round(wins / (wins + stops) * 100, 1) if (wins + stops) > 0 else None,
-    })
+    # Stats are aggregated over the FULL table (not the display-limited slice) so the
+    # headline edge stays accurate past 200 tracked outcomes. Only per-session or
+    # all-time views get aggregate stats; open_only is a working list, not an edge summary.
+    if open_only:
+        total_r = sum(float(r.get('outcome_r') or 0) for r in out if r.get('outcome_r') is not None)
+        wins  = sum(1 for r in out if str(r.get('outcome') or '').startswith('hit_'))
+        stops = sum(1 for r in out if r.get('outcome') == 'stopped')
+        stats = {
+            "total_r": round(total_r, 2), "wins": wins, "stops": stops,
+            "win_rate": round(wins / (wins + stops) * 100, 1) if (wins + stops) > 0 else None,
+        }
+    else:
+        stats = _RUNTIME_STORE.get_trade_outcome_stats(session_date=session_date)
+    return jsonify(ok=True, outcomes=out, count=len(out), stats=stats)
+
+
+@app.get('/api/outcomes/export_training_data')
+def api_outcomes_export_training_data():
+    """Export resolved outcomes as ML training rows (label=1 win / 0 stop).
+
+    Consumed by ml/retrain_from_outcomes.py to retrain the per-strategy ranker.
+    ?strategy=orb|parabolic|eod_momentum|atr_expansion — omit for all strategies.
+    """
+    strategy = str(request.args.get('strategy') or '').strip() or None
+    rows = _RUNTIME_STORE.export_training_data(strategy=strategy)
+    wins  = sum(1 for r in rows if r.get('label') == 1)
+    stops = sum(1 for r in rows if r.get('label') == 0)
+    return jsonify(ok=True, rows=rows, count=len(rows), strategy=strategy,
+                   wins=wins, stops=stops)
 
 
 @app.post('/api/outcomes/resolve')

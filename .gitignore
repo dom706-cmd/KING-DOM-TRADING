@@ -8,5 +8,11 @@ runtime/
 flatfiles/
 models/*.pkl
 models/*.log
+models/backup_*/
 *.zip
 *.part
+# stray empty top-level DB (real DB is runtime/, already ignored)
+/runtime_state.db
+# weekly retrain: keep the trend CSV tracked, ignore verbose per-run + launchd logs
+reports/*.log
+reports/weekly_retrain_*.log

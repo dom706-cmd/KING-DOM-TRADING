@@ -1,0 +1,5 @@
+date,strategy,cv_roc_auc_mean,cv_std,n_samples,wins,stops,saved
+20260630,orb,0.548,0.066,238,149,89,yes
+20260630,parabolic,0.834,0.052,146,53,93,yes
+20260630,eod_momentum,0.613,0.145,40,12,28,yes
+20260630,atr_expansion,NA,NA,28,NA,NA,no

@@ -1250,6 +1250,67 @@ class RuntimeStateStore:
                 ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_trade_outcome_stats(
+        self,
+        *,
+        session_date: str | None = None,
+    ) -> dict[str, Any]:
+        """All-time (or per-session) aggregate stats over the FULL table, ignoring any display limit."""
+        where = "WHERE session_date=?" if session_date else ""
+        params: tuple[Any, ...] = (str(session_date),) if session_date else ()
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                f"""
+                SELECT
+                    COUNT(*)                                                   AS total,
+                    COALESCE(ROUND(SUM(COALESCE(outcome_r, 0)), 2), 0.0)        AS total_r,
+                    SUM(CASE WHEN outcome LIKE 'hit_%' THEN 1 ELSE 0 END)       AS wins,
+                    SUM(CASE WHEN outcome = 'stopped' THEN 1 ELSE 0 END)        AS stops,
+                    SUM(CASE WHEN outcome IS NULL THEN 1 ELSE 0 END)            AS open_count
+                FROM trade_outcomes {where}
+                """,
+                params,
+            ).fetchone()
+        d = dict(row) if row else {}
+        wins = int(d.get("wins") or 0)
+        stops = int(d.get("stops") or 0)
+        return {
+            "total": int(d.get("total") or 0),
+            "total_r": round(float(d.get("total_r") or 0.0), 2),
+            "wins": wins,
+            "stops": stops,
+            "open_count": int(d.get("open_count") or 0),
+            "win_rate": round(wins / (wins + stops) * 100, 1) if (wins + stops) > 0 else None,
+        }
+
+    def export_training_data(self, *, strategy: str | None = None) -> list[dict[str, Any]]:
+        """Resolved outcomes as ML training rows: label=1 for a win (hit_*), 0 for a stop.
+
+        Only rows with a session_date and a win/stop outcome are returned (expired/manual
+        are excluded — they aren't clean ground-truth for the ranker). Used by
+        ml/retrain_from_outcomes.py, which re-computes features from historical market data.
+        """
+        sql = (
+            "SELECT symbol, strategy, session_date, direction, outcome, outcome_r, "
+            "ml_score, combined_score "
+            "FROM trade_outcomes "
+            "WHERE session_date IS NOT NULL AND session_date != '' "
+            "AND (outcome LIKE 'hit_%' OR outcome = 'stopped') "
+        )
+        params: list[Any] = []
+        if strategy:
+            sql += "AND strategy = ? "
+            params.append(str(strategy))
+        sql += "ORDER BY session_date ASC"
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            d["label"] = 1 if str(d.get("outcome") or "").startswith("hit_") else 0
+            out.append(d)
+        return out
+
     def resolve_trade_outcome(
         self,
         outcome_id: int,
