@@ -95,8 +95,13 @@ def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
         if p is not None:
             return p
 
-    # Fall back to generic orb outcomes model, against orb's gate
-    return _check(resolve_orb_outcomes_path(), _min_auc_for("orb"), _min_samples_for("orb"))
+    # The generic orb outcomes model is only a valid fallback for the orb strategy itself.
+    # Scoring a non-orb strategy (parabolic / atr_expansion / eod_momentum / ...) with an
+    # orb-trained model is a feature+label mismatch, so those strategies fall through here
+    # (return None) to their own price-bucket models instead.
+    if strat_key == "orb":
+        return _check(resolve_orb_outcomes_path(), _min_auc_for("orb"), _min_samples_for("orb"))
+    return None
 
 
 class OrbModelSelectionError(RuntimeError):
