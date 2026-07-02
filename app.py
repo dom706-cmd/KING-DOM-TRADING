@@ -6348,54 +6348,70 @@ def predict_halt_resume(
                 'rationale':       'T2 news-pending halt — direction uncertain without knowing catalyst.',
             }
 
-    # LULD T1 halt — the most common case for parabolic movers
-    # Small float + early session + big PM move → high confidence bullish resume
-    small_float = flt > 0 and flt < 10_000_000
-    early_sess  = hour <= 10
+    if is_luld:
+        # LULD T1 halt — the most common case for parabolic movers
+        # Small float + early session + big PM move → high confidence bullish resume
+        small_float = flt > 0 and flt < 10_000_000
+        early_sess  = hour <= 10
 
-    if pm_move >= 30:
-        resume_pct = 0.05 if not small_float else 0.08
-        conf = 'HIGH' if (small_float and early_sess) else 'MEDIUM'
-        return {
-            'resume_low':      round(price * 1.02, 2),
-            'resume_high':     round(price * (1 + resume_pct + 0.06), 2),
-            'resume_mid':      round(price * (1 + resume_pct), 2),
-            'direction':       'LONG',
-            'suggested_entry': round(price * 1.025, 2),
-            'suggested_stop':  round(price * 0.96, 2),
-            'suggested_target':round(price * (1 + resume_pct * 2.5), 2),
-            'confidence':      conf,
-            'rationale':       (
-                f'LULD T1 on +{pm_move:.0f}% mover'
-                + (' · small float' if small_float else '')
-                + (' · early session' if early_sess else '')
-                + ' — 85%+ of these resume higher. Place limit just above halt price.'
-            ),
-        }
-    elif pm_move >= 15:
-        return {
-            'resume_low':      round(price * 1.00, 2),
-            'resume_high':     round(price * 1.07, 2),
-            'resume_mid':      round(price * 1.035, 2),
-            'direction':       'LONG',
-            'suggested_entry': round(price * 1.02, 2),
-            'suggested_stop':  round(price * 0.97, 2),
-            'suggested_target':round(price * 1.08, 2),
-            'confidence':      'MEDIUM',
-            'rationale':       f'LULD T1 on +{pm_move:.0f}% mover — moderate resume likelihood. Wait for price confirm.',
-        }
-    else:
-        return {
-            'resume_low':      round(price * 0.97, 2),
-            'resume_high':     round(price * 1.05, 2),
-            'resume_mid':      price,
-            'direction':       'UNCERTAIN',
-            'suggested_entry': None,
-            'suggested_stop':  None,
-            'suggested_target':None,
-            'confidence':      'LOW',
-            'rationale':       'LULD T1 on low-momentum stock — resume direction unclear.',
-        }
+        if pm_move >= 30:
+            resume_pct = 0.05 if not small_float else 0.08
+            conf = 'HIGH' if (small_float and early_sess) else 'MEDIUM'
+            return {
+                'resume_low':      round(price * 1.02, 2),
+                'resume_high':     round(price * (1 + resume_pct + 0.06), 2),
+                'resume_mid':      round(price * (1 + resume_pct), 2),
+                'direction':       'LONG',
+                'suggested_entry': round(price * 1.025, 2),
+                'suggested_stop':  round(price * 0.96, 2),
+                'suggested_target':round(price * (1 + resume_pct * 2.5), 2),
+                'confidence':      conf,
+                'rationale':       (
+                    f'LULD T1 on +{pm_move:.0f}% mover'
+                    + (' · small float' if small_float else '')
+                    + (' · early session' if early_sess else '')
+                    + ' — 85%+ of these resume higher. Place limit just above halt price.'
+                ),
+            }
+        elif pm_move >= 15:
+            return {
+                'resume_low':      round(price * 1.00, 2),
+                'resume_high':     round(price * 1.07, 2),
+                'resume_mid':      round(price * 1.035, 2),
+                'direction':       'LONG',
+                'suggested_entry': round(price * 1.02, 2),
+                'suggested_stop':  round(price * 0.97, 2),
+                'suggested_target':round(price * 1.08, 2),
+                'confidence':      'MEDIUM',
+                'rationale':       f'LULD T1 on +{pm_move:.0f}% mover — moderate resume likelihood. Wait for price confirm.',
+            }
+        else:
+            return {
+                'resume_low':      round(price * 0.97, 2),
+                'resume_high':     round(price * 1.05, 2),
+                'resume_mid':      price,
+                'direction':       'UNCERTAIN',
+                'suggested_entry': None,
+                'suggested_stop':  None,
+                'suggested_target':None,
+                'confidence':      'LOW',
+                'rationale':       'LULD T1 on low-momentum stock — resume direction unclear.',
+            }
+
+    # Unrecognized / unclassified halt code — do NOT assume a resume direction.
+    # (Previously the LULD block was an unguarded fall-through, so any code other
+    #  than T2/T3/H was silently treated as a bullish LULD T1 resume.)
+    return {
+        'resume_low':      round(price * 0.90, 2),
+        'resume_high':     round(price * 1.10, 2),
+        'resume_mid':      price,
+        'direction':       'UNCERTAIN',
+        'suggested_entry': None,
+        'suggested_stop':  None,
+        'suggested_target':None,
+        'confidence':      'LOW',
+        'rationale':       f'Unrecognized halt code {code!r} — resume direction unknown.',
+    }
 
 
 def _news_entry_plan(sym: str, sentiment_score: float) -> dict:

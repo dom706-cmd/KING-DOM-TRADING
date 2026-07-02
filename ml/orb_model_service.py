@@ -70,8 +70,14 @@ def _outcomes_model_is_usable(strategy: str = "orb") -> Path | None:
             blob = joblib.load(path)
             if not isinstance(blob, dict) or "model" not in blob or "feature_names" not in blob:
                 return None
-            cv_score = blob.get("cv_roc_auc_mean")
-            if cv_score is not None and float(cv_score) < min_auc:
+            # Reject a model whose CV-AUC is missing, non-numeric, or NaN — not just
+            # one that is numerically below the gate. (float('nan') < min_auc is False,
+            # so a NaN would otherwise slip through the usability gate.)
+            try:
+                cv_val = float(blob.get("cv_roc_auc_mean"))
+            except (TypeError, ValueError):
+                return None
+            if not (cv_val >= min_auc):
                 return None
             if int(blob.get("n_samples", 0)) < min_samples:
                 return None

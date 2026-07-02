@@ -28,8 +28,9 @@ TREND="$REPORTS/ml_retrain_trend.csv"
 
 echo "[weekly_retrain] start $STAMP" | tee -a "$LOG"
 
-# Back up current outcomes models before overwriting.
-BACKUP="$ROOT/models/backup_${DAY}"
+# Back up current outcomes models before overwriting. Keyed on the full timestamp so a
+# second run on the same day cannot clobber the earlier (pre-retrain) backup.
+BACKUP="$ROOT/models/backup_${STAMP}"
 mkdir -p "$BACKUP"
 cp -p "$ROOT"/models/*_outcomes.pkl "$BACKUP"/ 2>/dev/null && \
   echo "[weekly_retrain] backed up current models -> $BACKUP" | tee -a "$LOG"
