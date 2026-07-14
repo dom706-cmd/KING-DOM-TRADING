@@ -1866,6 +1866,33 @@ window.PositionDeskSeed = [
     saveCandidatesCache(merged);
   }
 
+  // Boot reconciliation: the server sends a unique boot_id that changes on every restart.
+  // If it differs from what we last saw, the server was restarted — wipe stale client caches
+  // (candidate table + scan job pointer) so a fresh server always yields a fresh client and
+  // old scan data can't linger in the browser. Runs once on load.
+  (function reconcileServerBoot(){
+    try {
+      fetch('/api/health', {cache:'no-store'})
+        .then(r => r.json())
+        .then(h => {
+          const bid = h && h.boot_id;
+          if (!bid) return;
+          const prev = localStorage.getItem('kd_boot_id');
+          if (prev === bid) return;               // same server instance — keep cache
+          try { localStorage.removeItem(CAND_KEY); } catch(e){}   // stale candidate cache
+          try { localStorage.removeItem('orb_job_id'); } catch(e){} // stale scan job pointer
+          localStorage.setItem('kd_boot_id', bid);
+          // Wipe any already-rendered stale rows (renderCandidatesTable([]) intentionally
+          // no-ops on empty input, so clear the tbody directly).
+          try {
+            const body = document.getElementById('candidatesBody');
+            if (body) body.innerHTML = '<tr><td colspan="28" class="muted">Fresh server session — run a scan to populate candidates.</td></tr>';
+          } catch(e){}
+        })
+        .catch(()=>{});
+    } catch(e){}
+  })();
+
   function num(x, digits=2){
     if (x === null || x === undefined || Number.isNaN(Number(x))) return "—";
     const n = Number(x);
@@ -6903,7 +6930,10 @@ document.getElementById('runScanBtn')?.addEventListener('click', (e)=>{ e.preven
       if (badge && stats) {
         const wr   = stats.win_rate != null ? `${stats.win_rate}% WR` : '—% WR';
         const tr   = stats.total_r  != null ? `${stats.total_r >= 0 ? '+' : ''}${stats.total_r}R total` : '';
-        badge.textContent = `${outcomes.length} tracked • ${wr}${tr ? ' • ' + tr : ''}`;
+        // Use the all-time total from stats (not outcomes.length, which is capped at the
+        // fetch limit) so the "tracked" count is consistent with the all-time WR/R total.
+        const total = (stats.total != null) ? stats.total : outcomes.length;
+        badge.textContent = `${total} tracked • ${wr}${tr ? ' • ' + tr : ''}`;
         badge.style.color = (stats.total_r || 0) >= 0 ? '#4ade80' : '#f87171';
       }
 

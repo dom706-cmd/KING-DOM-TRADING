@@ -177,6 +177,13 @@ def _build_id() -> str:
 
 BUILD_ID = _build_id()
 
+# Unique per process start. Unlike BUILD_ID (a hash of the source file, identical across
+# restarts of unchanged code), BOOT_ID changes on every server start. The dashboard compares
+# it against its stored value and, when it changes (i.e. the server was restarted), clears
+# stale client-side caches (candidate table, scan job id) so a fresh server always yields a
+# fresh client. See the boot-reconciliation block in templates/index.html.
+BOOT_ID = f"{int(time.time())}-{os.getpid()}"
+
 # If the process receives SIGUSR1 (common "dump stacks" signal), do NOT exit.
 # Instead, print thread stack traces to stderr and continue.
 def _sigusr1_dump_stacks(signum, frame):  # noqa: ARG001
@@ -624,6 +631,7 @@ def api_health():
     out: Dict[str, Any] = {
         "ok": True,
         "build_id": BUILD_ID,
+        "boot_id": BOOT_ID,
         "server": {
             "ok": True,
             "time_utc": datetime.now(timezone.utc).isoformat(),
